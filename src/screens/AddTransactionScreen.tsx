@@ -15,6 +15,7 @@ import {
   Platform,
   Keyboard,
   BackHandler,
+  PanResponder,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
@@ -33,6 +34,9 @@ import { getCategoryLabel, getGroupLabel, findCategoryIdByChineseName } from '..
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { scanReceipt } from '../utils/scanReceipt';
 import { isAiConfigured } from '../config/aiConfig';
+
+/** 大组排序的存储键：与「管理类别」页共用同一个键，两页顺序保持一致 */
+const GROUP_ORDER_KEY = '@jizhang/categoryGroupOrder';
 import { getCurrencySymbol } from '../utils/currencies';
 import { CATEGORY_ICON_OPTIONS, CATEGORY_COLOR_OPTIONS, CategoryIconName } from '../constants/categoryAddOptions';
 // 分类网格编辑器（虚线占位框 / 长按 200ms 拖拽 / 虚线＋新增磁贴 / 删除角标）——与管理类别页同一个组件
@@ -614,6 +618,84 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     setNewGroupName('');
   }, [type, step, categoryGroups]);
   // 收入/支出各自的大组分组（默认组 + 自定义组 + 其他），支出与收入流程完全一致
+  // ── 大组排序（本页与「管理类别」页共用 @jizhang/categoryGroupOrder）──
+  // 为什么不用 RNGH：本页组头里的 Pressable 在按下那刻就自封 responder，RNGH 的 DOM 监听收不到
+  // 后续 move（实测 onStart 从未触发）。PanResponder 走 React 的 responder 协商，
+  // 且在 capture 阶段接管 → 长按满 250ms 后纵向移动即抬起整组，短按仍落到组头自己的 onPress。
+  const [groupOrder, setGroupOrder] = useState<Record<string, number>>({});
+  const [groupDragState, setGroupDragState] = useState<{ group: string; dy: number } | null>(null);
+  const groupPanCache = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const groupPressAtRef = useRef(0);
+  const GROUP_HOLD_MS = 250;
+  const GROUP_START_DY = 8;
+  const GROUP_SLOT_DY = 180; // 拖动多少像素算换一格（组卡高度差异大，用固定步长更可预期）
+
+  useEffect(() => {
+    AsyncStorage.getItem(GROUP_ORDER_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') setGroupOrder(parsed);
+        } catch {}
+      })
+      .catch(() => {});
+  }, []);
+
+  const applyGroupOrder = (next: Record<string, number>) => {
+    setGroupOrder(next);
+    AsyncStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(next)).catch(() => {});
+  };
+
+  const moveGroupBySteps = (group: string, steps: number) => {
+    if (!steps) return;
+    const list = orderedExpenseSectionsRef.current.map((s) => s.group);
+    const from = list.indexOf(group);
+    const to = Math.min(list.length - 1, Math.max(0, from + steps));
+    if (from < 0 || to === from) return;
+    const next = [...list];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const order: Record<string, number> = {};
+    next.forEach((g, i) => (order[g] = i));
+    applyGroupOrder(order);
+  };
+
+  const getGroupPanHandlers = (group: string) => {
+    const cached = groupPanCache.current[group];
+    if (cached) return cached.panHandlers;
+    const responder = PanResponder.create({
+      // 按下只记时刻，不接管：短按照旧走组头 onPress（折叠/展开、垃圾桶）
+      onStartShouldSetPanResponderCapture: () => {
+        groupPressAtRef.current = Date.now();
+        return false;
+      },
+      onStartShouldSetPanResponder: () => false,
+      // 长按满 250ms 后纵向移动 ≥8px → 在 capture 阶段接管（子节点此时抢不走）
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        const dy = Math.abs(g.dy);
+        if (dy < GROUP_START_DY || dy <= Math.abs(g.dx)) return false;
+        return Date.now() - groupPressAtRef.current >= GROUP_HOLD_MS;
+      },
+      onMoveShouldSetPanResponder: () => false,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        hapticLight();
+        setGroupDragState({ group, dy: 0 });
+      },
+      onPanResponderMove: (_e, g) => {
+        setGroupDragState({ group, dy: g.dy });
+      },
+      onPanResponderRelease: (_e, g) => {
+        moveGroupBySteps(group, Math.round(g.dy / GROUP_SLOT_DY));
+        setGroupDragState(null);
+      },
+      onPanResponderTerminate: () => setGroupDragState(null),
+    });
+    groupPanCache.current[group] = responder;
+    return responder.panHandlers;
+  };
+
   const groupedExpenseSections = useMemo(() => {
     const customGroups = categoryGroups.filter((g) => g.type === type);
     const customNames = customGroups.map((g) => g.name);
@@ -639,6 +721,16 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 默认组无内容时隐藏；自定义组即使为空也显示
     return inOrder.filter((s) => s.items.length > 0 || (s.custom && s.items.length === 0));
   }, [filteredCategories, categoryGroups, type]);
+
+  /** 按用户排好的大组顺序渲染（未排过的保持原顺序殿后） */
+  const orderedExpenseSections = useMemo(() => {
+    const copy = [...groupedExpenseSections];
+    return copy.sort(
+      (a, b) => (groupOrder[a.group] ?? Number.MAX_SAFE_INTEGER) - (groupOrder[b.group] ?? Number.MAX_SAFE_INTEGER)
+    );
+  }, [groupedExpenseSections, groupOrder]);
+  const orderedExpenseSectionsRef = useRef<{ group: string }[]>([]);
+  orderedExpenseSectionsRef.current = orderedExpenseSections;
 
   // ---------- 类别横排"最近用过"：外面直接显示4个，点了就直接选中，不用进选择页 ----------
   const [recentCategoryIds, setRecentCategoryIds] = useState<string[]>([]);
@@ -1948,7 +2040,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           {/* 按大类分节（每节一张圆角卡片、可折叠）；本页进入即编辑态（没有「编辑 / 完成」开关）：
               点磁贴 = 选中该分类并返回 · 长按 200ms 抬起可拖动组内排序 · 图标右上角红色角标删除 ·
               网格最后一项是虚线「＋」磁贴，复用组内两步小卡的新增流程 */}
-          {groupedExpenseSections.map(({ group, items, custom }) => {
+          {orderedExpenseSections.map(({ group, items, custom }) => {
               const expanded = !collapsedGroups.has(group);
               const themeColor = colors.link;
               const toggleGroup = () => {
@@ -1976,9 +2068,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               // 拖过的顺序 reload 后仍然保持，没序号的按原数组顺序殿后
               const orderedItems = sortByOrder(items, categoryOrder);
               const card = (
-                <Pressable
+                <View
                   key={group}
-                  style={styles.catGroupCard}
+                  {...getGroupPanHandlers(group)}
+                  style={[
+                    styles.catGroupCard,
+                    groupDragState?.group === group
+                      ? { transform: [{ translateY: groupDragState.dy }], zIndex: 20, opacity: 0.96 }
+                      : null,
+                  ]}
                   /* TASK-016⑥：卡片是 ScrollView 直接子节点，layout.y 即内容坐标——
                      聚焦滚动按组名查这张表，绕开 Fabric 不支持的 measureLayout */
                   onLayout={(e) => {
@@ -2089,7 +2187,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                       </View>
                     </View>
                   )}
-                </Pressable>
+                </View>
               );
               // TASK-016①：整组删除入口已移入标题行垃圾桶，左滑删除退役——分节直接返回卡片
               return card;
