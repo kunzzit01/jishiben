@@ -44,12 +44,14 @@ import { useLayout } from '../theme/useLayout';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler } from '../context/TabBarAutoHideContext';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
+import SegmentedControl from '../components/SegmentedControl';
+import { AccountTransactionList } from '../components/AccountTransactionList';
 import { useAmountExpression } from '../hooks/useAmountExpression';
 import { hapticWarning } from '../utils/haptics';
 import PressableScale from '../components/PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Layout, Radius, SemanticColors, Spacing, Typography } from '../theme/theme';
-import { gradients } from '../theme/theme';
+
 import {
   AppText,
   BottomSheet,
@@ -65,6 +67,7 @@ import {
   Switch,
 } from '../components/ui';
 import { withAlpha } from '../components/ui/color';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 /**
  * 账户类型 → i18n 键（与 AddAssetScreen 的 TYPE_OPTIONS.label 同源，六档齐全：
@@ -104,6 +107,23 @@ const USAGE_WARN_PCT = 80;
 const USAGE_FULL_PCT = 100;
 /** 已归档账户行的淡化透明度（仍可读，区别于活跃账户） */
 const ARCHIVED_ROW_OPACITY = 0.7;
+
+/* ─── 窄屏（320 视口）账户行宽度分配 ────────────────────────────────────────
+ * 行的四块：图标 42 · 文字栏（弹性）· 金额栏（不可压）· 行尾 chevron。
+ * 之前金额栏 flexShrink:0 且文字栏无下限 → 15 位金额把文字栏挤到「一行一个字」，
+ * 副行没有 numberOfLines 就逐字竖排。现在反过来：先给文字栏留一个最小宽，
+ * 剩下的才是金额栏的预算，金额按这个预算自己降档（MoneyText availableWidth），
+ * 降到地板仍放不下才走它自带的紧凑格式（长按看全文 + 读屏读完整金额）。 */
+/** 左侧文字栏最小宽：约 3–4 个中文字（16 号标题 / 13 号副行），再窄就只剩省略号 */
+const ROW_TEXT_MIN_WIDTH = 52;
+/** 金额栏预算下限：低于这个宽度连短金额都放不下，交给 MoneyText 的紧凑兜底 */
+const ROW_AMOUNT_MIN_WIDTH = 64;
+/** 行尾预留（chevron 进详情 14 + 余量 4） */
+const ROW_TRAILING_RESERVE = 18;
+/** 账户图标圆直径（与 AccountIcon 的 IconCircle size 同值） */
+const ROW_ICON_SIZE = 42;
+/** 分组头右侧展开/收起按钮的视觉直径（触控区是整条分组头 286×46，远大于 32×32 下限） */
+const COLLAPSE_BUTTON_SIZE = 26;
 
 function toDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -171,36 +191,83 @@ function GlassPillButton({
 }
 
 /**
+ * 分组头右侧的展开 / 收起指示：圆形 chevron 按钮。
+ * 材质与币种胶囊同一套（surfaceElevated 实底 + 7% accentText 叠层 + accentText 图标）——
+ * 不新增颜色语言，浅色 / 深色都跟着令牌走；收起朝下、展开朝上，用 transform 旋转过渡
+ * （Reanimated 是既有依赖，不引新包；系统「减弱动态效果」时时长归零，直接切到终态）。
+ * 纯视觉：点击由整条分组头接管，理由见 CurrencySectionHeader 的注释。
+ */
+function CollapseChevron({ collapsed }: { collapsed: boolean }) {
+  const { semantic, radius, motion } = useTheme();
+  const progress = useSharedValue(collapsed ? 0 : 1);
+  useEffect(() => {
+    progress.value = withTiming(collapsed ? 0 : 1, {
+      duration: motion.reduceMotion ? 0 : motion.timing.fade,
+    });
+  }, [collapsed, motion, progress]);
+  const rotateStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${progress.value * 180}deg` }],
+  }));
+  return (
+    // 底色用 accentSoft（令牌里的「选中胶囊底 / 图标方块底」）：日间白卡上 surfaceElevated 是纯白，
+    // 圆形按键会整个消失；accentSoft 是淡紫洗底，日夜两种主题在玻璃卡上都能看出「这是个按钮」。
+    <View
+      style={{
+        width: COLLAPSE_BUTTON_SIZE,
+        height: COLLAPSE_BUTTON_SIZE,
+        borderRadius: radius.full,
+        backgroundColor: semantic.accentSoft,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <Animated.View style={rotateStyle}>
+        <Ionicons name="chevron-down" size={15} color={semantic.accentText} />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
  * 币种小节头（V2.2c：放进玻璃卡**卡内**，一组一个节标题行）——
  *   左：币种代码小胶囊（accent 软底 + accent 字，如 MYR）；
  *   右：该币种合计（15/600，text.secondary，**完整两位小数千分位、不带货币符号** ——
- *       币种只靠左侧胶囊，否则 CNY / JPY 都是 ¥ 分不清）；
+ *       币种只靠左侧胶囊，否则 CNY / JPY 都是 ¥ 分不清）+ 展开/收起按钮；
  *   「净资产」字样与每个组各自的实白卡都已删（V2.2c：所有组共用同一张玻璃卡）。
- * 只有 1 个账户的组不显示合计（合计 = 那一个账户的余额，重复且占宽）。
+ * 合计对所有组一律显示（V2.2c 曾按「> 1 个账户」隐藏，导致同一种分组头一半有数字、
+ * 一半空白，被判定为「没有总计」的 bug —— 已统一）。
  * 为什么不用共享 Chip：稿里币种标记是「实心小胶囊（24 高 / 左右内衬 9 / 12-600）」，
  * 而 Chip 是描边胶囊 + 44 触控外框，当分组头会把这一行撑高一档。
- * 收起 / 展开的功能一点没变：胶囊本身就是原来的开关（点它收起该组）；
- * 收起时胶囊降透明度，读屏照旧报「选中 / 未选中」。
+ *
+ * 可发现性（本次修）：原来「整行可收」这件事只存在于代码里 —— 屏上唯一能点的只有币种胶囊，
+ * 而且它长得像标签，新用户不可能猜到那是开关。现在：
+ *   1) 右侧多一枚 chevron 圆形按钮（收起朝下 / 展开朝上），把「这行能收起来」画出来；
+ *   2) 整条分组头本身成为开关（≥44 高的整行触控），点胶囊 / 点合计 / 点按钮都切换；
+ *   3) 读屏报 button + expanded 状态（accessibilityState；原生端直接生效 —— react-native-web 0.21
+ *      已不再把 accessibilityState 映射成 aria-expanded，那是全 App 的既有写法，不在本期改）；
+ *      不再用 selected 这种含糊表达。
+ * 按钮不单独绑 onPress：嵌套 Pressable 的 click 会冒泡到整行，点一次会切两次（= 没反应）。
+ * 收起时组内账户隐藏，但这一行的合计照常显示（合计在折叠块之外，未改动）。
  */
 function CurrencySectionHeader({
   code,
   total,
-  showTotal,
   collapsed,
   onToggle,
   testID,
 }: {
   code: string;
   total: number;
-  /** 组内账户数 > 1 才显示合计（V2.2c） */
-  showTotal: boolean;
   collapsed: boolean;
   onToggle: () => void;
   testID?: string;
 }) {
   const { semantic, spacing, radius, layout } = useTheme();
   return (
-    <View
+    <PressableScale
+      onPress={onToggle}
+      activeScale={0.99}
       style={{
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -212,44 +279,41 @@ function CurrencySectionHeader({
         paddingTop: spacing.md,
         paddingBottom: spacing.sm,
       }}
+      accessibilityRole="button"
+      accessibilityLabel={code}
+      accessibilityState={{ expanded: !collapsed }}
+      testID={testID}
     >
-      <PressableScale
-        onPress={onToggle}
-        activeScale={0.96}
-        // 胶囊只有 24 高，外扩到 44 触控（UI_RULES：可点元素 ≥44pt）
-        hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
-        accessibilityRole="button"
-        accessibilityLabel={code}
-        accessibilityState={{ selected: !collapsed }}
-        testID={testID}
+      {/* 胶囊底：不透明软紫 —— 页面底是渐变，直接用 10% 的 accentSoft 会被渐变拉暗
+          （实测 12pt 紫字只有 3.4:1，§4 要 4.5）；不透明底 + accent 7%（≈ accentSoft 浅一档）
+          落在 4.6:1。底色由「surfaceElevated 实底 + 半透明紫叠层」合成，不手写色值 */}
+      <View
+        style={{
+          height: 24,
+          borderRadius: radius.full,
+          paddingHorizontal: 9,
+          justifyContent: 'center',
+          backgroundColor: semantic.surfaceElevated,
+          overflow: 'hidden',
+          opacity: collapsed ? 0.55 : 1,
+        }}
       >
-        {/* 胶囊底：不透明软紫 —— 页面底是渐变，直接用 10% 的 accentSoft 会被渐变拉暗
-            （实测 12pt 紫字只有 3.4:1，§4 要 4.5）；不透明底 + accent 7%（≈ accentSoft 浅一档）
-            落在 4.6:1。底色由「surfaceElevated 实底 + 半透明紫叠层」合成，不手写色值 */}
         <View
-          style={{
-            height: 24,
-            borderRadius: radius.full,
-            paddingHorizontal: 9,
-            justifyContent: 'center',
-            backgroundColor: semantic.surfaceElevated,
-            overflow: 'hidden',
-            opacity: collapsed ? 0.55 : 1,
-          }}
-        >
-          <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(semantic.accentText, 0.07) }]}
-          />
-          <AppText variant="caption" weight="600" color={semantic.accentText}>
-            {code}
-          </AppText>
-        </View>
-      </PressableScale>
-      {showTotal && (
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(semantic.accentText, 0.07) }]}
+        />
+        <AppText variant="caption" weight="600" color={semantic.accentText}>
+          {code}
+        </AppText>
+      </View>
+      {/* 合计一律显示（不再按账户数区分）：同一种分组头一半有数字一半空白，
+          用户只会判定「坏了」。单账户组的合计虽然等于那行余额，但它是这一组唯一的
+          「汇总读数」，且收起后是唯一还留在屏上的数字，位置一致性比省这点宽度重要。 */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm }}>
         <MoneyText value={total} variant="subhead" weight="600" color={semantic.textSecondary} />
-      )}
-    </View>
+        <CollapseChevron collapsed={collapsed} />
+      </View>
+    </PressableScale>
   );
 }
 
@@ -281,8 +345,12 @@ function AssetRow({
   title: string;
   /** 副行（信用卡：可用额度 · 还款日）；放不下时自己换行，不截断不缩略 */
   subtitle?: string;
-  /** 右侧金额（flexShrink:0，永远留在第一行最右） */
-  value?: React.ReactNode;
+  /**
+   * 右侧金额（flexShrink:0，永远留在第一行最右）。
+   * 也可以传函数：参数是本行实测后分给金额栏的可用宽（px）—— MoneyText 靠它自己降档，
+   * 长金额就不会再靠挤压左侧文字栏来「让位」。
+   */
+  value?: React.ReactNode | ((availableWidth: number | undefined) => React.ReactNode);
   /** 行下细条（信用卡额度使用率；0–1） */
   barFraction?: number;
   /** 细条色调：accent（正常，走品牌渐变）/ warning（≥80%）/ danger（≥100%）—— 告警档沿用原来的语义色 */
@@ -294,13 +362,28 @@ function AssetRow({
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
-  const { semantic, typography, spacing, radius, layout } = useTheme();
+  const { semantic, typography, spacing, radius, layout, gradients } = useTheme();
   const { rowMinHeight } = useLayout();
 
   // 标题是否占到了第二行（实测高度判定，与 ScreenHeader 同一套做法）：
   // 单行时三块垂直居中（和 ListRow 观感一致）；两行时文字块与金额一律靠上，
   // 金额因此永远停在第一行最右边，不会被顶到第二行去
   const [titleLines, setTitleLines] = useState(1);
+  // 本行横向容器的实测宽（行宽由卡片给定，不随内容变化 → 不会和金额字宽互相追成反馈环）
+  const [rowWidth, setRowWidth] = useState(0);
+  /**
+   * 分给金额栏的可用宽：先扣掉图标 / 行尾 / 间距，再给文字栏留一个最小宽，剩下的才是金额的。
+   * 还没量到行宽时返回 undefined → MoneyText 退回「按自身盒宽判断」的老行为（单帧无副作用）。
+   */
+  const amountBudget =
+    rowWidth > 0
+      ? Math.max(
+          ROW_AMOUNT_MIN_WIDTH,
+          Math.round(
+            rowWidth - ROW_ICON_SIZE - ROW_TEXT_MIN_WIDTH - ROW_TRAILING_RESERVE - spacing.md * 3
+          )
+        )
+      : undefined;
   // V2.2c 层级：账户名 16/500（body 令牌 17/400，按稿覆盖字号 + 提半档字重）
   const singleLineHeight =
     TITLE_FONT_SIZE *
@@ -335,11 +418,16 @@ function AssetRow({
           alignItems: alignTop ? 'flex-start' : 'center',
           columnGap: spacing.md,
         }}
+        onLayout={(e) => {
+          const w = Math.round(e.nativeEvent.layout.width);
+          if (w > 0 && w !== rowWidth) setRowWidth(w);
+        }}
       >
         <View style={{ alignSelf: 'center' }}>
           <AccountIcon color={color} icon={icon} />
         </View>
-        <View style={{ flexGrow: 1, flexShrink: 1 }}>
+        {/* 文字栏：可以缩（minWidth:0），但金额栏的预算已经把它的下限保住了 */}
+        <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
           <AppText
             variant="body"
             weight="500"
@@ -352,7 +440,15 @@ function AssetRow({
             {title}
           </AppText>
           {!!subtitle && (
-            <AppText variant="footnote" color={semantic.textSecondary} style={{ marginTop: spacing.xs }}>
+            // 副行**永远一行**（窄屏 + 巨额时曾经逐字竖排：中文可断行、又没有行数限制）。
+            // 放不下就尾部省略 —— 一行高度恒定，行高不再随金额长度乱跳。
+            <AppText
+              variant="footnote"
+              color={semantic.textSecondary}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={{ marginTop: spacing.xs }}
+            >
               {subtitle}
             </AppText>
           )}
@@ -394,8 +490,15 @@ function AssetRow({
           )}
         </View>
         {value != null && (
-          <View style={{ flexShrink: 0, marginLeft: spacing.sm, alignSelf: alignTop ? 'flex-start' : 'center' }}>
-            {value}
+          <View
+            style={{
+              flexShrink: 0,
+              // 不再额外加 marginLeft：行内已有 columnGap 统一隔开，
+              // 再叠 8px 会让「文字↔金额」比「图标↔文字」宽一档，白占宽度还破坏节奏
+              alignSelf: alignTop ? 'flex-start' : 'center',
+            }}
+          >
+            {typeof value === 'function' ? value(amountBudget) : value}
           </View>
         )}
         {trailing}
@@ -547,6 +650,8 @@ export default function AssetScreen() {
     assets,
     activeAssets,
     transactions,
+    currency,
+    categories,
     getAssetBalance,
     deleteAsset,
     archiveAsset,
@@ -558,8 +663,12 @@ export default function AssetScreen() {
   // 已归档账户（底部可折叠分组，默认收起）
   const archivedAssets = useMemo(() => assets.filter((a) => !!a.archivedAt), [assets]);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  // 账户类型筛选（设计稿 02 屏分段 Tab）：只过滤展示，不动 assets / 余额口径
+  const [accountFilter, setAccountFilter] = useState<'all' | 'cash' | 'bank' | 'ewallet'>('all');
+  // 总资产卡的隐私开关（稿里的眼睛）：只切显示，不写数据
+  const [balanceHidden, setBalanceHidden] = useState(false);
   type AssetItem = (typeof assets)[number];
-  const { semantic, typography, spacing, radius, layout } = useTheme();
+  const { semantic, typography, spacing, radius, layout, gradients } = useTheme();
   const { pagePadding, contentMaxWidth } = useLayout();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
@@ -880,6 +989,19 @@ export default function AssetScreen() {
       .join(' · ');
   }, [sheetAsset, t]);
 
+  // 账户详情里的「该账户流水」：归属口径与 computeAssetFlowStats 一致
+  // （expense/income 看 assetId，transfer 看 fromAssetId / toAssetId），新的在前。
+  const accountTransactions = useMemo(() => {
+    const id = sheetAsset?.id;
+    if (!id) return [];
+    return transactions
+      .filter((t) =>
+        t.type === 'transfer' ? t.fromAssetId === id || t.toAssetId === id : t.assetId === id
+      )
+      .slice()
+      .sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1));
+  }, [sheetAsset?.id, transactions]);
+
   // 银行卡/现金类：本月流入流出（含转账）金额与笔数
   const viewingFlowStats = useMemo(() => {
     if (!viewingAsset || viewingAsset.type === 'credit') return null;
@@ -899,10 +1021,12 @@ export default function AssetScreen() {
 
   const groupedAssets = useMemo(() => {
     const byCurrency: Record<string, typeof activeAssets> = {};
-    activeAssets.forEach((a) => {
-      if (!byCurrency[a.currency]) byCurrency[a.currency] = [];
-      byCurrency[a.currency].push(a);
-    });
+    activeAssets
+      .filter((a) => accountFilter === 'all' || a.type === accountFilter)
+      .forEach((a) => {
+        if (!byCurrency[a.currency]) byCurrency[a.currency] = [];
+        byCurrency[a.currency].push(a);
+      });
     return Object.entries(byCurrency)
       .sort(([codeA], [codeB]) => codeA.localeCompare(codeB))
       .map(([code, items]) => ({
@@ -919,7 +1043,45 @@ export default function AssetScreen() {
           return (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99);
         }),
       }));
-  }, [activeAssets, typeOrder, assetOrder]);
+  }, [activeAssets, typeOrder, assetOrder, accountFilter]);
+
+  // ---------- 总资产卡（设计稿 02 屏）：总资产（币种）+ 较上月变化 ----------
+  // 口径：同名币种聚合，绝不跨币种相加 —— 主币种 = 全局设置币种在该分组里时用它，否则取第一个分组
+  const primaryGroup = useMemo(() => {
+    if (groupedAssets.length === 0) return null;
+    return groupedAssets.find((g) => g.code === currency) ?? groupedAssets[0];
+  }, [groupedAssets, currency]);
+  const primaryTotal = useMemo(
+    () => (primaryGroup ? primaryGroup.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0) : 0),
+    [primaryGroup, getAssetBalance]
+  );
+  // 较上月变化（展示口径）：该币种本月收入 − 支出（只统计归属该币种的账单；转账不计，避免跨币种混加）
+  const primaryMonthDelta = useMemo(() => {
+    if (!primaryGroup) return 0;
+    const code = primaryGroup.code;
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const byId = new Map(assets.map((a) => [a.id, a] as const));
+    let delta = 0;
+    transactions.forEach((tx) => {
+      if (!tx.date.startsWith(monthKey)) return;
+      if (tx.type !== 'expense' && tx.type !== 'income') return;
+      const cur = (tx.assetId ? byId.get(tx.assetId)?.currency : undefined) ?? code;
+      if (cur !== code) return;
+      delta += tx.type === 'income' ? tx.amount : -tx.amount;
+    });
+    return delta;
+  }, [primaryGroup, assets, transactions]);
+  // 筛选分段（稿：全部账户 / 现金 / 银行 / 电子钱包）—— 标签取现有 i18n 键（i18n 不在本次改动范围）
+  const filterOptions = useMemo(
+    () => [
+      { label: t('common.all'), value: 'all' },
+      { label: t('asset.typeCash'), value: 'cash' },
+      { label: t('asset.typeBank'), value: 'bank' },
+      { label: t('asset.typeEwallet'), value: 'ewallet' },
+    ],
+    [t]
+  );
 
   /** 浏览模式的一行：图标方块 + 名称 + 余额；信用卡换成"欠款 + 可用 / 还款日 + 使用率细条" */
   const renderAssetRow = (a: AssetItem) => {
@@ -942,7 +1104,9 @@ export default function AssetScreen() {
           .filter(Boolean)
           .join(' · ')
       : undefined;
-    // 其余账户的副行：账户类型（+ 默认标记），UI V2 定稿每行都有副行
+    // 其余账户的副行：账户类型 + 默认标记。
+    // 不再带币种代码：分组头（MYR / USD）已经标了币种，行里重复一次只会占宽 ——
+    // 320 视口上那一段恰好是唯一被省略号截断的部分（用户圈出「· MYR」要求删掉）。
     const accountSubtitle = [
       t(TYPE_LABEL_KEYS[a.type] ?? 'asset.typeOther'),
       a.isDefault ? t('asset.defaultTag') : null,
@@ -959,9 +1123,21 @@ export default function AssetScreen() {
         subtitle={isCredit ? creditSubtitle : accountSubtitle}
         // 信用卡：主数字是欠款（分组头已标币种）；其余账户就是余额。
         // V2.2c：行余额 17/600（text.primary + tabular，AppText 统一给等宽数字）
-        value={<MoneyText value={isCredit ? -owed : balance} variant="body" weight="600" />}
+        // 金额栏拿到的预算 → MoneyText 先按阶降字号；降到地板仍放不下才用紧凑格式
+        // （长按看完整金额、读屏也读完整金额），绝不再去挤压左侧文字栏
+        value={(amountWidth) => (
+          <MoneyText
+            value={isCredit ? -owed : balance}
+            variant="body"
+            weight="600"
+            availableWidth={amountWidth}
+            compactFallback
+          />
+        )}
         barFraction={isCredit && limit > 0 ? usedPct / 100 : undefined}
         barTone={barTone}
+        // 稿 02 屏：金额右侧一枚 chevron（进入账户详情）
+        trailing={<Ionicons name="chevron-forward" size={14} color={semantic.textTertiary} />}
         onPress={() => setViewingAssetId(a.id)}
         onLongPress={() => setReorderMode(true)}
         testID={`asset-row-${a.id}`}
@@ -1013,6 +1189,77 @@ export default function AssetScreen() {
           </View>
         </View>
 
+        {/* 总资产卡（稿 02 屏）：渐变卡 + 「总资产 · 币种」+ 大金额 + 较上月变化；
+            隐私开关沿用首页的眼睛图标语义，只切显示不写数据 */}
+        {assets.length > 0 && primaryGroup && (
+          <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.md }}>
+            <LinearGradient
+              colors={gradients.hero.colors}
+              start={gradients.hero.start}
+              end={gradients.hero.end}
+              style={styles.totalCard}
+            >
+              <View style={styles.totalCardHead}>
+                <AppText
+                  variant="footnote"
+                  color={withAlpha(semantic.textInverse, 0.86)}
+                  numberOfLines={1}
+                  style={{ flexShrink: 1 }}
+                >
+                  {`${t('asset.summaryAssets')} · ${primaryGroup.code}`}
+                </AppText>
+                <View style={styles.totalCardHeadActions}>
+                  <PressableScale
+                    activeScale={0.94}
+                    hitSlop={12}
+                    onPress={() => setBalanceHidden((v) => !v)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('home.toggleAmount')}
+                    accessibilityState={{ checked: !balanceHidden }}
+                    testID="asset-toggle-amount"
+                  >
+                    <Ionicons
+                      name={balanceHidden ? 'eye-off-outline' : 'eye-outline'}
+                      size={16}
+                      color={withAlpha(semantic.textInverse, 0.86)}
+                    />
+                  </PressableScale>
+                </View>
+              </View>
+              <MoneyText
+                value={primaryTotal}
+                kind="plain"
+                variant="display"
+                color={semantic.textInverse}
+                hidden={balanceHidden}
+              />
+              <View style={styles.totalDeltaRow}>
+                <Ionicons
+                  name={primaryMonthDelta >= 0 ? 'trending-up' : 'trending-down'}
+                  size={14}
+                  color={semantic.textInverse}
+                />
+                <AppText variant="footnote" color={semantic.textInverse} numberOfLines={1} style={{ flexShrink: 1 }}>
+                  {`${primaryMonthDelta >= 0 ? '+' : '−'}${formatMoney(Math.abs(primaryMonthDelta))} ${t('asset.netChange')}`}
+                </AppText>
+              </View>
+            </LinearGradient>
+          </View>
+        )}
+
+        {/* 分段筛选（稿 02 屏）：全部账户 / 现金 / 银行 / 电子钱包 —— 按 assets.type 过滤，纯展示层 */}
+        {assets.length > 0 && (
+          <View style={[styles.filterWrap, { paddingHorizontal: pagePadding }]} testID="asset-filter">
+            <SegmentedControl
+              options={filterOptions}
+              selected={accountFilter}
+              onSelect={(v) => setAccountFilter(v as typeof accountFilter)}
+              stretch
+              thumb="accent"
+            />
+          </View>
+        )}
+
         {assets.length === 0 ? (
           /* S5 空状态：图标 + 一句话 + 一个按钮 */
           <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.xl }}>
@@ -1034,11 +1281,10 @@ export default function AssetScreen() {
               {groupedAssets.map((group, groupIndex) => (
                 <View key={group.code}>
                   {groupIndex > 0 && <View style={styles.groupDivider} />}
-                  {/* 排序模式不收起，但合计照旧（组内 > 1 个账户才显示） */}
+                  {/* 排序模式不收起，合计与浏览模式一致（一律显示） */}
                   <CurrencySectionHeader
                     code={group.code}
                     total={group.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0)}
-                    showTotal={group.items.length > 1}
                     collapsed={false}
                     onToggle={() => undefined}
                   />
@@ -1083,7 +1329,6 @@ export default function AssetScreen() {
                     <CurrencySectionHeader
                       code={group.code}
                       total={groupTotal}
-                      showTotal={group.items.length > 1}
                       collapsed={isCollapsed}
                       onToggle={() => toggleCurrencyGroup(group.code)}
                       testID={`asset-group-${group.code}`}
@@ -1343,6 +1588,15 @@ export default function AssetScreen() {
                 </PressableScale>
               </View>
 
+              {/* 该账户的交易流水（缺口补齐）：抽屉里直接可查，不必回首页筛账户 */}
+              <View style={styles.sheetSection}>
+                <AccountTransactionList
+                  transactions={accountTransactions}
+                  categories={categories}
+                  testID="asset-detail-transactions"
+                />
+              </View>
+
               {/* 设为默认账户：Switch 行（随"保存"一并提交） */}
               <View style={styles.sheetList}>
                 <ListRow
@@ -1446,6 +1700,22 @@ function makeStyles(
     headerTitle: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
     // 大标题（渐变上的白字）：稿为 30 / 600（token title1 是 28/700，字号按稿覆盖）
     heroTitle: { fontSize: 30, lineHeight: 36 },
+    // 总资产卡（稿 02 屏）：20 圆角渐变卡，16 内衬，左边标签行、下方金额与变化行
+    totalCard: {
+      borderRadius: radius.lg,
+      padding: layout.card,
+      rowGap: spacing.sm,
+    },
+    totalCardHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      columnGap: spacing.sm,
+    },
+    totalCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
+    totalDeltaRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    // 分段筛选与总资产卡之间 12、与列表之间 24
+    filterWrap: { marginTop: spacing.md },
     // V2.2c：所有币种组共用一张玻璃卡（卡内小节头 + hairline 分组），卡与页头之间 24
     groupsCardWrap: { marginTop: 24 },
     // overflow hidden：行 / 小节头的 hairline 与按压高光不越出 26 圆角
@@ -1532,6 +1802,7 @@ function makeStyles(
       fontVariant: ['tabular-nums'],
     },
     sheetList: { marginTop: spacing.sm },
+    sheetSection: { marginTop: spacing.lg },
     sheetNote: { marginTop: spacing.lg, paddingHorizontal: spacing.sm },
     sheetButton: { marginTop: spacing.md },
     keypadFooter: {
