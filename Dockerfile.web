@@ -67,6 +67,18 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # 内测安装包：文件不存在就给 404，绝不回退到 index.html
+    #（否则用户点 .apk 链接会看到 App 页面，误以为下载坏了）
+    location /downloads/ {
+        autoindex on;
+        try_files $uri =404;
+        default_type application/octet-stream;
+        types {
+            application/vnd.android.package-archive apk;
+        }
+        add_header Content-Disposition "attachment";
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
     }
