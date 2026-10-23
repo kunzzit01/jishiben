@@ -312,19 +312,6 @@ function GroupCardSlot({
     >
       <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.groupCard}>
         {header}
-        {/* 显式拖拽把手（≡）：整组排序只从这里发起。
-            放成组头的绝对定位兄弟节点，避免落在 header 那层 Pressable 里面——
-            Pressable 一按下就会自封 responder，把手在里面就抢不到指针序列。
-            44×44 触控区、无子节点 → responder 协商里必胜。 */}
-        <View
-          testID="group-drag-handle"
-          style={dragHandleStyle}
-          {...panResponder.panHandlers}
-          accessibilityRole="adjustable"
-          accessibilityLabel={group}
-        >
-          <Ionicons name="reorder-three-outline" size={20} color={semantic.textTertiary} />
-        </View>
         {children}
       </GlassView>
     </Animated.View>
@@ -622,6 +609,68 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
 
   useEffect(() => () => stopGroupLoop(), [stopGroupLoop]);
 
+  /**
+   * 组序拖拽把手（组头里的 ≡）：
+   * 用 RN 的 PanResponder —— 它走 React 的 responder 协商，按下即接管，不依赖 RNGH 的 DOM 监听；
+   * 把手是组头里的普通行内子节点（不是绝对定位），既一定可见，也不与标题/垃圾桶抢同一块区域。
+   * 每个组缓存一份 responder（拖拽中重渲染不会重建、不会打断手势）。
+   */
+  const groupPanCache = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const getGroupPanHandlers = useCallback((group: string) => {
+    const cached = groupPanCache.current[group];
+    if (cached) return cached.panHandlers;
+    const responder = PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (_e, g) => {
+        gScroll0.value = scrollYSV.value;
+        gTransY.value = 0;
+        gLastY.value = g.y0;
+        gScale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
+        handleGroupDragStart(group, g.y0);
+      },
+      onPanResponderMove: (_e, g) => {
+        gMoveY.value = gBaseY.value + g.dy + (scrollYSV.value - gScroll0.value);
+        gTransY.value = g.dy;
+        const fingerY = g.moveY;
+        const idx = groupIndexAt(
+          fingerY,
+          gListTop.value,
+          scrollYSV.value - gScroll0.value,
+          gTops.value,
+          gEnds.value,
+          gCount.value
+        );
+        if (idx !== gCur.value) {
+          gCur.value = idx;
+          handleGroupDragHover(idx, fingerY);
+        }
+        if (Math.abs(fingerY - gLastY.value) > GRID_FINGER_STEP) {
+          gLastY.value = fingerY;
+          handleGroupDragMove(fingerY);
+        }
+      },
+      onPanResponderRelease: (_e, g) => {
+        const idx = groupIndexAt(
+          g.moveY,
+          gListTop.value,
+          scrollYSV.value - gScroll0.value,
+          gTops.value,
+          gEnds.value,
+          gCount.value
+        );
+        gMoveY.value = withTiming(gTops.value[idx] ?? gBaseY.value, { duration: 150 });
+        gScale.value = withTiming(1, { duration: 150 });
+        handleGroupDragEnd(gFrom.value, idx);
+      },
+      onPanResponderTerminate: () => handleGroupDragCancel(),
+    });
+    groupPanCache.current[group] = responder;
+    return responder.panHandlers;
+  }, [handleGroupDragStart, handleGroupDragHover, handleGroupDragMove, handleGroupDragEnd, handleGroupDragCancel, scrollYSV,
+      gScroll0, gTransY, gLastY, gScale, gMoveY, gBaseY, gListTop, gTops, gEnds, gCount, gCur, gFrom]);
+
   // 让位算量：被拖整组留在原槽位（变淡），其余组卡按"腾出来的空位"上下平移
   const groupShifts = useMemo(() => {
     const map = new Map<string, number>();
@@ -812,10 +861,20 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                 >
                   <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={semantic.textPrimary} />
                   <AppText variant="subhead" weight="600" style={styles.groupTitle}>{getGroupLabel(group, t)}</AppText>
-                  {/* 组头右侧让出 46px 给拖拽把手（≡），避免项数被把手压住 */}
-                  <AppText variant="caption2" color={semantic.textSecondary} style={[styles.groupCount, { marginRight: 46 }]}>
+                  <AppText variant="caption2" color={semantic.textSecondary} style={styles.groupCount}>
                     {t('addTx.itemsUnit', { count: items.length })}
                   </AppText>
+                  {/* 组序拖拽把手（≡）：组头里的普通行内子节点 —— 一定渲染、一定可见，
+                      且与标题/垃圾桶不是同一块区域。按住它上下拖 = 抬起整组换位。 */}
+                  <View
+                    testID="group-drag-handle"
+                    {...getGroupPanHandlers(group)}
+                    accessibilityRole="button"
+                    accessibilityLabel={group + ' reorder'}
+                    style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 2 }}
+                  >
+                    <Ionicons name="reorder-three-outline" size={18} color={semantic.textTertiary} />
+                  </View>
                   {/* 整组删除入口（记一笔同款：垃圾桶贴数量胶囊右侧；默认组自定义组都可删） */}
                   <PressableScale
                     style={styles.catHeaderDeleteBtn}
