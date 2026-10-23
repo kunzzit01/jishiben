@@ -317,6 +317,7 @@ function GroupCardSlot({
             Pressable 一按下就会自封 responder，把手在里面就抢不到指针序列。
             44×44 触控区、无子节点 → responder 协商里必胜。 */}
         <View
+          testID="group-drag-handle"
           style={dragHandleStyle}
           {...panResponder.panHandlers}
           accessibilityRole="adjustable"
@@ -582,25 +583,6 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     groupFingerYRef.current = absY;
   }, []);
 
-  /** 组序上/下移一格：与拖拽落位共用同一套「自然序 → 移动 → 重排 number」逻辑，只是入口换成按钮。
-   *  手势在 web 上受 responder 协商与长按 15px 判死规则影响，按钮是不依赖手势的兜底入口。 */
-  const moveGroupBy = useCallback((group: string, dir: -1 | 1) => {
-    const list = sectionsRef.current;
-    const from = list.findIndex((s) => s.group === group);
-    const to = from + dir;
-    if (from < 0 || to < 0 || to >= list.length) return;
-    const moved = moveInArray(
-      list.map((_, i) => i),
-      from,
-      to
-    );
-    const next: Record<string, number> = {};
-    moved.forEach((natural, order) => {
-      next[list[natural].group] = order;
-    });
-    persistGroupOrder(next);
-  }, []);
-
   const handleGroupDragEnd = useCallback(
     (from: number, to: number) => {
       groupFingerYRef.current = -1;
@@ -834,27 +816,6 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                   <AppText variant="caption2" color={semantic.textSecondary} style={[styles.groupCount, { marginRight: 46 }]}>
                     {t('addTx.itemsUnit', { count: items.length })}
                   </AppText>
-                  {/* 组序上/下移一格（不依赖手势的兜底；拖动仍可用） */}
-                  <View style={{ flexDirection: 'row', marginRight: 2 }}>
-                    <Pressable
-                      onPress={() => moveGroupBy(group, -1)}
-                      hitSlop={{ top: 10, bottom: 10, left: 6, right: 2 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={group + ' up'}
-                      style={{ paddingHorizontal: 3, paddingVertical: 6 }}
-                    >
-                      <Ionicons name="chevron-up" size={15} color={semantic.textSecondary} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => moveGroupBy(group, 1)}
-                      hitSlop={{ top: 10, bottom: 10, left: 2, right: 6 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={group + ' down'}
-                      style={{ paddingHorizontal: 3, paddingVertical: 6 }}
-                    >
-                      <Ionicons name="chevron-down" size={15} color={semantic.textSecondary} />
-                    </Pressable>
-                  </View>
                   {/* 整组删除入口（记一笔同款：垃圾桶贴数量胶囊右侧；默认组自定义组都可删） */}
                   <PressableScale
                     style={styles.catHeaderDeleteBtn}
