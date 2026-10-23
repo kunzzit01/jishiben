@@ -646,6 +646,8 @@ export const en = {
     darkModeHint: 'Choose how the app looks',
     // General settings that are not about appearance (language etc.)
     general: 'General',
+    // "Features" section (capability entries such as the AI Zone)
+    features: 'Features',
     support: 'Support',
     help: 'Help & Feedback',
     about: 'About',

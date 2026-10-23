@@ -322,6 +322,21 @@ export default function ProfileScreen({ navigation }: any) {
           />
         </ListSection>
 
+        {/* 功能分组：AI 专区入口 —— AIScreen 已双注册在 HomeStack / ProfileStack
+            （App.tsx 的 ROUTES.AI），但全仓一直没有 navigate(ROUTES.AI)，等于「有页面、没入口」；
+            这里补上设置页的正式入口。行规格直接复用 ListRow（同高 / 同内衬 / 同 chevron），不另画。 */}
+        <ListSection title={tr('profile.features')} style={styles.section} testID="profile-features">
+          <ListRow
+            leading={
+              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="sparkles-outline" />
+            }
+            title={tr('profile.aiZone')}
+            chevron
+            onPress={() => navigation.navigate(ROUTES.AI)}
+            testID="profile-ai-row"
+          />
+        </ListSection>
+
         {/* 支持：帮助与反馈 / 关于应用 */}
         <ListSection title={tr('profile.support')} style={styles.section} testID="profile-support">
           <ListRow

@@ -631,7 +631,7 @@ export const zh = {
     title: '设置',
     myAccount: '我的账户',
     myAccountSub: '查看与编辑个人资料',
-    aiZone: 'AI专区',
+    aiZone: 'AI 专区',
     aiZoneSub: '管理 AI 相关功能与服务',
     calculator: '计算器',
     calculatorSub: '贷款、复利等理财计算工具',
@@ -648,6 +648,8 @@ export const zh = {
     darkModeHint: '选择应用的显示方式',
     // 语言等「与外观无关」的通用设置
     general: '通用',
+    // 「功能」分组（AI 专区等能力型入口）
+    features: '功能',
     support: '支持',
     help: '帮助与反馈',
     about: '关于应用',
