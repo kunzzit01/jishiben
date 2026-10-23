@@ -2368,14 +2368,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               （PressableScale 的 Pressable 宽度是内容自适应，百分比给不到它内部那层） */}
           {displayCategories.map((c) => {
             const active = categoryId === c.id;
-            // 选中态的第二重信号：已选中任何一项时，其余格子压暗到 0.55。
-            // 光靠"放大 + 细环"在小尺寸 + 彩色球体里仍然不够抢眼（用户实测「不明显」），
-            // 而"其余的暗下去"是最直接的可读性手段，且不引入新颜色。
-            const dimmed = !!categoryId && !active;
+            // 用户定版：不要"其它图标发蒙"的压暗方案 —— 选中感全部交给选中项自己的
+            // 贴边描边 + 光晕（见 IconCircle 的 selected）。未选中项保持原样不透明。
             return (
               <View key={c.id} style={[styles.catCellWrap, { width: `${100 / gridColumns}%` as unknown as `${number}%` }]}>
                 <PressableScale
-                  style={[styles.catCell, isShort && styles.catCellShort, dimmed && { opacity: 0.55 }]}
+                  style={[styles.catCell, isShort && styles.catCellShort]}
                   activeScale={0.94}
                   onPress={() => handlePickCategory(c.id)}
                   accessibilityRole="button"

@@ -197,15 +197,20 @@ export function IconCircle({
       ? withAlpha(color, categoryRing.darkAlpha)
       : categoryRing.light
     : semantic.textTertiary;
-  // 选中态（用户两轮定版后的最终形态）：只有「柔光 + 放大」不够明显——同色光晕在这个
-  // 尺寸下几乎看不见。改成三重信号同时出现：
-  //   1) 放大 1.1（transform 不参与布局，不挤邻格）
-  //   2) 一圈 accent 细环：2px 环宽 + 2px 间隙（原来的 5px 环 + 3px 间隙太粗，像戴了个圈；
-  //      而这一环是「选中」的语义色，不再用球体自身颜色，避免绿球配紫环那种冲突观感）
-  //   3) 更实的地面投影，把球从平面里抬起来
-  // 另外调用方会把「未选中」的格子压暗（见 AddTransactionScreen 的 categoryDim），三者叠加才一眼可辨。
+  // 选中态（用户第三轮定版）：**环必须紧贴球体外沿，中间不能隔一道空气**。
+  // 之前 2px 环 + 2px 间隙看起来像"戴了个项圈"，脱离了球体本身。
+  // 现在：0 间隙 + 2.5px 描边直接咬住球边，再叠三层特效把选中的球"顶"起来：
+  //   1) 贴边描边（accent 语义色，与标签同一身份）
+  //   2) 近距同色光晕（8px 扩散）—— 让环有光感，不是一条死线
+  //   3) 更远的地面投影（18px，暗色）—— 层次拉开，不糊成一片
+  // 不再依赖"把其它格子压暗"来制造对比（用户明确不要其它图标发蒙）。
   const selectedShadow = selected
-    ? `0px 0px 0px 2px ${semantic.bg}, 0px 0px 0px 4px ${semantic.accent}, 0px 10px 18px -6px ${withAlpha(semantic.accent, 0.45)}`
+    ? [
+        `0px 0px 0px 2.5px ${semantic.accent}`,
+        `0px 0px 12px 0px ${withAlpha(semantic.accent, 0.55)}`,
+        `0px 14px 22px -8px ${withAlpha(semantic.accent, 0.45)}`,
+        `0px 6px 10px -4px rgba(0,0,0,0.25)`,
+      ].join(', ')
     : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
@@ -221,7 +226,7 @@ export function IconCircle({
           height: size,
           borderRadius: radius,
           boxShadow: selectedShadow,
-          transform: selected ? [{ scale: 1.1 }] : undefined,
+          transform: selected ? [{ scale: 1.06 }] : undefined,
         },
         style,
       ]}
