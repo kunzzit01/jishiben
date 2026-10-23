@@ -88,3 +88,48 @@ DELETE FROM users          WHERE id=@u;   -- 连账号一起删
 ```
 
 （按此顺序删，否则 `fk_transactions_ledger` 的 RESTRICT 会拦住。）
+
+---
+
+## 实测记录（2026-10-23，真实备份数据）
+
+源：用户提供的 `supabase-backup.zip` → `export-2026-10-23/`
+
+```
+SQL 语句数            185
+补建占位账本          1（1788744197635-ipcoych，被 19 笔流水引用但导出中缺失）
+
+导入后 DB             ledgers=6  assets=16  categories=90  category_groups=15
+                      transactions=54  budgets=3
+经 /api 校验（size=200）
+                      流水 54 / total=54；账户 16；分类 90；账本 6；预算 3
+按币种汇总（与源 JSON 逐项比对，完全一致）
+                      MYR  支出 11,093.60   收入 50,655.00
+                      USD  支出 0.00        收入 0.00
+                      CNY  支出 100.00      收入 100.00
+```
+
+注意：`GET /api/transactions` 默认分页 50 条，核对总数要带 `?size=200`（或看 `totalElements`）。
+
+## 在 VPS 上执行的完整命令
+
+```bash
+cd /opt/jishiben
+
+# 1) 目标账号必须已存在（导入挂在这个账号下）
+curl -X POST http://127.0.0.1:8088/api/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"mingsoon249@gmail.com","password":"12345678","displayName":"Ming Soon"}'
+
+# 2) 执行导入（import.sql 由本地脚本生成后上传）
+docker exec -i jishiben-mysql sh -c \
+  'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' < import.sql
+
+# 3) 核对（脚本末尾已自动打印一张表，这里再手工查一次）
+docker exec -it jishiben-mysql sh -c 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "
+SET @u := (SELECT id FROM users WHERE email=\"mingsoon249@gmail.com\");
+SELECT COUNT(*) AS tx FROM transactions WHERE user_id=@u;
+SELECT currency, FORMAT(SUM(IF(type=\"expense\",amount,0)),2) exp,
+                 FORMAT(SUM(IF(type=\"income\",amount,0)),2) inc
+FROM transactions WHERE user_id=@u GROUP BY currency;"'
+```
