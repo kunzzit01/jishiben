@@ -7,10 +7,11 @@ import {
   ScrollView,
   Pressable,
   Modal,
+  PanResponder,
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent, ViewStyle } from 'react-native';
 
 /**
  * 玻璃材质（UI V2.1 §2）在 web 上的偏差修正：expo-blur 的 web 实现用「tint 底色」模拟模糊——
@@ -24,8 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
@@ -134,8 +134,21 @@ function groupIndexAt(
 }
 
 const GROUP_DRAG_SCALE = 1.03;
-/** 组头按下后多少纵向位移就抬起整组（够大才不会把点击抖成拖拽，够小才跟得住手指） */
-const GROUP_DRAG_START_DIST = 10;
+/**
+ * web 专用：把手行上必须让浏览器**别**接管滚动。
+ * responder 被我们拿到也拦不住浏览器的原生滚动（实测：按下即向上拖 220px 时页面自己滚了 205px，
+ * 手指相对内容只挪了 15px → 落点算出来还是原槽位，顺序不动）；而 GestureDetector 当初正是靠
+ * 自己那层 `touch-action:none` 才没滚动，代价却是内层 Pressable 抢先。这里把 touch-action
+ * 放回把手行本身，滚动与手势就不再互相打岔。native 不认识这个样式键，传 undefined。
+ */
+const GROUP_DRAG_HANDLE_WEB_STYLE: ViewStyle | undefined =
+  Platform.OS === 'web' ? ({ touchAction: 'none' } as unknown as ViewStyle) : undefined;
+/** 长按多久之后纵向移动就算拖整组（闸门：没满这个时长、位移也不大的按下一律当点按） */
+const GROUP_DRAG_HOLD_MS = 250;
+/** 长按闸门开启后，纵向位移超过多少就抬起整组 */
+const GROUP_DRAG_START_DIST = 6;
+/** 没停够长按时长，但纵向已经拖这么远——只能是拖拽，不会被当成点按 */
+const GROUP_DRAG_FAST_DIST = 12;
 /**
  * 拖拽收尾后屏蔽组头点击的时长：web 上 mouseup 会补一个 click（实测 click@组头），
  * 不挡就会「一松手整组自己折叠 / 手指停在垃圾桶上顺手把整组删了」。
@@ -185,72 +198,104 @@ function GroupCardSlot({
   }, [shiftYTarget, shiftY]);
   const shiftStyle = useAnimatedStyle(() => ({ transform: [{ translateY: shiftY.value }] }));
 
-  // 同磁贴：手势只在挂载时建一次，拖拽中重渲染不会打断正在进行的拖拽
-  //
-  // 这里**不能**用 .activateAfterLongPress(200)：RNGH 在长按计时未到之前，只要位移超过
-  // DEFAULT_TOUCH_SLOP(15px) 就清掉计时器并直接判手势失败
-  // （node_modules/react-native-gesture-handler/src/web/handlers/PanGestureHandler.ts:483 shouldFail
-  //   + src/web/constants.ts:1 DEFAULT_TOUCH_SLOP = 15）；而 GestureDetector 在 web 上给这一层
-  // 打的是 touch-action:none（DOM 实测），浏览器也不会替你滚页面——
-  // 于是"按住一拖"既不起拖、也不滚动，整段手势是死区：这就是用户说的「拖不动」。
-  // 改成位移阈值激活：短按（无位移）照旧走组头自己的 onPress，纵向拖过 10px 立刻抬起整组。
-  const gesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetY([-GROUP_DRAG_START_DIST, GROUP_DRAG_START_DIST])
-        .onStart((e) => {
-          'worklet';
-          scroll0.value = scrollY.value;
-          transY.value = 0;
-          lastY.value = e.absoluteY;
-          scale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
-          runOnJS(onDragStart)(group, e.absoluteY);
-        })
-        .onUpdate((e) => {
-          'worklet';
-          moveY.value = baseY.value + e.translationY + (scrollY.value - scroll0.value);
-          transY.value = e.translationY;
-          const idx = groupIndexAt(
-            e.absoluteY,
-            listTop.value,
-            scrollY.value - scroll0.value,
-            tops.value,
-            ends.value,
-            count.value
-          );
-          if (idx !== cur.value) {
-            cur.value = idx;
-            runOnJS(onDragHover)(idx, e.absoluteY);
-          }
-          if (Math.abs(e.absoluteY - lastY.value) > GRID_FINGER_STEP) {
-            lastY.value = e.absoluteY;
-            runOnJS(onDragMove)(e.absoluteY);
-          }
-        })
-        .onEnd((e) => {
-          'worklet';
-          const idx = groupIndexAt(
-            e.absoluteY,
-            listTop.value,
-            scrollY.value - scroll0.value,
-            tops.value,
-            ends.value,
-            count.value
-          );
-          // 落位：幽灵滑到目标槽位顶边，再交差写回顺序
-          moveY.value = withTiming(tops.value[idx] ?? baseY.value, { duration: 150 });
-          scale.value = withTiming(1, { duration: 150 });
-          runOnJS(onDragEnd)(from.value, idx);
-        })
-        .onFinalize((_e, success) => {
-          'worklet';
-          if (!success) {
-            scale.value = withTiming(1, { duration: 120 });
-            runOnJS(onDragCancel)();
-          }
-        }),
-    []
-  );
+  // 拖拽手势只在挂载时建一次（拖拽中重渲染不打断），回调经 ref 取最新闭包
+  const cbs = useRef({ onDragStart, onDragHover, onDragMove, onDragEnd, onDragCancel });
+  cbs.current = { onDragStart, onDragHover, onDragMove, onDragEnd, onDragCancel };
+  /** 本次按下的时刻：长按闸门用它区分「点按」与「长按后拖动」 */
+  const pressAtRef = useRef(0);
+
+  /**
+   * 组头（= 整卡把手行；收起态整张卡就是这一行）拖拽用 RN 自带 PanResponder，
+   * 并且走 **capture 阶段 + 长按闸门**，而不是 RNGH：
+   *
+   * 1) 为什么 RNGH 在这条组头上不可能好用：
+   *    · GestureDetector 在 web 上把 pointerdown/pointermove 直接挂在自己生成的包装 DOM 上
+   *      （react-native-gesture-handler/src/web/tools/PointerEventManager.ts:175/193
+   *       `this.view.addEventListener('pointermove', ...)`），它完全不参与 React 的 responder 协商；
+   *    · 组头里那层 Pressable 在按下那一刻就自封为 RNW 的 responder
+   *      （react-native-web/dist/cjs/modules/usePressEvents/PressResponder.js:228
+   *       `onStartShouldSetResponder: … return !disabled` → true），这条指针序列的语义归
+   *      responder 系统所有，DOM 层那套 RNGH 监听拿不到可用的拖拽序列 →「按住一拖」什么都不发生。
+   *    · 顺带纠正上一轮的猜测：`.activeOffsetY([a,b])` 在 RNGH 里**确实**会被拆成
+   *      activeOffsetYStart/End（src/handlers/gestures/panGesture.ts:49-58），阈值写法不是根因。
+   *
+   * 2) 为什么 capture 而不是 bubble：RNW 的 ResponderSystem 在 move 时按 LCA 剪枝后从根往叶子
+   *    问 capture、再从叶子往根问 bubble（ResponderSystem.js:394-446）。内层 Pressable 已经是
+   *    responder，capture 先问祖先，我们在这里返回 true 就直接发起移交，再由 Pressable 的
+   *    onResponderTerminationRequest（cancelable ?? true）让位——它抢不走纵向拖拽。
+   *
+   * 3) 长按闸门：按下只记录时刻、返回 false（点按照旧落到组头自己的 onPress：折叠/展开、垃圾桶）；
+   *    长按满 GROUP_DRAG_HOLD_MS 之后再纵向移动 → 接管；没停够就果断纵向拖过
+   *    GROUP_DRAG_FAST_DIST 也接管（够大就不可能是点按），两条路都不会吞掉短按。
+   */
+  const panResponder = useMemo(() => {
+    /** 落位：幽灵滑到目标槽位顶边，再交差写回顺序（释放与中断共用同一套几何） */
+    const land = (fingerY: number) => {
+      const idx = groupIndexAt(
+        fingerY,
+        listTop.value,
+        scrollY.value - scroll0.value,
+        tops.value,
+        ends.value,
+        count.value
+      );
+      moveY.value = withTiming(tops.value[idx] ?? baseY.value, { duration: 150 });
+      scale.value = withTiming(1, { duration: 150 });
+      cbs.current.onDragEnd(from.value, idx);
+    };
+    return PanResponder.create({
+      // 按下：只记时刻，不接管——短按必须留给组头自己的 onPress
+      onStartShouldSetPanResponderCapture: () => {
+        pressAtRef.current = Date.now();
+        return false;
+      },
+      onStartShouldSetPanResponder: () => false,
+      // 纵向意图 + （长按已满 | 位移已经很大）→ capture 阶段接管
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        const dy = Math.abs(g.dy);
+        if (dy <= Math.abs(g.dx) || dy < GROUP_DRAG_START_DIST) return false;
+        return Date.now() - pressAtRef.current >= GROUP_DRAG_HOLD_MS || dy >= GROUP_DRAG_FAST_DIST;
+      },
+      onMoveShouldSetPanResponder: () => false,
+      // 拖动中不许别人（内层 Pressable / 页面滚动）抢走
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (_e, g) => {
+        scroll0.value = scrollY.value;
+        transY.value = 0;
+        lastY.value = g.y0;
+        scale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
+        cbs.current.onDragStart(group, g.y0);
+      },
+      onPanResponderMove: (_e, g) => {
+        moveY.value = baseY.value + g.dy + (scrollY.value - scroll0.value);
+        transY.value = g.dy;
+        // g.moveY = 手指在窗口里的绝对纵坐标（与旧实现的 absoluteY 同义）
+        const fingerY = g.moveY;
+        const idx = groupIndexAt(
+          fingerY,
+          listTop.value,
+          scrollY.value - scroll0.value,
+          tops.value,
+          ends.value,
+          count.value
+        );
+        if (idx !== cur.value) {
+          cur.value = idx;
+          cbs.current.onDragHover(idx, fingerY);
+        }
+        if (Math.abs(fingerY - lastY.value) > GRID_FINGER_STEP) {
+          lastY.value = fingerY;
+          cbs.current.onDragMove(fingerY);
+        }
+      },
+      onPanResponderRelease: (_e, g) => land(g.moveY),
+      onPanResponderTerminate: () => {
+        scale.value = withTiming(1, { duration: 120 });
+        cbs.current.onDragCancel();
+      },
+    });
+  }, []);
+
 
   return (
     <Animated.View
@@ -258,9 +303,9 @@ function GroupCardSlot({
       onLayout={(e) => onCardLayout(group, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
     >
       <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.groupCard}>
-        <GestureDetector gesture={gesture}>
-          <View>{header}</View>
-        </GestureDetector>
+        <View style={GROUP_DRAG_HANDLE_WEB_STYLE} {...panResponder.panHandlers}>
+          {header}
+        </View>
         {children}
       </GlassView>
     </Animated.View>
