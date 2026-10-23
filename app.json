@@ -31,7 +31,9 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.kylim0103.jizhangapp"
+      "package": "com.kylim0103.jizhangapp",
+      "versionCode": 1,
+      "usesCleartextTraffic": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
