@@ -1,27 +1,32 @@
-// aiConfig.ts —— AI（OpenRouter）接入配置
+// aiConfig.ts —— AI（小票识别）客户端开关
 //
-// ⚠ 安全基线（本次改造）：**这里不再保存任何明文密钥**。
-//   密钥只从构建期环境变量读取，Expo 会把 EXPO_PUBLIC_ 前缀的变量内联进包：
+// 安全基线：APP 包里**不再有任何第三方密钥**。
+//   小票识别走自家后端 POST /api/ai/receipt-scan，OpenRouter 密钥只存在于服务器环境变量
+//   （OPENROUTER_API_KEY），永远不会被 Expo 内联进 bundle。
 //
-//   本地开发：仓库根目录 .env（已被 .gitignore 忽略，禁止提交）
-//     EXPO_PUBLIC_OPENROUTER_API_KEY=sk-or-...
-//     EXPO_PUBLIC_AI_MODEL=anthropic/claude-sonnet-4.5   （可选，缺省用下面的值）
-//   EAS / 发布构建：在项目 Secrets（或 eas.json 的环境段）里配置同名变量。
-//
-// 没有配置时：
-//   - OPENROUTER_API_KEY === ''（既有的「未配置」判断继续成立，utils 层不会发请求）；
-//   - isAiConfigured === false —— 界面（扫小票 / 语音记账）用它提前给出「不可用」提示，
-//     不会打开相机、也不会抛出未捕获异常。降级路径 = 手动记账 + 小票拍照留档，业务不受影响。
-//
-// 正式上架前建议改成「经自己的服务器中转」，不要让 APP 直接带着密钥调用第三方。
+// isAiConfigured 仍保持同步 boolean：界面（扫小票 / 语音记账）在打开相机前用它做一次
+// 「不可用」判断，而界面文件不在本次改动范围内。语义已改为：
+//   true  = 允许尝试识别。真正的可用性只有后端知道（服务器是否配了密钥）；
+//           未配置时后端返回 503 AI_NOT_CONFIGURED，utils/scanReceipt.ts 会把它翻译成
+//           可读提示并降级为手动记账，不会崩。
+//   不要再根据 EXPO_PUBLIC_ 密钥判断可用性 —— 那等于把密钥重新塞回包里。
 
 declare const process: { env: Record<string, string | undefined> };
 
-/** OpenRouter API Key（来自 EXPO_PUBLIC_OPENROUTER_API_KEY；未配置 = 空字符串） */
+/**
+ * 旧版直连 OpenRouter 用的构建期变量。**小票识别已完全不再读它**。
+ *
+ * 目前只剩 utils/voiceAccounting.ts（语音记账）还在直连 OpenRouter，属于已知的待迁移项，
+ * 不在本次范围内；一旦语音也迁到后端，这两个常量就可以整段删除。
+ * 发布构建不要再设置 EXPO_PUBLIC_OPENROUTER_API_KEY。
+ */
 export const OPENROUTER_API_KEY: string = (process.env.EXPO_PUBLIC_OPENROUTER_API_KEY ?? '').trim();
 
-/** 使用的模型名（来自 EXPO_PUBLIC_AI_MODEL；可在 OpenRouter 控制台确认最新可用名称） */
+/** @deprecated 同上，仅为 voiceAccounting.ts 保留。 */
 export const AI_MODEL: string = (process.env.EXPO_PUBLIC_AI_MODEL ?? 'anthropic/claude-sonnet-4.5').trim();
 
-/** AI 能力是否可用（界面据此决定「直接给出不可用提示」还是「真的去识别」） */
-export const isAiConfigured: boolean = OPENROUTER_API_KEY.length > 0;
+/**
+ * AI 能力是否可用（界面据此决定「直接给出不可用提示」还是「真的去识别」）。
+ * 现在由后端决定：客户端一律允许尝试，未配置时以 503 AI_NOT_CONFIGURED 降级。
+ */
+export const isAiConfigured: boolean = true;

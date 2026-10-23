@@ -39,6 +39,10 @@ export type ApiErrorCode =
   | 'NOT_IMPLEMENTED'
   | 'UPSTREAM_ERROR'
   | 'AI_UNAVAILABLE'
+  // AI 端点（经自家后端中转）的三个稳定码：未配置 / 上游失败 / 上游超时
+  | 'AI_NOT_CONFIGURED'
+  | 'AI_UPSTREAM_ERROR'
+  | 'AI_UPSTREAM_TIMEOUT'
   | 'INTERNAL_ERROR'
   // 客户端侧：网络层没有拿到 HTTP 响应（弱网 / DNS / 后端未启动）
   | 'NETWORK_ERROR'
@@ -566,6 +570,22 @@ function adoptTokens(response: AuthTokenResponse): AuthTokenResponse {
   return response;
 }
 
+/**
+ * 小票识别结果（POST /api/ai/receipt-scan）。服务端把「识别不到」写成 null，
+ * 且 Spring 的 non_null 序列化会省略整个字段 —— 所以每个字段都可能 undefined。
+ */
+export interface ReceiptScanDto {
+  amount?: number | null;
+  merchant?: string | null;
+  /** YYYY-MM-DD */
+  date?: string | null;
+  type?: 'expense' | 'income' | null;
+  suggestedCategory?: string | null;
+}
+
+/** 服务端上游超时 30s + 连接 5s，客户端留出余量，避免先于服务端报「网络超时」。 */
+const AI_SCAN_TIMEOUT_MS = 45_000;
+
 export const authApi = {
   register: (email: string, password: string, displayName?: string) =>
     authorizedRequest<AuthTokenResponse>('POST', '/api/auth/register', {
@@ -678,6 +698,14 @@ export const api = {
   // premium（桩：只读状态，内购未实现）
   premiumStatus: () =>
     authorizedRequest<{ active: boolean; implemented: boolean }>('GET', '/api/premium/status'),
+
+  // AI 小票识别：图片只发给自家后端，第三方密钥永远不进 APP 包。
+  // 服务端读图 + 调模型最长约 30s，所以这里单独放宽超时（默认 20s 会先于服务端超时）。
+  aiScanReceipt: (imageBase64: string) =>
+    authorizedRequest<ReceiptScanDto>('POST', '/api/ai/receipt-scan', {
+      body: { imageBase64 },
+      timeoutMs: AI_SCAN_TIMEOUT_MS,
+    }),
 };
 
 /**
