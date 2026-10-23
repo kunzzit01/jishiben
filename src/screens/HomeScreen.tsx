@@ -1568,8 +1568,8 @@ export default function HomeScreen({ navigation }: any) {
   }, [ledgerTransactions, thisMonthKey, txCurrencyOf]);
   const thisExpense = expenseByCurrency.get(activeCurrency) ?? 0;
   // 4 个快捷方块（设计稿 01 屏）：支出 / 收入 / 转账 / 扫描。
-  // ⚠ 类型只能落到「记一笔」的默认档（支出）——ROUTES.ADD_TX 的参数类型（navigation/routes.ts）
-  //   不在本次改动范围，没有 presetType；扫描走既有的 autoScan。
+  // 前三档用 ROUTES.ADD_TX 的 presetType 带出各自的初始类型（routes.ts 已声明该参数），
+  // 扫描走既有的 autoScan（不带 presetType，落到默认支出档后自动开相机）。
   const quickActions = useMemo(
     () => [
       {
@@ -1578,7 +1578,7 @@ export default function HomeScreen({ navigation }: any) {
         icon: 'arrow-up-outline' as IconName,
         tileBg: semantic.brandSoft,
         tint: semantic.accent,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX),
+        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'expense' }),
       },
       {
         key: 'income',
@@ -1586,7 +1586,7 @@ export default function HomeScreen({ navigation }: any) {
         icon: 'arrow-down-outline' as IconName,
         tileBg: semantic.tileMint,
         tint: semantic.textPrimary,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX),
+        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'income' }),
       },
       {
         key: 'transfer',
@@ -1594,7 +1594,7 @@ export default function HomeScreen({ navigation }: any) {
         icon: 'swap-horizontal-outline' as IconName,
         tileBg: semantic.surfaceSunken,
         tint: semantic.accent,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX),
+        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'transfer' }),
       },
       {
         key: 'scan',
@@ -2041,6 +2041,11 @@ export default function HomeScreen({ navigation }: any) {
   const [calMounted, setCalMounted] = useState(false);
   // 日历是否已完全打开（列表区高度夹取用）：只在动画结束后变化，不参与动画过程
   const [calClamp, setCalClamp] = useState(false);
+  // 日历模式「列表不吃点击」开关：进场动画还没走完时（calClamp 仍为 false）列表内容 opacity 0，
+  // 却仍排在日历卡之上，命中测试会把翻转月份 / 药丸 / 合计行的点击吃掉（CDP 实测：进场 200ms 内
+  // 点上个月按钮，命中的是下面那行 tx-row）。所以在点按那一刻就把列表置为不吃点击，
+  // 不用等动画结束的 calClamp —— 两条一起保证「日历模式下列表永不接点击」。
+  const [calHitInert, setCalHitInert] = useState(false);
   const [calH, setCalH] = useState(0);
   const onCalLayoutH = useCallback((h: number) => setCalH((prev) => (Math.abs(prev - h) >= 1 ? h : prev)), []);
   const calMountedRef = useRef(false);
@@ -2085,13 +2090,15 @@ export default function HomeScreen({ navigation }: any) {
   // 列表顶部的吸顶日期头：跟列表一起淡出（日历打开时隐藏），不再靠 React 状态条件挂载
   const pinnedFadeStyle = useAnimatedStyle(() => ({ opacity: listO.value }));
   // 列表始终挂着（日历模式下它 opacity 0）；日历打开后（calClamp 为真，只在动画结束时变一次）把列表内容高度夹成「头部 + 日历」，
-  // 不会滚进一大片空白，也不会让头部被滚走。这是唯一一次跟切换有关的 React 更新（见 finishToggle）
+  // 不会滚进一大片空白，也不会让头部被滚走。切换过程只有两次 React 更新（见 afterCalTap / finishToggle）：
+  // 点按那一刻翻 calHitInert（命中测试），动画结束才翻 calClamp（高度夹取）。
   const calContentH = calH > 0 ? heroH + calH + tabClearance + 12 : 0;
-  const listContentStyle = useMemo(
-    () =>
-      calClamp && calContentH > 0
+  const listContentStyle = useMemo(() => {
+    const clamped = calClamp && calContentH > 0;
+    return {
+      paddingBottom: tabClearance,
+      ...(clamped
         ? {
-            paddingBottom: tabClearance,
             minHeight: calContentH,
             maxHeight: calContentH,
             overflow: 'hidden' as const,
@@ -2100,19 +2107,23 @@ export default function HomeScreen({ navigation }: any) {
             // 日历卡里的 z-index 跳不出去 —— 命中测试会把这些「看不见的格子」排在日历前面，
             // 把分段药丸下半颗 / 合计行 / 月格的点击吃掉（CDP 实测：药丸 y 363..393，
             // 从 382 起就被 opacity 0 的日期头接走，所以点文字时不灵敏、下半颗完全点不动）。
-            // 这里把整层关掉命中测试；头部层（含日历卡、hero、开关按钮）用 JSX 的 pointerEvents="auto"
-            // 显式打开 —— pointer-events:none 的祖先不会连带禁掉显式声明 auto 的子树。
-            pointerEvents: 'none' as const,
           }
-        : { paddingBottom: tabClearance },
-    [calClamp, calContentH, tabClearance]
-  );
+        : null),
+      // 这里把整层关掉命中测试；头部层（含日历卡、hero、开关按钮）用 JSX 的 pointerEvents="auto"
+      // 显式打开 —— pointer-events:none 的祖先不会连带禁掉显式声明 auto 的子树。
+      // ⚠ 条件里必须带 calHitInert：夹取（calClamp）要等动画结束，而命中测试从点击那一刻就得关掉，
+      //   否则进场动画期间点日历卡的按钮会掉到下面 opacity 0 的账单行上（「点了没反应」）。
+      ...(calHitInert || clamped ? { pointerEvents: 'none' as const } : null),
+    };
+  }, [calClamp, calContentH, tabClearance, calHitInert]);
   // JS 兜底：预热没到就点了 —— 先挂上日历卡（藏着），两帧后在 UI 线程起动画
   const startSheetsRef = useRef<(open: boolean) => void>(() => {});
   const toggleCalendarJS = useCallback(
     (open: boolean) => {
       hapticLight();
       if (!calMountedRef.current) setCalMounted(true);
+      // 点按那一刻就把列表置为不吃点击（进场动画期间列表 opacity 0，却仍盖在日历卡上层）
+      setCalHitInert(open);
       requestAnimationFrame(() => requestAnimationFrame(() => startSheetsRef.current(open)));
     },
     []
@@ -2128,13 +2139,19 @@ export default function HomeScreen({ navigation }: any) {
       finishHandleRef.current = InteractionManager.runAfterInteractions(() => {
         finishHandleRef.current = null;
         if ((calTarget.value === 1) !== open) return;
-        React.startTransition(() => setCalClamp(open));
+        React.startTransition(() => {
+          setCalClamp(open);
+          // 收尾同时对齐「列表不吃点击」：打开=保持关；关闭=动画走完再把点击还给列表
+          setCalHitInert(open);
+        });
       });
     },
     [calTarget]
   );
   // 点按后 JS 线程做的事：触感（fire-and-forget）、取消上一次还没执行的收尾
-  const afterCalTap = useCallback(() => {
+  const afterCalTap = useCallback((open: boolean) => {
+    // 日历模式（含进场动画期间）列表必须不吃点击，否则点日历卡上的按钮会掉到下面的账单行
+    setCalHitInert(open);
     if (__DEV__) {
       devCal.tapAt = performance.now();
       devCalLog('tap (JS)');
@@ -2166,6 +2183,10 @@ export default function HomeScreen({ navigation }: any) {
         listY.value = open ? CAL_LIST_LIFT : 0;
         listO.value = open ? 0 : 1;
         viewP.value = open ? 1 : 0;
+        // ⚠ 无动画档也要走收尾：calClamp 只在 finishToggle 里翻转，漏掉它 = 列表区高度永不夹取、
+        //   列表内容层永远接点击 —— 在「减弱动态效果」下点日历的翻月键/药丸会全被下面
+        //   opacity 0 的账单行吃掉（用户实测「点左右翻月键切换不了月份」就是这条路）。
+        runOnJS(finishToggle)(open);
         return;
       }
       viewP.value = withTiming(open ? 1 : 0, { duration: 180 });
@@ -2215,7 +2236,7 @@ export default function HomeScreen({ navigation }: any) {
       return;
     }
     startSheets(open);
-    runOnJS(afterCalTap)();
+    runOnJS(afterCalTap)(open);
   }, [calTarget, calReady, startSheets, afterCalTap, toggleCalendarJS]);
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -3457,8 +3478,9 @@ function makeStyles(
     //   （见 listContentStyle 的 pointerEvents 与下面 listHeaderLayer 的 JSX 注释）。
     calendarAbs: { position: 'absolute', left: 0, right: 0 },
     listHeaderLayer: { zIndex: 2 },
-    // 玻璃圆角 26（半径由 GlassView 的 radius 给，这里补稿的内衬 12/10/10）
-    calendarCard: { paddingTop: 12, paddingHorizontal: 10, paddingBottom: 10 },
+    // 玻璃卡：圆角 26 由 GlassView 的 radius 给（与资产页 groupsCard 同一张 26 圆角玻璃卡），
+    // 内衬走间距令牌（12 / 8 / 8）
+    calendarCard: { paddingTop: spacing.md, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
     // ── 以下旧的「账单卡 / 空状态 / 账单行（图标托 + 类别(备注)）」样式已按 T09 删除 ──
     // （H4：连续分组列表；H5：行统一走 ui/TransactionRow；H7：空状态统一走 ui/EmptyState）
     ledgerModalOverlay: {

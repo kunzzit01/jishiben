@@ -37,6 +37,9 @@ export const ROUTES = {
   ADD_TX_ROOT: '记一笔主页',
 } as const;
 
+/** 「记一笔」的初始类型档（入口预设 / 编辑回填都落在这里） */
+export type AddTxPresetType = 'expense' | 'income' | 'transfer';
+
 export type TransactionLike = {
   id: string;
   amount: number;
@@ -51,7 +54,15 @@ export type TransactionLike = {
 /** HomeStack：首页 Tab 里的堆栈 */
 export type HomeStackParamList = {
   首页主页: undefined;
-  记一笔: { editTransaction?: TransactionLike; presetCategoryId?: string; autoScan?: boolean } | undefined;
+  记一笔: {
+    editTransaction?: TransactionLike;
+    presetCategoryId?: string;
+    autoScan?: boolean;
+    // 首页四个快捷方块的预设档：expense / income / transfer（只决定初始类型）
+    presetType?: AddTxPresetType;
+    // 既有入口（资产页转账、AI 专区）用的同义字段，保留
+    initialType?: AddTxPresetType;
+  } | undefined;
   类别分类: undefined;
   开设账本: undefined;
   关于应用: undefined;
@@ -78,7 +89,14 @@ export type ProfileStackParamList = {
   // 财务规划-新增/编辑计划(整页表单;planId 有值 = 编辑)
   财务规划编辑: { planId?: string } | undefined;
   // AI专区→"扫描小票自动记账" 会 push 本栈的"记一笔"（双注册）
-  记一笔: { editTransaction?: TransactionLike; presetCategoryId?: string; autoScan?: boolean } | undefined;
+  记一笔: {
+    editTransaction?: TransactionLike;
+    presetCategoryId?: string;
+    autoScan?: boolean;
+    // 与 HomeStack 同签名（AI 专区等入口双注册进来）
+    presetType?: AddTxPresetType;
+    initialType?: AddTxPresetType;
+  } | undefined;
   // 原侧拉菜单的入口（从设置项列表跳转）
   关于应用: undefined;
   帮助与反馈: undefined;

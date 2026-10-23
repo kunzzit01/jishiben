@@ -476,6 +476,8 @@ export const zh = {
     deleteLedgerDone: '账本已删除',
     balanceLabel: '结余',
     calNet: '总额',
+    // 日历：点开没有交易的某一天时，明细区的那句话（不留空白一片）
+    calDayEmpty: '这天没有记录',
     // T08：Hero 头部「日历/列表切换」按钮的读屏标签
     toggleView: '切换视图',
     // T08：Hero 隐藏/显示金额按钮的读屏标签
@@ -506,6 +508,8 @@ export const zh = {
     budgetEdit: '编辑',
     budgetAddCategory: '未设额度的分类',
     budgetNoLimit: '未设额度',
+    // 超支读屏文案（负号会被念成「负七十三」，读屏只说幅度）
+    budgetOverBy: '超支 %{pct}%',
     budgetCategoryModalTitle: '设置「%{name}」额度（%{cur}）',
   },
   report: {
@@ -547,6 +551,13 @@ export const zh = {
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
     accountDetail: '账户详情',
+    // 账户详情三段（交易记录 / 月度统计 / 账户设置）+ 头部三动作（转账 / 编辑 / 更多）
+    tabTransactions: '交易记录',
+    tabMonthly: '月度统计',
+    tabSettings: '账户设置',
+    actionTransfer: '转账',
+    actionEdit: '编辑',
+    actionMore: '更多',
     // 双主题改造 · 缺口补齐：账户详情里的该账户流水
     recentTransactions: '账户流水',
     transactionsEmpty: '这个账户还没有流水',

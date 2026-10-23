@@ -474,6 +474,8 @@ export const en = {
     deleteLedgerDone: 'Ledger deleted',
     balanceLabel: 'Balance',
     calNet: 'Net',
+    // Calendar: one-liner under the grid when the selected day has no transactions
+    calDayEmpty: 'No records on this day',
     // T08: a11y label for the calendar/list switch in the Hero header
     toggleView: 'Switch view',
     // T08: a11y label for the hide/show amount button
@@ -504,6 +506,8 @@ export const en = {
     budgetEdit: 'Edit',
     budgetAddCategory: 'Categories without a limit',
     budgetNoLimit: 'No limit',
+    // a11y copy when over budget (a minus sign would be read as "negative seventy-three")
+    budgetOverBy: 'Over by %{pct}%',
     budgetCategoryModalTitle: 'Set limit for "%{name}" (%{cur})',
   },
   report: {
@@ -545,6 +549,14 @@ export const en = {
     emptyTitle: 'No accounts yet',
     emptyHint: 'Add an account to see balances and statements here',
     accountDetail: 'Account',
+    // Detail sheet segments (transactions / monthly / settings) + header actions
+    // 英文短标签：320 视口三等分每格只有 91，'Transactions' / 'Transfer' 会被省略号截断
+    tabTransactions: 'Records',
+    tabMonthly: 'Monthly',
+    tabSettings: 'Settings',
+    actionTransfer: 'Send',
+    actionEdit: 'Edit',
+    actionMore: 'More',
     // Dual-theme refactor: this account's transaction feed inside the detail sheet
     recentTransactions: 'Transactions',
     transactionsEmpty: 'No transactions for this account yet',

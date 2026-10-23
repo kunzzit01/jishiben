@@ -25,7 +25,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
-import { ROUTES } from '../navigation/routes';
+import { ROUTES, AddTxPresetType } from '../navigation/routes';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { TransactionType, Transaction, Category } from '../types';
 import { useT, useLanguage } from '../i18n/LanguageContext';
@@ -347,9 +347,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const editTransaction: Transaction | undefined = route?.params?.editTransaction;
   const isEditing = !!editTransaction;
 
+  // 入口预设（首页四个快捷方块：支出 / 收入 / 转账）。presetType 是本次新增的字段，
+  // initialType 是既有入口（资产页"转账"、AI 专区）一直在用的同义字段，二者合并成一条优先级链。
+  const presetType: AddTxPresetType | undefined = route?.params?.presetType ?? route?.params?.initialType;
+  // 初始类型优先级：编辑已有账单（保持原类型，绝不能被入口预设覆盖）> 入口预设 > 默认支出。
+  // 只决定挂载时的那一档，挂载后用户仍可用顶部切换自由改（setUiType 不动）。
   const initialUiType: UiType = editTransaction
     ? (editTransaction.type as UiType)
-    : route?.params?.initialType ?? 'expense';
+    : presetType ?? 'expense';
   const presetCategoryId: string | undefined = route?.params?.presetCategoryId;
   const autoScan: boolean = !!route?.params?.autoScan;
 
