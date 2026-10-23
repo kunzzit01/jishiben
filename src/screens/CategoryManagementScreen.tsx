@@ -191,6 +191,20 @@ function GroupCardSlot({
   onDragCancel: () => void;
 }) {
   const { moveY, scale, from, cur, baseY, transY, count, tops, ends, listTop, scroll0, lastY } = drag;
+  const { semantic } = useTheme();
+  /** 把手：贴在组头右侧、垃圾桶左边（垃圾桶占右内衬 16 + 18 图标） */
+  const dragHandleStyle: ViewStyle = {
+    position: 'absolute',
+    top: 4,
+    right: 40,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 3,
+    ...(Platform.OS === 'web' ? ({ touchAction: 'none' } as unknown as ViewStyle) : null),
+  };
+
 
   const shiftY = useSharedValue(0);
   useEffect(() => {
@@ -244,19 +258,13 @@ function GroupCardSlot({
       cbs.current.onDragEnd(from.value, idx);
     };
     return PanResponder.create({
-      // 按下：只记时刻，不接管——短按必须留给组头自己的 onPress
-      onStartShouldSetPanResponderCapture: () => {
-        pressAtRef.current = Date.now();
-        return false;
-      },
-      onStartShouldSetPanResponder: () => false,
-      // 纵向意图 + （长按已满 | 位移已经很大）→ capture 阶段接管
-      onMoveShouldSetPanResponderCapture: (_e, g) => {
-        const dy = Math.abs(g.dy);
-        if (dy <= Math.abs(g.dx) || dy < GROUP_DRAG_START_DIST) return false;
-        return Date.now() - pressAtRef.current >= GROUP_DRAG_HOLD_MS || dy >= GROUP_DRAG_FAST_DIST;
-      },
-      onMoveShouldSetPanResponder: () => false,
+      // 用户定版：拖拽只从**显式把手**（组头右侧那枚 ≡）发起。
+      // 把手是一个没有任何子节点的普通 View —— 它和组头里那些 Pressable 不在一条竞争链上，
+      // 所以按下即接管，不需要 capture、不需要长按闸门，也就不存在「被内层控件吃掉」这回事。
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponderCapture: () => false,
       // 拖动中不许别人（内层 Pressable / 页面滚动）抢走
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (_e, g) => {
@@ -303,8 +311,18 @@ function GroupCardSlot({
       onLayout={(e) => onCardLayout(group, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
     >
       <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.groupCard}>
-        <View style={GROUP_DRAG_HANDLE_WEB_STYLE} {...panResponder.panHandlers}>
-          {header}
+        {header}
+        {/* 显式拖拽把手（≡）：整组排序只从这里发起。
+            放成组头的绝对定位兄弟节点，避免落在 header 那层 Pressable 里面——
+            Pressable 一按下就会自封 responder，把手在里面就抢不到指针序列。
+            44×44 触控区、无子节点 → responder 协商里必胜。 */}
+        <View
+          style={dragHandleStyle}
+          {...panResponder.panHandlers}
+          accessibilityRole="adjustable"
+          accessibilityLabel={group}
+        >
+          <Ionicons name="reorder-three-outline" size={20} color={semantic.textTertiary} />
         </View>
         {children}
       </GlassView>
@@ -793,7 +811,8 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                 >
                   <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={semantic.textPrimary} />
                   <AppText variant="subhead" weight="600" style={styles.groupTitle}>{getGroupLabel(group, t)}</AppText>
-                  <AppText variant="caption2" color={semantic.textSecondary} style={styles.groupCount}>
+                  {/* 组头右侧让出 46px 给拖拽把手（≡），避免项数被把手压住 */}
+                  <AppText variant="caption2" color={semantic.textSecondary} style={[styles.groupCount, { marginRight: 46 }]}>
                     {t('addTx.itemsUnit', { count: items.length })}
                   </AppText>
                   {/* 整组删除入口（记一笔同款：垃圾桶贴数量胶囊右侧；默认组自定义组都可删） */}
