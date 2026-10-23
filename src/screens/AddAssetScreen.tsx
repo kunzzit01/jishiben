@@ -43,6 +43,18 @@ const TYPE_OPTIONS: { type: AssetType; label: string; icon: IconName; color: str
   { type: 'other', label: 'asset.typeOther', icon: 'cube-outline', color: '#8E8E9A' },
 ];
 
+// 账户名称的输入提示跟着类型走：选中「现金」时提示"例如：现金钱包"，
+// 而不是永远写着 "e.g. Bank card ****"（那会让用户以为只能填银行卡）。
+// 6 档一张映射表，不在这里写三元表达式——将来加类型只需补一行。
+const NAME_PLACEHOLDER_KEY: Record<AssetType, string> = {
+  cash: 'addTx.accountNamePlaceholderCash',
+  bank: 'addTx.accountNamePlaceholderBank',
+  credit: 'addTx.accountNamePlaceholderCredit',
+  ewallet: 'addTx.accountNamePlaceholderEwallet',
+  investment: 'addTx.accountNamePlaceholderInvestment',
+  other: 'addTx.accountNamePlaceholderOther',
+};
+
 // 计算器键盘当前在给哪个金额字段打字；null = 键盘收起
 // （信用卡模式下这个字段就是"信用额度"，现金/银行卡是"起始余额"）
 type AmountField = 'balance';
@@ -363,7 +375,7 @@ export default function AddAssetScreen({ route }: any) {
                 setName(t);
                 clearError('name');
               }}
-              placeholder={t('addTx.accountNamePlaceholder')}
+              placeholder={t(NAME_PLACEHOLDER_KEY[selectedType])}
               placeholderTextColor={semantic.textTertiary}
               selectionColor={semantic.accent}
               returnKeyType="done"
