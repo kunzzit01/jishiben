@@ -364,7 +364,7 @@ export const zh = {
     scanFailed: '识别失败',
     // 双主题改造：AI 密钥改由环境变量提供；未配置时提示不可用（不是崩溃、不是死按钮）
     scanUnavailableTitle: 'AI 识别暂不可用',
-    scanUnavailableMsg: '这个构建没有配置 AI 服务密钥（EXPO_PUBLIC_OPENROUTER_API_KEY）。你仍可手动记账，或直接给小票拍照留档。',
+    scanUnavailableMsg: '服务端还没有配置 AI 能力。你仍可手动记账，或直接给小票拍照留档。',
     photoPermissionTitle: '需要相册权限',
     photoPermissionMsg: '请在系统设置里允许本APP访问照片',
     aiScanning: 'AI正在识别收据...',
@@ -393,7 +393,7 @@ export const zh = {
     voiceFailedTitle: '语音识别失败',
     voiceFailedMsg: '没有识别成功，请说得更清楚一点后再试。',
     voiceUnavailableTitle: '语音记账暂不可用',
-    voiceUnavailableMsg: '这个构建没有配置 AI 服务密钥（EXPO_PUBLIC_OPENROUTER_API_KEY），语音解析无法使用。你仍可手动记账。',
+    voiceUnavailableMsg: '服务端还没有配置 AI 能力，语音解析暂时用不了。你仍可手动记账。',
     amountWrong: '金额有误',
     amountWrongMsg: '请确认金额后再保存。',
     selectCategoryTitle: '请选择分类',

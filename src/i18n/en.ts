@@ -362,7 +362,7 @@ export const en = {
     scanFailed: 'Scan failed',
     // Dual-theme refactor: the AI key now comes from env vars; when absent we show a notice instead of crashing
     scanUnavailableTitle: 'AI scanning unavailable',
-    scanUnavailableMsg: 'This build has no AI service key configured (EXPO_PUBLIC_OPENROUTER_API_KEY). You can still record the entry manually, or attach the receipt photo.',
+    scanUnavailableMsg: 'AI is not configured on the server yet. You can still record the entry manually, or attach the receipt photo.',
     photoPermissionTitle: 'Photo permission required',
     photoPermissionMsg: 'Please allow this app to access photos in system settings',
     aiScanning: 'AI is scanning the receipt...',
@@ -391,7 +391,7 @@ export const en = {
     voiceFailedTitle: 'Voice recognition failed',
     voiceFailedMsg: 'Not recognized, please speak more clearly and try again.',
     voiceUnavailableTitle: 'Voice entry unavailable',
-    voiceUnavailableMsg: 'This build has no AI service key configured (EXPO_PUBLIC_OPENROUTER_API_KEY), so voice parsing cannot run. You can still record entries manually.',
+    voiceUnavailableMsg: 'AI is not configured on the server yet, so voice parsing is unavailable. You can still record entries manually.',
     amountWrong: 'Invalid amount',
     amountWrongMsg: 'Please confirm the amount before saving.',
     selectCategoryTitle: 'Select a category',
