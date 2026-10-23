@@ -113,6 +113,15 @@ export type ProfileStackParamList = {
 export type AssetStackParamList = {
   资产主页: undefined;
   添加资产账户: { assetId?: string } | undefined;
+  // 账户详情的"转账" push 本栈的"记一笔"（与 HomeStack / ProfileStack 同一组件三注册）：
+  // goBack 天然回账户详情。签名与另两处保持一致，presetType='transfer' 预选转账档
+  记一笔: {
+    editTransaction?: TransactionLike;
+    presetCategoryId?: string;
+    autoScan?: boolean;
+    presetType?: AddTxPresetType;
+    initialType?: AddTxPresetType;
+  } | undefined;
 };
 
 /** AddTransactionStack（中间圆按钮的记一笔） */

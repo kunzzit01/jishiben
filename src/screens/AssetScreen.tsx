@@ -1031,33 +1031,15 @@ export default function AssetScreen() {
   /**
    * 「转账」动作：只开记账页的转账档（金额 / 账户 / 汇率 / 校验仍全由记账页决定，
    * 与 AI 专区跳记账页同一套 params 用法，不新增记账规则）。
-   * 有未保存修改时先走既有的「放弃修改」确认，不静默丢掉用户正在改的名称 / 金额。
    */
   const handleDetailTransfer = () => {
-    // 记一笔带类型：Tab 里的「记一笔」是长驻实例（state 只在挂载时取预设），
-    // 从父级 Tab 的「首页」栈 push 一个新鲜实例，预设才一定生效（与首页快捷方块同一套参数）。
-    const go = () =>
-      navigation.navigate(ROUTES.TAB_HOME, { screen: ROUTES.ADD_TX, params: { presetType: 'transfer' } });
-    // 关抽屉（有未保存修改时已走过确认）+ 跳转：与「关闭」按钮同一条路径，不多绕一层状态
-    const leave = () => {
-      closeDetail();
-      go();
-    };
-    if (!viewEditDirty) {
-      leave();
-      return;
-    }
-    dialog.alert({
-      title: t('asset.discardEditTitle'),
-      buttons: [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.discard'),
-          style: 'destructive',
-          onPress: leave,
-        },
-      ],
-    });
+    // 记一笔带类型：跨 Tab 跳「首页」栈会 push 到首页那一份实例，返回就回首页了。
+    // 资产栈里也注册了同一份「记一笔」（App.tsx 三注册），所以在本栈内 push：
+    // 预设同样生效（新实例挂载时取 params），返回天然回这个账户详情。
+    // 抽屉保持打开（不 closeDetail）：它挂在 AssetScreen 树内、被新的栈页整页盖住，
+    // 返回时原样露出来 = 回到这个账户详情；遮着不等于关掉，未保存的名称 / 金额也不会被清掉，
+    // 所以这条路径不需要再弹「放弃修改」确认（记住笔没有任何东西被丢弃）。
+    navigation.navigate(ROUTES.ADD_TX, { presetType: 'transfer' });
   };
 
   const saveViewChanges = async (overrideBalance?: number) => {
