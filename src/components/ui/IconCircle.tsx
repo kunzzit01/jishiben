@@ -197,11 +197,15 @@ export function IconCircle({
       ? withAlpha(color, categoryRing.darkAlpha)
       : categoryRing.light
     : semantic.textTertiary;
-  // 选中态（用户定版，取代原先的「两层外圈」）：硬描边套在立体球上像「戴了个圈」，
-  // 而且环色与球色天然冲突（紫球配紫环勉强，绿球配紫环就脏）。改成「球体浮起」：
-  // 放大 8%（transform 不参与布局，不挤邻格）+ 同色柔光晕（取球体自身的 ringColor）+ 更实的地面投影。
+  // 选中态（用户两轮定版后的最终形态）：只有「柔光 + 放大」不够明显——同色光晕在这个
+  // 尺寸下几乎看不见。改成三重信号同时出现：
+  //   1) 放大 1.1（transform 不参与布局，不挤邻格）
+  //   2) 一圈 accent 细环：2px 环宽 + 2px 间隙（原来的 5px 环 + 3px 间隙太粗，像戴了个圈；
+  //      而这一环是「选中」的语义色，不再用球体自身颜色，避免绿球配紫环那种冲突观感）
+  //   3) 更实的地面投影，把球从平面里抬起来
+  // 另外调用方会把「未选中」的格子压暗（见 AddTransactionScreen 的 categoryDim），三者叠加才一眼可辨。
   const selectedShadow = selected
-    ? `0px 12px 22px -6px ${withAlpha(ringColor, 0.6)}, 0px 4px 8px -2px rgba(0,0,0,0.22)`
+    ? `0px 0px 0px 2px ${semantic.bg}, 0px 0px 0px 4px ${semantic.accent}, 0px 10px 18px -6px ${withAlpha(semantic.accent, 0.45)}`
     : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
@@ -217,7 +221,7 @@ export function IconCircle({
           height: size,
           borderRadius: radius,
           boxShadow: selectedShadow,
-          transform: selected ? [{ scale: 1.08 }] : undefined,
+          transform: selected ? [{ scale: 1.1 }] : undefined,
         },
         style,
       ]}
