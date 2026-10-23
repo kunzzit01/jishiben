@@ -535,9 +535,7 @@ function profileToRow(s: LocalSnapshot): ProfileRow {
   const ledgerIds = new Set(s.ledgers.map((l) => l.id));
   return {
     currency: safeCurrency(s.currency, 'MYR'),
-    // 后端只接受 YYYY/MM/DD、DD/MM/YYYY、MM/DD/YYYY；'YYYY-MM-DD' 会被 400，
-    // 这里传 null = 不推送该字段（本地设置照常生效，见报告里的接口缺口）
-    dateFormat: s.dateFormat === 'YYYY-MM-DD' ? null : s.dateFormat,
+    dateFormat: s.dateFormat,
     weekStartsOn: s.weekStartsOn,
     decimalPlaces: s.decimalPlaces,
     periodPreference: s.periodPreference,
