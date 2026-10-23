@@ -62,3 +62,6 @@ deploy/downloads/*.apk
 deploy/downloads/*.aab
 # 迁移/导入产生的 SQL（含真实账目）不进仓库
 import*.sql
+# 账号导入产物（含 bcrypt 哈希）不进仓库
+users*.sql
+auth-users.*

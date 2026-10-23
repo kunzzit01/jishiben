@@ -218,3 +218,33 @@ ssh root@<vps> 'cd /opt/jishiben && docker exec -i jishiben-mysql sh -c \
 SELECT m.supa_uid, m.email, u.id AS local_uid
 FROM supa_user_map m JOIN users u ON u.email = m.email;
 ```
+
+
+## 实测：真实 CSV 导入（2026-10-23）
+
+导出的 `Supabase Snippet Untitled query.csv` 内容：
+
+```
+id,email,encrypted_password,created_at,last_sign_in_at
+1bc8a1e3-…  kkyylim663@gmail.com        $2a$10$BpqxP1…（60 字符）
+fda327f1-…  tangyeawkhoong@gmail.com    $2a$10$KpVtna…（60 字符）
+```
+
+```bash
+node scripts/import-auth-users.mjs --in auth-users.csv --out users-real.sql
+mysql --default-character-set=utf8mb4 -u... -p... db < users-real.sql
+```
+
+结果：
+
+```
+supa_uid                                email                     local_uid
+1bc8a1e3-c369-443b-bf15-534272beea06    kkyylim663@gmail.com      3
+fda327f1-bcde-4024-aad8-1f6b70bf989f    tangyeawkhoong@gmail.com  6
+```
+
+验证方式（关键）：导入后用**旧占位密码**登录应返回 401，用**用户原密码**登录应返回 200。
+实测 `kkyylim663 + 12345678 → 401`、`mingsoon249 + 12345678 → 200`，说明哈希确实被替换且未影响其它账号。
+
+> 注意：邮箱容易从截图抄错（本例实际是 `tangyeawkhoong`，不是 `tangyeawkoong`）。
+> 一律以 CSV 里的值为准，不要手打。
