@@ -28,7 +28,7 @@ import { useT } from '../i18n/LanguageContext';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler } from '../context/TabBarAutoHideContext';
 import PressableScale from '../components/PressableScale';
-import { AppText, GlassView, HeroGradient, ScreenHeader } from '../components/ui';
+import { AppText, Card, GlassView, HeroGradient, ScreenHeader } from '../components/ui';
 
 /** UI V2.1 玻璃二级页头：ScreenHeader 的返回键是透明 44 触控区，这里在它底下垫一枚 44 玻璃圆钮（稿） */
 function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -79,16 +79,18 @@ export default function HelpFeedbackScreen({ navigation }: any) {
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sectionTitle}>
             {t('addTx.faq')}
           </AppText>
-          <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.card}>
+          {/* 实色 Card，不再用玻璃：这一页有输入框，玻璃的「模糊 + 白色叠层」会把框里文字洗淡
+              （用户反馈「蒙」）。玻璃留给页头那枚 44 圆钮与浮空 Tab 栏，内容卡一律走 surface。 */}
+          <Card style={styles.card}>
             <Row label={t('addTx.faqAdd')} muted={semantic.textSecondary} />
             <Row label={t('addTx.faqSwitch')} muted={semantic.textSecondary} />
             <Row label={t('addTx.faqAssets')} muted={semantic.textSecondary} />
-          </GlassView>
+          </Card>
 
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sectionTitle}>
             {t('addTx.feedbackSection')}
           </AppText>
-          <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.feedbackCard}>
+          <Card style={styles.feedbackCard}>
             <TextInput
               value={feedback}
               onChangeText={setFeedback}
@@ -102,7 +104,7 @@ export default function HelpFeedbackScreen({ navigation }: any) {
                 styles.input,
                 {
                   color: semantic.textPrimary,
-                  backgroundColor: semantic.surface,
+                  backgroundColor: semantic.surfaceSunken,
                   borderWidth: 1,
                   borderColor: semantic.hairline,
                   outlineWidth: 0,
@@ -129,7 +131,7 @@ export default function HelpFeedbackScreen({ navigation }: any) {
                 </AppText>
               </LinearGradient>
             </PressableScale>
-          </GlassView>
+          </Card>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
