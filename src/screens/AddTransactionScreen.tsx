@@ -2687,7 +2687,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       {/* 「全部」类别抽屉（T15）：完整列表 + 行内打勾；管理与排序入口在「管理类别」页 */}
       {catSheetOpen && (
         <CategoryPickerSheet
-          sections={groupedExpenseSections}
+          sections={orderedExpenseSections}
           selectedId={categoryId}
           onPickCategory={(id) => {
             // 「全部」抽屉选了「网格里没有」的类别 → 插到第 1 格（原行为）；
