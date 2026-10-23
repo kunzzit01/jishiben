@@ -103,3 +103,48 @@ Flyway 会在 api 启动时自动把 schema 升到最新，**不需要手工跑 
 3. `deploy/.env` 已在 .gitignore 里；不要提交真实口令。
 4. 本机实跑用的临时端口是 8088（避免与本地开发 8080 冲突），VPS 上一般用 80 或 443。
 5. HTTPS 未在本次验证范围内：nginx 目前只监听 80，上生产建议加证书（certbot 或云负载均衡终止 TLS）。
+
+
+---
+
+## 八、与已有站点共存（这台机器 80/443 已被占用）
+
+本机实测：`:80` 返回 301 跳 `https://IP/`，`:443` 是一个 Go 服务的 404 ——
+说明同一台公网服务器上已经有**另一个站点/面板**在占用标准端口。
+
+**不要抢端口**，把本项目的 web 发布到高位端口即可：
+
+```bash
+cp deploy/.env.example deploy/.env
+sed -i "s|^HTTP_PORT=.*|HTTP_PORT=8088|" deploy/.env
+# 另外三行必须改成强随机值：DB_PASSWORD / MYSQL_ROOT_PASSWORD / JWT_SECRET
+docker compose -f deploy/docker-compose.yml up -d --build
+curl -s localhost:8088/api/health     # {"status":"ok",...}
+```
+
+外网访问：`http://<公网IP>:8088`
+
+### 必须放行安全组
+
+云厂商控制台的**入站规则**要加一条 `TCP 8088`；否则服务器本机能访问、外网打不开。
+（本机 ufw 若开启：`ufw allow 8088/tcp`）
+
+### 以后想挂子域名
+
+在现有反代（nginx / traefik / 面板）上加一条：
+
+```
+location / {
+    proxy_pass http://127.0.0.1:8088;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+证书由现有反代统一签发即可，本项目不用改。
+此时 Android 端可以把 API 地址换成 `https://子域名`，并把 `app.json` 的
+`android.usesCleartextTraffic` 改回 `false`。
+
+### 明文 HTTP 的风险（当前状态）
+
+登录口令在公网上是明文传输的。自用测试可接受；存真实账目前建议尽快挂 HTTPS。

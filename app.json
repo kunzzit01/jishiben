@@ -33,7 +33,7 @@
       ],
       "package": "com.kylim0103.jizhangapp",
       "versionCode": 1,
-      "usesCleartextTraffic": false
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
