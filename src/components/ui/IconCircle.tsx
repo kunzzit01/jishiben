@@ -20,6 +20,7 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
+  withRepeat,
   withSequence,
   withSpring,
   withTiming,
@@ -170,24 +171,42 @@ export function IconCircle({
   // reduceMotion 下不弹，只留静态白环（无障碍要求）。
   const reduceMotion = useReducedMotion();
   const popP = useSharedValue(1);
+  /** 选中后的持续上浮位置（-4 = 抬起基准，-7..-3 = 呼吸幅度） */
+  const bobY = useSharedValue(0);
   useEffect(() => {
     if (!selected) {
       popP.value = withTiming(1, { duration: 140 });
+      bobY.value = withTiming(0, { duration: 140 });
       return;
     }
     if (reduceMotion) {
-      popP.value = 1.06;
+      popP.value = 1.05;
+      bobY.value = -4;
       return;
     }
-    // 弹一下：1.0 → 1.11 → 1.05（终态与下面的 translateY(-4) 一起构成「抬起」）
+    // 1) 弹一下：1.0 → 1.11 → 1.05
     popP.value = withSequence(
       withTiming(1.11, { duration: 130, easing: Easing.out(Easing.quad) }),
       withSpring(1.05, { damping: 12, stiffness: 180 })
     );
-  }, [selected, reduceMotion, popP]);
+    // 2) 抬起后**持续浮动**（用户要求「动效一直在动，不要停」）：
+    //    先升到 -4 的抬升位，然后 -7 ↔ -3 之间 1.1s 单程的缓慢往返，无限循环。
+    //    幅度只有 4px、周期 2.2s —— 目的是「活着」而不是吸引注意力。
+    bobY.value = withTiming(-4, { duration: 160 }, (finished) => {
+      if (!finished) return;
+      bobY.value = withRepeat(
+        withSequence(
+          withTiming(-7, { duration: 1100, easing: Easing.inOut(Easing.quad) }),
+          withTiming(-3, { duration: 1100, easing: Easing.inOut(Easing.quad) })
+        ),
+        -1,
+        false
+      );
+    });
+  }, [selected, reduceMotion, popP, bobY]);
   // 选中 = 向上抬起 4px；未选中 = 原位。⚠ translateY 不参与布局，不会把网格顶开。
   const animatedRoot = useAnimatedStyle(() => ({
-    transform: [{ translateY: selected ? -4 : 0 }, { scale: popP.value }],
+    transform: [{ translateY: bobY.value }, { scale: popP.value }],
   }));
   const radius = size / 2;
   // 渐变定义 id 带基色指纹：同色实例共用一份定义（web 的 url(#id) 按文档解析），异色不会串
