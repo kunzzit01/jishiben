@@ -122,7 +122,8 @@ export function useTheme(override?: 'light' | 'dark'): AppTheme {
     gradients: {
       heroDark: gradients.heroDark,
       heroLight: gradients.heroLight,
-      accent: gradients.accent,
+      // 品牌渐变按主题解析（tokens: brand.gradientFrom/To 日夜各一套）
+      accent: isDark ? gradients.brandDark : gradients.brandLight,
       keyConfirm: gradients.keyConfirm,
       hero: isDark ? gradients.heroDark : gradients.heroLight,
     },

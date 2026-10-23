@@ -16,8 +16,10 @@
 //      取能放下的最大档；系数是 Inter 逐字符实测值（见下方 CHAR_EM 注释），
 //      逐字符相加比整串实测略宽（~1.6% 字距），方向安全 —— 漏算 +RM 里的 M（0.92em）
 //      就会选大一号档位、把最后一个 0 挤到第二行；
-//   2. 连最小档都放不下 → **只降档、不紧凑**（V2.2c 验收退回：资产页出现过 4k / 100k / RM156.7k）。
-//      compactFallback 默认关闭；日历是显式传 `compact`（格式选项，与这里无关）的那一个；
+//   2. 连最小档都放不下 → 停在**地板档**（阶梯末档），再由调用方决定要不要紧凑：
+//      compactFallback 默认关闭，显式打开的地方（首页净资产金额槽、资产页资产行）改用紧凑格式
+//      + 长按 / 读屏看完整值；日历是显式传 `compact`（格式选项，与这里无关）的那一个。
+//      ⚠ Hero 路径必须停在阶梯末档 —— 退回顶档（-1 → 0）会让长金额按最大字号画出去被页面裁掉；
 //   3. 兜底：金额 Text 恒 numberOfLines={1} + ellipsizeMode="clip"
 //      —— 就算估算失灵也只是裁掉尾巴，**绝不换行、绝不出省略号**。
 //
@@ -139,6 +141,14 @@ export interface MoneyTextProps extends FormatMoneyOptions {
   heroLetterRatio?: number;
   /** 文本/布局微调（color / opacity / margin / textAlign 等；flexShrink 默认 0 = 金额不被挤压） */
   style?: StyleProp<TextStyle>;
+  /**
+   * 父级已知的可用宽（px）：传了就用它判档位，不再用「自身盒宽」。
+   * ⚠ 自身盒宽 = 内容宽，而内容宽又随档位（字号）变 —— 两者互为输入会形成逐帧来回的
+   *   反馈环：盒宽 273 → 判档放得下 → 40 号 → 内容 273 → 位数动画把盒宽先设回上一值 232
+   *   → 判档放不下 → 34 号 → 内容 232 → …。行高随之 44↔38 抖动，整页高度也跟着跳 6px。
+   *   首页金额行（heroPagerPage）宽是父级给定的定值，直接传进来即可断开这个环。
+   */
+  availableWidth?: number;
   /** 读屏文本（默认 = 完整金额，即使屏上显示的是紧凑格式） */
   accessibilityLabel?: string;
 }
@@ -436,6 +446,7 @@ export function MoneyText({
   heroDecimalColor,
   heroLetterRatio,
   style,
+  availableWidth: availableWidthProp,
   accessibilityLabel,
 }: MoneyTextProps) {
   const { typography, semantic, motion } = useTheme();
@@ -492,12 +503,17 @@ export function MoneyText({
   );
   const heroIntWeight: FontWeightKey = hero && weight ? weight : MIN_AMOUNT_WEIGHT;
 
-  // 本组件被允许占的宽度（onLayout 实测：卡片里 = 卡片内宽，行内跟着自己的框走）
-  const [availableWidth, setAvailableWidth] = useState(0);
+  // 本组件被允许占的宽度：优先用父级给的定值（availableWidth prop），否则退回 onLayout 实测盒宽。
+  // ⚠ 实测盒宽在「宽 = 内容宽」的容器里恒等于内容宽，内容宽又随档位变 → 不能单独用它判档。
+  const [boxW, setBoxW] = useState(0);
   const measureWidth = (e: LayoutChangeEvent) => {
+    // 父级已给定可用宽时，实测盒宽不参与判档（值随内容变，写进 state 只会白重渲一次）
+    if (availableWidthProp !== undefined && availableWidthProp > 0) return;
     const w = Math.round(e.nativeEvent.layout.width);
-    if (w > 0 && w !== availableWidth) setAvailableWidth(w);
+    if (w > 0 && w !== boxW) setBoxW(w);
   };
+  const availableWidth =
+    availableWidthProp !== undefined && availableWidthProp > 0 ? availableWidthProp : boxW;
 
   // 实测每 px 字形宽（em）：隐藏测量层量出的「(真实宽 − 字距) ÷ 当时字号」。
   // 换文本要重新量；换字号不用（字形 em 与字号无关，见 fitsByEm 注释）
@@ -514,9 +530,9 @@ export function MoneyText({
    *    扣掉**一次**，组件内不再二次扣减（页面别重复扣）。
    */
   const [heroBaseWidth, setHeroBaseWidth] = useState<number | null>(null);
-  useEffect(() => {
-    setHeroBaseWidth(null);
-  }, [fullText, heroSize]);
+  // ⚠ 换文本时**不清空**基准宽：清空会让 heroTier 在重测到之前恒为 0（掉回最大档），
+  //   而金额滚动 / 逐位滚动每帧都在换文本 → 档位逐帧 0 → 1 → 0 来回跳，行高跟着跳。
+  //   隐藏测量层随文本重渲、同一帧就会把新基准宽量回来，保留旧值只是「最多一帧略偏」。
   const heroTier = useMemo(() => {
     if (!hero) return 0;
     if (heroBaseWidth === null || availableWidth <= 0 || heroSize <= 0) return 0;
@@ -559,10 +575,16 @@ export function MoneyText({
     () => (useCompact ? formatMoney(value, { ...formatOptions, compact: true }) : fullText),
     [useCompact, value, formatOptions, fullText]
   );
+  // ⚠ heroTier === -1（四档全放不下）必须停在**地板档**（阶梯末档），
+  //   不能 Math.max(0, -1) 退回顶档 —— 退回顶档 = 长金额在窄视口直接按最大字号画出去被页面裁掉
+  //   （320 视口 15 位金额实测：40 号内容 440px / 预算 256px）。停在地板是「尽力显示」，
+  //   地板仍放不下再交给 compactFallback（首页金额槽已打开）。
   const tier = hero
     ? useCompact
       ? 0
-      : Math.max(0, heroTier)
+      : heroTier < 0
+        ? ladder.length - 1
+        : heroTier
     : useCompact
       ? Math.max(0, tierFitting(estimateEm(shownText), token.letterSpacing * shownText.length, ladder, availableWidth))
       : Math.max(0, fullTier, digitTier(moneyIntDigits(fullText)));

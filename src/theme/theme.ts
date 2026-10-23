@@ -283,9 +283,9 @@ export const lightColors: ThemeColors = {
   textTertiary: '#6A6680',
   link: '#5B45E0',
 
-  income: '#0A7A50',
-  expense: '#6C4DF6',
-  expenseOver: '#E11D48',
+  income: '#2FA75F', // tokens: amount.income
+  expense: '#EF1116', // tokens: amount.expense（双主题改造：紫 → 红）
+  expenseOver: '#EF1116', // tokens: status.danger
   track: '#ECECF1',
 
   // 预算进度条 2026-10-07 批次5 按目标图取样改 3 停：浅蓝紫 → 亮紫（55%）→ 青
@@ -451,9 +451,9 @@ export const darkColors: ThemeColors = {
   textTertiary: 'rgba(242,240,250,0.72)',
   link: '#A595FF',
 
-  income: '#7CF0B8',
-  expense: '#A78BFA',
-  expenseOver: '#FB7185',
+  income: '#61E9BE', // tokens: amount.income
+  expense: '#FC5F5C', // tokens: amount.expense（双主题改造：紫 → 红）
+  expenseOver: '#FC5F5C', // tokens: status.danger
   track: '#26262E',
 
   // 预算进度条 2026-10-07 批次5 按目标图取样改 3 停：浅蓝紫 → 亮紫（55%）→ 青
@@ -620,14 +620,43 @@ export type SemanticColors = {
   budgetFill: string;
   /** 首页预算进度条填充（超支） */
   budgetFillOver: string;
+
+  /* ─── design/tokens.json 新增语义（2026 双主题改造）─────────────────────────
+   * 命名严格对齐 tokens.json -> light.color / dark.color 的键，
+   * 组件只从这里取色，禁止再写裸 hex。 */
+
+  /** 成功（收入确认 / 预算健康 / 结余为正）—— tokens: status.success */
+  success: string;
+  /** 品牌淡底块（选中底、图表淡底）—— tokens: bg.brandSoft */
+  brandSoft: string;
+  /** 薄荷淡底（次要图表块 / 提示块）—— tokens: bg.tileMint */
+  tileMint: string;
+  /** 文字链接 —— tokens: text.link */
+  textLink: string;
+  /** 反色文字（渐变、深底、品牌色块上的字）—— tokens: text.inverse */
+  textInverse: string;
+  /** 分组分隔线（比 hairline 深一档）—— tokens: border.divider */
+  divider: string;
+  /** 图表第 1 色 —— tokens: chart.orange */
+  chartOrange: string;
+  /** 图表第 2 色 —— tokens: chart.violet */
+  chartViolet: string;
+  /** 品牌渐变起点（按钮 / 选中块 / 环形图）—— tokens: brand.gradientFrom */
+  gradientFrom: string;
+  /** 品牌渐变终点 —— tokens: brand.gradientTo */
+  gradientTo: string;
+  /** Hero 渐变起点（首页顶部大色块，日夜两套不同）—— tokens: brand.heroFrom */
+  heroFrom: string;
+  /** Hero 渐变终点 —— tokens: brand.heroTo */
+  heroTo: string;
 };
 
 export const lightSemantic: SemanticColors = {
   // UI V2.1 定稿数值（.zcode/design/UI_V21_SPEC.md 第 1/2/3 节，2026-10-10）
-  bg: '#F5F2FB',
-  surface: '#FFFFFF',
-  surfaceElevated: '#FFFFFF',
-  surfaceSunken: '#F3F2F8',
+  bg: '#F5F4FC', // tokens: bg.page
+  surface: '#FBFAFE', // tokens: bg.surface
+  surfaceElevated: '#FFFFFF', // tokens: bg.surfaceRaised
+  surfaceSunken: '#EBE9FD', // tokens: bg.surfaceSunken
   keypadPanel: '#F3F1FA', // 日间键盘面板：浅薰衣草底，白色圆角键浮在上面（稿 G_AddLight）
   keyTile: '#FFFFFF',
   keyTilePressed: '#E9E5F6',
@@ -639,39 +668,52 @@ export const lightSemantic: SemanticColors = {
   tabActive: '#5B3DF0',
   tabActiveLabel: '#5B3DF0',
   tabInactive: '#6A6680', // = textTertiary（§3：Tab 未选中）
-  hairline: 'rgba(20,20,40,0.06)',
+  hairline: '#EBE9FD', // tokens: border.hairline
   switchTrackOff: '#D6D3E0',
-  textPrimary: '#17142A',
-  textSecondary: '#433E5A', // V2.2c：同 colors.textSecondary
-  textTertiary: '#6A6680',
-  accent: '#6C4DF6',
+  textPrimary: '#14121F', // tokens: text.primary
+  textSecondary: '#433E5A', // tokens: text.secondary
+  textTertiary: '#6A6680', // tokens: text.tertiary
+  accent: '#5E43FC', // tokens: brand.primary
   onAccent: '#FFFFFF',
-  accentText: '#6C4DF6',
-  accentSoft: 'rgba(108,77,246,0.10)',
-  amountExpense: '#5B3DF0', // V3 新规：全 App 支出金额 = 紫（日）
-  amountIncome: '#0A7A50',
-  amountTransfer: '#433E5A', // = textSecondary
-  danger: '#E11D48',
-  warning: '#D97706',
+  accentText: '#5B45E0', // tokens: text.link
+  accentSoft: 'rgba(94,67,252,0.10)',
+  // ⚠ 双主题改造：支出金额从紫色改为红色（tokens: amount.expense / status.danger）
+  amountExpense: '#EF1116',
+  amountIncome: '#2FA75F', // tokens: amount.income / status.success
+  amountTransfer: '#433E5A', // tokens: amount.transfer
+  danger: '#EF1116', // tokens: status.danger
+  warning: '#FAAE2F', // tokens: status.warning
   scrim: 'rgba(10,8,20,0.40)',
-  homeBg: '#F4F3F8',
-  homeCard: '#FFFFFF',
-  homeHairline: 'rgba(21,19,42,0.07)',
+  homeBg: '#F5F4FC', // = bg（tokens: bg.page）
+  homeCard: '#FBFAFE', // = surface（tokens: bg.surface）
+  homeHairline: '#EBE9FD', // = hairline（tokens: border.hairline）
   homeIconTile: '#F0EDFA',
-  selectedRow: '#F0EDFE',
-  navBarBg: '#F5F2FB',
+  selectedRow: '#E0DFFD', // tokens: bg.brandSoft
+  navBarBg: '#F5F4FC',
   budgetTrack: 'rgba(23,20,42,0.10)',
-  budgetFill: '#6C4DF6',
-  budgetFillOver: '#E11D48',
+  budgetFill: '#5E43FC', // tokens: brand.primary
+  budgetFillOver: '#EF1116', // tokens: status.danger
+  success: '#2FA75F',
+  brandSoft: '#E0DFFD',
+  tileMint: '#D0ECE2',
+  textLink: '#5B45E0',
+  textInverse: '#FFFFFF',
+  divider: '#DEDEE4',
+  chartOrange: '#FE8751',
+  chartViolet: '#6F36CC',
+  gradientFrom: '#9083FC',
+  gradientTo: '#634FFC',
+  heroFrom: '#9083FC',
+  heroTo: '#634FFC',
 };
 
 export const darkSemantic: SemanticColors = {
   // UI V2.1 定稿数值（.zcode/design/UI_V21_SPEC.md 第 1/2/3 节，2026-10-10）
   // 夜间：bg < surface < surfaceElevated 逐级变亮（底层后退、浮层前进），不靠阴影
-  bg: '#06050C',
-  surface: '#14141B',
-  surfaceElevated: '#1E1E2A',
-  surfaceSunken: '#1A1A22',
+  bg: '#0E121B', // tokens: bg.page
+  surface: '#161B28', // tokens: bg.surface
+  surfaceElevated: '#1D2233', // tokens: bg.surfaceRaised
+  surfaceSunken: '#161A27', // tokens: bg.surfaceSunken
   keypadPanel: '#121219',
   keyTile: '#1E1B2A',
   keyTilePressed: '#2B2740',
@@ -693,26 +735,38 @@ export const darkSemantic: SemanticColors = {
   // 夜间灰字（见 darkColors 同名注释）：secondary .84 / tertiary .72，对最亮渐变色块 ≥4.5:1
   textSecondary: 'rgba(242,240,250,0.84)',
   textTertiary: 'rgba(242,240,250,0.72)',
-  accent: '#6C4DF6',
+  accent: '#6F52F8', // tokens: brand.primary
   onAccent: '#FFFFFF',
-  accentText: '#A595FF',
+  accentText: '#A595FF', // tokens: text.link
   accentSoft: 'rgba(165,149,255,0.14)',
-  amountExpense: '#B8A6FF', // V3 新规：全 App 支出金额 = 紫（夜）
-  // 收入金额（夜）：#3DDC97 在 #5A5470 上仅 4.05:1；#7CF0B8 在卡 #16141F 13:1、在亮玻璃底 5.1:1（≥4.5）
-  amountIncome: '#7CF0B8',
-  amountTransfer: 'rgba(242,240,250,0.84)', // = textSecondary
-  danger: '#FB7185',
-  warning: '#FBBF24',
+  // ⚠ 双主题改造：支出金额从紫色改为红色（tokens: amount.expense / status.danger）
+  amountExpense: '#FC5F5C',
+  amountIncome: '#61E9BE', // tokens: amount.income / status.success
+  amountTransfer: 'rgba(242,240,250,0.84)', // tokens: amount.transfer
+  danger: '#FC5F5C', // tokens: status.danger
+  warning: '#FFC21D', // tokens: status.warning
   scrim: 'rgba(0,0,0,0.55)',
-  homeBg: '#0A0910',
-  homeCard: '#16141F',
-  homeHairline: 'rgba(255,255,255,0.07)',
+  homeBg: '#0E121B', // = bg（tokens: bg.page）
+  homeCard: '#161B28', // = surface（tokens: bg.surface）
+  homeHairline: 'rgba(255,255,255,0.05)', // = hairline（tokens: border.hairline）
   homeIconTile: '#221E30',
-  selectedRow: '#1F1A35',
-  navBarBg: '#06050C',
+  selectedRow: '#251A66', // tokens: bg.brandSoft
+  navBarBg: '#0E121B',
   budgetTrack: 'rgba(255,255,255,0.14)',
-  budgetFill: '#8B6CFF',
-  budgetFillOver: '#FB7185',
+  budgetFill: '#6F52F8', // tokens: brand.primary
+  budgetFillOver: '#FC5F5C', // tokens: status.danger
+  success: '#61E9BE',
+  brandSoft: '#251A66',
+  tileMint: '#17382A',
+  textLink: '#A595FF',
+  textInverse: '#FFFFFF',
+  divider: '#2A2A33',
+  chartOrange: '#FC5F2C',
+  chartViolet: '#8B6CFF',
+  gradientFrom: '#8063F8',
+  gradientTo: '#5E3DFA',
+  heroFrom: '#7C63F6',
+  heroTo: '#2710A6',
 };
 
 /**
@@ -736,7 +790,10 @@ export type TypographyVariant =
 
 export type TypographyToken = {
   fontSize: number;
+  /** 拉丁 / 数字行高（拉丁字形的行盒比中文矮，用更紧的行高） */
   lineHeight: number;
+  /** 中文行高（硬约束 ≥1.30 × fontSize；AppText 判定为 CJK 字体分流时用它） */
+  lineHeightCjk: number;
   fontWeight: TextStyle['fontWeight'];
   letterSpacing: number;
   maxFontSizeMultiplier: number;
@@ -744,29 +801,30 @@ export type TypographyToken = {
 
 export type Typography = Record<TypographyVariant, TypographyToken>;
 
+// 数值与 design/tokens.json -> typography.variants 逐档一致（lineHeightCjk 见各自 source 注）。
 export const typography: Typography = {
   // 净资产金额（Hero 卡）；超过 9 位整数按档位降级 40 → 34 → 28，不做连续压缩
-  display: { fontSize: 40, lineHeight: 46, fontWeight: '600', letterSpacing: -0.8, maxFontSizeMultiplier: 1.15 },
+  display: { fontSize: 40, lineHeight: 46, lineHeightCjk: 52, fontWeight: '600', letterSpacing: -0.8, maxFontSizeMultiplier: 1.15 },
   // 记一笔输入金额（自动缩小，下限 28）
-  amountEntry: { fontSize: 44, lineHeight: 52, fontWeight: '600', letterSpacing: -0.9, maxFontSizeMultiplier: 1.15 },
+  amountEntry: { fontSize: 44, lineHeight: 52, lineHeightCjk: 58, fontWeight: '600', letterSpacing: -0.9, maxFontSizeMultiplier: 1.15 },
   // Tab 根页面大标题（资产 / 统计 / 设置）
-  title1: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.4, maxFontSizeMultiplier: 1.2 },
+  title1: { fontSize: 28, lineHeight: 34, lineHeightCjk: 37, fontWeight: '700', letterSpacing: -0.4, maxFontSizeMultiplier: 1.2 },
   // 卡片大数字、页内主数字
-  title2: { fontSize: 22, lineHeight: 28, fontWeight: '700', letterSpacing: -0.3, maxFontSizeMultiplier: 1.2 },
+  title2: { fontSize: 22, lineHeight: 28, lineHeightCjk: 29, fontWeight: '700', letterSpacing: -0.3, maxFontSizeMultiplier: 1.2 },
   // 二级页标题
-  title3: { fontSize: 20, lineHeight: 25, fontWeight: '600', letterSpacing: 0, maxFontSizeMultiplier: 1.2 },
+  title3: { fontSize: 20, lineHeight: 25, lineHeightCjk: 26, fontWeight: '600', letterSpacing: 0, maxFontSizeMultiplier: 1.2 },
   // 列表行标题、按钮
-  headline: { fontSize: 17, lineHeight: 22, fontWeight: '600', letterSpacing: 0, maxFontSizeMultiplier: 1.2 },
+  headline: { fontSize: 17, lineHeight: 22, lineHeightCjk: 23, fontWeight: '600', letterSpacing: 0, maxFontSizeMultiplier: 1.2 },
   // 正文
-  body: { fontSize: 17, lineHeight: 22, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
+  body: { fontSize: 17, lineHeight: 22, lineHeightCjk: 23, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
   // 行副标题、账户名
-  subhead: { fontSize: 15, lineHeight: 20, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
+  subhead: { fontSize: 15, lineHeight: 20, lineHeightCjk: 20, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
   // 日期头、说明
-  footnote: { fontSize: 13, lineHeight: 18, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
+  footnote: { fontSize: 13, lineHeight: 18, lineHeightCjk: 17, fontWeight: '400', letterSpacing: 0, maxFontSizeMultiplier: 1.35 },
   // 徽章、标签
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: '500', letterSpacing: 0.1, maxFontSizeMultiplier: 1.3 },
+  caption: { fontSize: 12, lineHeight: 16, lineHeightCjk: 16, fontWeight: '500', letterSpacing: 0.1, maxFontSizeMultiplier: 1.3 },
   // 最小字号档（任何地方都不许比它更小）
-  caption2: { fontSize: 11, lineHeight: 13, fontWeight: '500', letterSpacing: 0.2, maxFontSizeMultiplier: 1.3 },
+  caption2: { fontSize: 11, lineHeight: 13, lineHeightCjk: 15, fontWeight: '500', letterSpacing: 0.2, maxFontSizeMultiplier: 1.3 },
 };
 
 /** 间距层（计划 4.3）：8pt 网格，只有这 8 个值，页面上不许再出现别的数字 */
@@ -915,51 +973,80 @@ export function gradientAxis(
 export const gradients: {
   heroDark: HeroGradientToken;
   heroLight: HeroGradientToken;
+  /** 品牌渐变（浅色主题；= tokens: brand.gradientFrom/To） */
+  brandLight: LinearGradientToken;
+  /** 品牌渐变（深色主题；= tokens: brand.gradientFrom/To） */
+  brandDark: LinearGradientToken;
+  /**
+   * @deprecated 用 useTheme().gradients.accent —— 它是按当前主题解析过的品牌渐变。
+   * 这里保留只为兼容尚未迁移的 import；值等于 brandLight。
+   */
   accent: LinearGradientToken;
   /** 键盘「完成」键：accent 紫 → 亮紫（稿 G_Add，135°） */
   keyConfirm: LinearGradientToken;
 } = {
+  // ⚠ 双主题改造：Hero 渐变日夜两套不再共用（tokens: brand.heroFrom/heroTo）。
+  //   日间 = 亮紫 → 主紫；夜间 = 中紫 → 深靛紫（更深，压在 bg #0E121B 上不刺眼）。
   heroDark: {
-    // linear 165°: #140A3A 0% → #24125E 35% → #3B1A6E 60% → #4A1E52 82% → #140C22 100%
-    colors: ['#140A3A', '#24125E', '#3B1A6E', '#4A1E52', '#140C22'],
-    locations: [0, 0.35, 0.6, 0.82, 1],
+    colors: [darkSemantic.heroFrom, darkSemantic.heroTo],
+    locations: [0, 1],
     // 165°（CSS）；start/end 是 390×844 的折算值，运行时按实测宽高用 gradientAxis() 重算
     angle: 165,
     start: { x: 0.2, y: -0.02 },
     end: { x: 0.8, y: 1.02 },
     blobs: [
-      { color: '#3A1C9A', cx: 0, cy: 0, rx: 0.9, ry: 0.55, fadeStop: 0.6 },
-      { color: '#7A2E6A', cx: 1, cy: 0.35, rx: 0.8, ry: 0.5, fadeStop: 0.62 },
-      { color: '#2A1470', cx: 0.2, cy: 0.85, rx: 0.7, ry: 0.45, fadeStop: 0.6 },
+      { color: 'rgba(124,99,246,0.50)', cx: 0, cy: 0, rx: 0.9, ry: 0.55, fadeStop: 0.6 },
+      { color: 'rgba(94,61,250,0.42)', cx: 1, cy: 0.35, rx: 0.8, ry: 0.5, fadeStop: 0.62 },
+      { color: 'rgba(39,16,166,0.45)', cx: 0.2, cy: 0.85, rx: 0.7, ry: 0.45, fadeStop: 0.6 },
     ],
   },
   heroLight: {
-    // linear 165°: #DCD3FF 0% → #E9DEFF 35% → #F5DDF0 60% → #FFE4D8 82% → #F5F2FB 100%
-    colors: ['#DCD3FF', '#E9DEFF', '#F5DDF0', '#FFE4D8', '#F5F2FB'],
-    locations: [0, 0.35, 0.6, 0.82, 1],
-    // 165°（CSS）；同 heroDark
-    angle: 165,
-    start: { x: 0.2, y: -0.02 },
-    end: { x: 0.8, y: 1.02 },
+    // 日间：深端在上、亮端在下（180° 竖直）——Hero 顶部的文字是白字（tokens: text.inverse），
+    // 深端 #634FFC 上白字 5.2:1；若把亮端 #9083FC 放顶部，白字只有 3.1:1、深字也只有 3.5:1，
+    // 两头都不达标。取值仍严格来自 tokens（brand.heroFrom / heroTo），只调方向。
+    colors: [lightSemantic.heroTo, lightSemantic.heroFrom],
+    locations: [0, 1],
+    angle: 180,
+    start: { x: 0.5, y: 0 },
+    end: { x: 0.5, y: 1 },
     blobs: [
-      { color: '#C9BDFF', cx: 0, cy: 0, rx: 0.9, ry: 0.55, fadeStop: 0.6 },
-      { color: '#F7C6DE', cx: 1, cy: 0.35, rx: 0.8, ry: 0.5, fadeStop: 0.62 },
-      { color: '#D8CCFF', cx: 0.2, cy: 0.85, rx: 0.7, ry: 0.45, fadeStop: 0.6 },
+      { color: 'rgba(255,255,255,0.22)', cx: 0, cy: 0, rx: 0.9, ry: 0.55, fadeStop: 0.6 },
+      { color: 'rgba(99,79,252,0.35)', cx: 1, cy: 0.35, rx: 0.8, ry: 0.5, fadeStop: 0.62 },
+      { color: 'rgba(144,131,252,0.40)', cx: 0.2, cy: 0.85, rx: 0.7, ry: 0.45, fadeStop: 0.6 },
     ],
   },
+  brandLight: {
+    colors: [lightSemantic.gradientFrom, lightSemantic.gradientTo],
+    locations: [0, 1],
+    start: { x: 0, y: 0 },
+    end: { x: 1, y: 1 },
+  },
+  brandDark: {
+    colors: [darkSemantic.gradientFrom, darkSemantic.gradientTo],
+    locations: [0, 1],
+    start: { x: 0, y: 0 },
+    end: { x: 1, y: 1 },
+  },
   accent: {
-    colors: ['#6C4DF6', '#9B5BD6', '#D06C96'],
-    locations: [0, 0.5, 1],
+    colors: [lightSemantic.gradientFrom, lightSemantic.gradientTo],
+    locations: [0, 1],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   keyConfirm: {
-    colors: ['#6C4DF6', '#9B5BD6'],
+    colors: [lightSemantic.gradientFrom, lightSemantic.gradientTo],
     locations: [0, 1],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
 };
+
+/**
+ * 页面底渐变（HeroGradient 的 fill 模式）：整页铺底但不压住内容 ——
+ * 顶部取 heroFrom 的极淡薄层，向下融进 bg.page。
+ * 两个端点都没有裸色值：颜色一律来自 semantic（heroFrom / bg）。
+ */
+export const pageWashAlpha = { from: 0.20, mid: 0.06 } as const;
 
 /** Hero 渐变底部淡出到页面底：从渐变高度 ~50% 处开始，92% 处已是实底 bg */
 export const heroFade = {

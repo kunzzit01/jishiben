@@ -291,9 +291,11 @@ export function AmountCalculatorKeypad({
                 style={StyleSheet.absoluteFill}
                 pointerEvents="none"
               />
-              <Ionicons name="checkmark-circle-outline" size={26} color="#FFFFFF" />
-              <Text style={styles.confirmText}>{t('addTx.keypadConfirm')}</Text>
-              {!!onConfirmLongPress && <Text style={styles.confirmHint}>{t('addTx.keypadConfirmHint')}</Text>}
+              <Ionicons name="checkmark-circle-outline" size={26} color={semantic.onAccent} />
+              <Text style={[styles.confirmText, { color: semantic.onAccent }]}>{t('addTx.keypadConfirm')}</Text>
+              {!!onConfirmLongPress && (
+                <Text style={[styles.confirmHint, { color: semantic.onAccent }]}>{t('addTx.keypadConfirmHint')}</Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -425,14 +427,14 @@ const styles = StyleSheet.create({
   confirmText: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
+    // 颜色由组件内联给 semantic.onAccent（渐变底上的白字，走令牌）
     textAlign: 'center',
   },
   // 长按提示：14/700 满白（11pt 白字在渐变末端对比不足 4.5，见下方说明）
   confirmHint: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#FFFFFF',
+    // 颜色由组件内联给 semantic.onAccent
     textAlign: 'center',
   },
   // 数字键：22/500（稿）；C 同字号、次要色

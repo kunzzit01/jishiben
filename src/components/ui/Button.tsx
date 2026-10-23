@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import PressableScale from '../PressableScale';
 import { useTheme } from '../../theme/useTheme';
-import { gradients } from '../../theme/theme';
+
 import AppText from './AppText';
 import { withAlpha } from './color';
 
@@ -66,7 +66,7 @@ export function Button({
   style,
   testID,
 }: ButtonProps) {
-  const { semantic, radius, spacing } = useTheme();
+  const { semantic, radius, spacing, gradients } = useTheme();
   // disabled 与 loading 分开：loading 不是「变灰」，是「正在忙」——
   // 保留本档配色（主按钮仍是实心紫），只把文字换成同色转圈，否则夜间灰底上的转圈几乎看不见
   const isBusy = !!loading;

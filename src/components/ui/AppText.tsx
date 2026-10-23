@@ -99,7 +99,9 @@ export function AppText({
 
   const textStyle: TextStyle = {
     fontSize: token.fontSize,
-    lineHeight: token.lineHeight,
+    // 中文行高 ≥1.30（tokens: typography.variants[x].lineHeightCjk）：
+    // 判定为 CJK 字体分流时用中文档，纯数字 / 拉丁仍用更紧的拉丁档
+    lineHeight: useCjkFont ? token.lineHeightCjk : token.lineHeight,
     // 打包的是静态字重字体（Inter-SemiBold / NotoSansSC-Bold 等），不能再给 fontWeight，
     // 否则安卓会去合成加粗 / iOS 会二次加粗（约定：家族名即字重）
     fontWeight: packedFamily ? 'normal' : token.fontWeight,

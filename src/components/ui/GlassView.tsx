@@ -35,6 +35,12 @@ export interface GlassViewProps {
   /** 强模糊（仅浮空 Tab 栏用；其余玻璃件保持默认）：iOS BlurView 强度 70；
    *  web 用 backdrop-filter blur(28px) saturate(160%)；Android 无原生模糊，靠 fill 的高不透明度 */
   strongBlur?: boolean;
+  /** 是否输出模糊层（默认 true）。
+   *  传 false = 这块玻璃只留「半透明填充 + 亮边 + 高光 + 投影」，不再挂 backdrop-filter / BlurView。
+   *  为什么要这个开关：模糊层是一个独立合成图层，即使父级 opacity 已为 0（或整块隐藏）也仍在合成器里，
+   *  真机浏览器上会从邻页渗出来（实测：首页日历邻页的玻璃卡在资产页留下一道软边阴影竖带）。
+   *  隐藏态 / 动画子树里的玻璃件（横滑邻页预览）用它把这层彻底关掉。 */
+  blur?: boolean;
   pointerEvents?: ViewProps['pointerEvents'];
   style?: ViewStyle | ViewStyle[];
   children?: React.ReactNode;
@@ -46,12 +52,13 @@ export function GlassView({
   intensity,
   shadow = true,
   strongBlur = false,
+  blur = true,
   pointerEvents,
   style,
   children,
 }: GlassViewProps) {
   const { glass } = useTheme();
-  const blurSupported = Platform.OS === 'ios' || Platform.OS === 'web';
+  const blurSupported = blur && (Platform.OS === 'ios' || Platform.OS === 'web');
   // ⚠ web 的 BlurView 把 tint 当「白色叠层」用（expo-blur getBackgroundColor：
   //    'default' = rgba(255,255,255, (intensity/100) × 0.3)）—— intensity 100 就是 30% 白，
   //    把夜间玻璃整体提亮一档：实测浮空 Tab 栏内底被抬到 rgb(112,104,120)、玻璃槽抬到

@@ -25,7 +25,8 @@ import { LayoutChangeEvent, StyleSheet, View, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Defs, G, Mask, Path, RadialGradient, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 import { useTheme } from '../../theme/useTheme';
-import { gradientAxis } from '../../theme/theme';
+import { gradientAxis, pageWashAlpha } from '../../theme/theme';
+import { withAlpha } from './color';
 
 export interface HeroGradientProps {
   /** 'dark' | 'light' 显式指定；省略 = 跟随当前主题 */
@@ -63,6 +64,22 @@ export function HeroGradient({ variant, height, fill = false, grid = false, styl
   const { isDark, gradients, semantic, heroFade, heroGrid } = useTheme();
   const spec = variant === 'dark' ? gradients.heroDark : variant === 'light' ? gradients.heroLight : gradients.hero;
   const blockHeight = height ?? 0;
+
+  // fill 模式（整页铺底）= Hero 起点的极淡薄层融进 bg.page：
+  // 页面底色仍然是 tokens 的 bg.page，卡片面（surface）与之对比度不变；
+  // 两个端点都由 semantic 推导，日夜两套自动跟着走。
+  const wash = useMemo(
+    () => ({
+      colors: [
+        withAlpha(semantic.heroFrom, pageWashAlpha.from),
+        withAlpha(semantic.heroTo, pageWashAlpha.mid),
+        semantic.bg,
+      ] as readonly [string, string, string],
+      locations: [0, 0.45, 1] as number[],
+    }),
+    [semantic.heroFrom, semantic.heroTo, semantic.bg]
+  );
+  const mainSpec = fill ? wash : spec;
 
   // SVG（光斑 / 网格）需要实测尺寸：百分比在 Mask / 原生端不稳，全部用数值
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -109,17 +126,18 @@ export function HeroGradient({ variant, height, fill = false, grid = false, styl
       ]}
       onLayout={onLayout}
     >
-      {/* 1. 主线性渐变 */}
+      {/* 1. 主线性渐变（fill = 页面底薄层；块高模式 = Hero 主渐变 tokens: heroFrom/heroTo） */}
       <LinearGradient
-        colors={spec.colors}
-        locations={spec.locations as [number, number, ...number[]]}
+        colors={mainSpec.colors}
+        locations={mainSpec.locations as [number, number, ...number[]]}
         start={axis.start}
         end={axis.end}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* 2. 径向光斑 + 3. 网格线（同一张 SVG，实测尺寸后渲染） */}
-      {box.w > 0 ? (
+      {/* 2. 径向光斑 + 3. 网格线（同一张 SVG，实测尺寸后渲染）
+          fill 模式不画光斑：整页薄底上叠光斑会与新 bg.page 打架 */}
+      {box.w > 0 && !fill ? (
         <Svg width={box.w} height={box.h} style={StyleSheet.absoluteFill}>
           <Defs>
             {spec.blobs.map((blob, i) => {

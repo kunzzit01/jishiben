@@ -185,9 +185,11 @@ export function IconCircle({
     );
   }
 
-  // 外投影（§5）：同色投影 80% + 2/3 黑；选中再叠两层外圈（3dp 页面底色打底 + 5dp 外环）
+  // 外投影（§5）：同色投影 + 2/3 黑；选中再叠两层外圈（3dp 页面底色打底 + 5dp 外环）
+  // ⚠ 同色发光从 80% 降到 30%：80% 的彩色外发光在浅色页面 / 软 GPU 上会糊成一团色雾，
+  //   账户图标那几颗尤其明显（真机「绿色发光偏重」）。30% 保留层次，不再发糊。
   const outerShadow = [
-    `0px 8px 16px -6px ${withAlpha(base, 0.8)}`,
+    `0px 8px 16px -6px ${withAlpha(base, 0.3)}`,
     '0px 2px 3px rgba(0,0,0,0.2)',
   ].join(', ');
   const ringColor = color
@@ -254,7 +256,7 @@ export function IconCircle({
         <Ionicons
           name={icon}
           size={iconSize ?? Math.round(size * 0.48)}
-          color="#FFFFFF"
+          color={semantic.onAccent}
           style={styles.icon}
         />
       ) : null}

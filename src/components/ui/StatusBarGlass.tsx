@@ -20,6 +20,7 @@ import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/useTheme';
 import { LinearGradient } from 'expo-linear-gradient';
+import { withAlpha } from './color';
 
 /** 挡板层级：只在页面内（根节点）压住滚动内容，低于弹层（BottomSheet 是 90） */
 const Z_INDEX = 40;
@@ -29,14 +30,14 @@ export interface StatusBarGlassProps {
 }
 
 export function StatusBarGlass({ style }: StatusBarGlassProps) {
-  const { isDark } = useTheme();
+  const { semantic } = useTheme();
   const insets = useSafeAreaInsets();
   if (insets.top <= 0) return null;
   return (
     <View pointerEvents="none" style={[styles.root, { height: insets.top + 6 }, style]}>
       {/* 顶部渐变遮罩（V3）：页面底色 55% → 透明，不再是不透明色带（Expo Go 下实底会像「白屏/黑条」） */}
       <LinearGradient
-        colors={isDark ? ['rgba(10,9,16,0.55)', 'rgba(10,9,16,0)'] : ['rgba(244,243,248,0.55)', 'rgba(244,243,248,0)']}
+        colors={[withAlpha(semantic.homeBg, 0.55), withAlpha(semantic.homeBg, 0)]}
         locations={[0, 1]}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
