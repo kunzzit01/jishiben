@@ -90,6 +90,11 @@ services:
         condition: service_started
     ports:
       - "${HTTP_PORT:-80}:80"
+    volumes:
+      # 内测安装包下载目录：把 .apk 放进 deploy/downloads/ 即可通过
+      #   http://<你的地址>:<HTTP_PORT>/downloads/xxx.apk
+      # 对外提供（只读挂载，容器不能改宿主机文件）
+      - ./downloads:/usr/share/nginx/html/downloads:ro
     networks:
       - jishiben-net
     logging:

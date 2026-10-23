@@ -58,3 +58,5 @@ server/target/
 deploy/.env
 deploy/backups/
 .tools/
+deploy/downloads/*.apk
+deploy/downloads/*.aab
