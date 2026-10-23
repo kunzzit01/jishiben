@@ -1,15 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Keyboard,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   ScrollView,
   Pressable,
   Modal,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 
 /**
  * 玻璃材质（UI V2.1 §2）在 web 上的偏差修正：expo-blur 的 web 实现用「tint 底色」模拟模糊——
@@ -23,12 +24,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  NestableDraggableFlatList,
-  NestableScrollContainer,
-  ScaleDecorator,
-  RenderItemParams,
-} from 'react-native-draggable-flatlist';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
 import { useTheme } from '../theme/useTheme';
@@ -46,6 +44,17 @@ import SegmentedControl from '../components/SegmentedControl';
 import { AppText, GlassView, HeroGradient, IconCircle, ScreenHeader } from '../components/ui';
 // 图标/颜色池抽到公共常量（选择类别页的内联添加也用同一份，防两处漂移）
 import { CATEGORY_ICON_OPTIONS, CATEGORY_COLOR_OPTIONS, CategoryIconName } from '../constants/categoryAddOptions';
+// 网格编辑器（虚线占位框 / 长按 200ms 拖拽 / 虚线＋新增磁贴 / 删除角标）与记一笔选择类别页共用一套
+import {
+  CategoryGridEditor,
+  GRID_EDGE_ZONE,
+  GRID_FINGER_STEP,
+  GRID_LAND_MS,
+  GRID_LONG_PRESS_MS,
+  GRID_SCROLL_STEP,
+  moveInArray,
+  sortByOrder,
+} from '../components/CategoryGridEditor';
 
 const ICON_OPTIONS: CategoryIconName[] = CATEGORY_ICON_OPTIONS;
 const COLOR_OPTIONS = CATEGORY_COLOR_OPTIONS;
@@ -82,27 +91,234 @@ const glassHeaderStyles = StyleSheet.create({
   glassInner: { width: 44, height: 44 },
 });
 
-// 组内排序：按持久化的 order 编号排（没编号的排最后），编号只在本组内比较
-function sortByOrder(items: Category[], order: Record<string, number>): Category[] {
-  return [...items].sort((a, b) => (order[a.id] ?? 9999) - (order[b.id] ?? 9999));
+// ---------- 大分组拖拽（与新网格同一套手势语言：长按 200ms + 幽灵跟手 + 让位动画） ----------
+/** 一张组卡在列表坐标系里的顶/底（onLayout 上报，顶边用来算槽位、底边用来算中线阈值） */
+type GroupBox = { top: number; bottom: number };
+
+type GroupDragShared = {
+  moveY: SharedValue<number>;
+  scale: SharedValue<number>;
+  from: SharedValue<number>;
+  /** 上一次报告给 JS 的落点下标（只在变化时报） */
+  cur: SharedValue<number>;
+  baseY: SharedValue<number>;
+  transY: SharedValue<number>;
+  count: SharedValue<number>;
+  tops: SharedValue<number[]>;
+  ends: SharedValue<number[]>;
+  /** 列表顶边在窗口里的位置（拖拽开始那一刻的量测） */
+  listTop: SharedValue<number>;
+  scroll0: SharedValue<number>;
+  lastY: SharedValue<number>;
+};
+
+/**
+ * 手指位置 → 落点分组下标：按每张卡的中线判定（越过中线才让位），
+ * worklet 与 JS 自动滚动共用同一份算式。
+ */
+function groupIndexAt(
+  y: number,
+  listTop: number,
+  scrollDelta: number,
+  tops: number[],
+  ends: number[],
+  count: number
+): number {
+  'worklet';
+  if (count <= 0 || tops.length < count) return 0;
+  const local = y - (listTop - scrollDelta);
+  let idx = 0;
+  for (let i = 0; i < count; i++) {
+    if (local >= tops[i] + (ends[i] - tops[i]) / 2) idx = i + 1;
+  }
+  return Math.min(count - 1, idx);
+}
+
+const GROUP_DRAG_SCALE = 1.03;
+
+/**
+ * 一张大组卡的外壳：让位平移量包在外面，长按手势挂在组头那一行上
+ * （组名 / 项数 / 垃圾桶都在组头里，短按照旧、长按 200ms 才抬起整组）。
+ */
+function GroupCardSlot({
+  group,
+  dimmed,
+  shiftYTarget,
+  header,
+  children,
+  drag,
+  scrollY,
+  styles,
+  onCardLayout,
+  onDragStart,
+  onDragHover,
+  onDragMove,
+  onDragEnd,
+  onDragCancel,
+}: {
+  group: string;
+  dimmed: boolean;
+  shiftYTarget: number;
+  header: React.ReactNode;
+  children: React.ReactNode;
+  drag: GroupDragShared;
+  scrollY: SharedValue<number>;
+  styles: ReturnType<typeof makeStyles>;
+  onCardLayout: (group: string, top: number, height: number) => void;
+  onDragStart: (group: string, absY: number) => void;
+  onDragHover: (index: number, absY: number) => void;
+  onDragMove: (absY: number) => void;
+  onDragEnd: (from: number, to: number) => void;
+  onDragCancel: () => void;
+}) {
+  const { moveY, scale, from, cur, baseY, transY, count, tops, ends, listTop, scroll0, lastY } = drag;
+
+  const shiftY = useSharedValue(0);
+  useEffect(() => {
+    shiftY.value = withTiming(shiftYTarget, { duration: 180 });
+  }, [shiftYTarget, shiftY]);
+  const shiftStyle = useAnimatedStyle(() => ({ transform: [{ translateY: shiftY.value }] }));
+
+  // 同磁贴：手势只在挂载时建一次，拖拽中重渲染不会打断正在进行的拖拽
+  const gesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(GRID_LONG_PRESS_MS)
+        .onStart((e) => {
+          'worklet';
+          scroll0.value = scrollY.value;
+          transY.value = 0;
+          lastY.value = e.absoluteY;
+          scale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
+          runOnJS(onDragStart)(group, e.absoluteY);
+        })
+        .onUpdate((e) => {
+          'worklet';
+          moveY.value = baseY.value + e.translationY + (scrollY.value - scroll0.value);
+          transY.value = e.translationY;
+          const idx = groupIndexAt(
+            e.absoluteY,
+            listTop.value,
+            scrollY.value - scroll0.value,
+            tops.value,
+            ends.value,
+            count.value
+          );
+          if (idx !== cur.value) {
+            cur.value = idx;
+            runOnJS(onDragHover)(idx, e.absoluteY);
+          }
+          if (Math.abs(e.absoluteY - lastY.value) > GRID_FINGER_STEP) {
+            lastY.value = e.absoluteY;
+            runOnJS(onDragMove)(e.absoluteY);
+          }
+        })
+        .onEnd((e) => {
+          'worklet';
+          const idx = groupIndexAt(
+            e.absoluteY,
+            listTop.value,
+            scrollY.value - scroll0.value,
+            tops.value,
+            ends.value,
+            count.value
+          );
+          // 落位：幽灵滑到目标槽位顶边，再交差写回顺序
+          moveY.value = withTiming(tops.value[idx] ?? baseY.value, { duration: 150 });
+          scale.value = withTiming(1, { duration: 150 });
+          runOnJS(onDragEnd)(from.value, idx);
+        })
+        .onFinalize((_e, success) => {
+          'worklet';
+          if (!success) {
+            scale.value = withTiming(1, { duration: 120 });
+            runOnJS(onDragCancel)();
+          }
+        }),
+    []
+  );
+
+  return (
+    <Animated.View
+      style={[shiftStyle, dimmed && styles.groupDragging]}
+      onLayout={(e) => onCardLayout(group, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
+    >
+      <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.groupCard}>
+        <GestureDetector gesture={gesture}>
+          <View>{header}</View>
+        </GestureDetector>
+        {children}
+      </GlassView>
+    </Animated.View>
+  );
 }
 
 export default function CategoryManagementScreen({ navigation, route }: any) {
   const { categories, categoryGroups, addCategory, addCategoryGroup, updateCategory, deleteCategory, deleteCategoryGroup } = useApp();
-  const { semantic, spacing, gradients, isDark } = useTheme();
+  const { semantic, spacing, gradients, glass, isDark } = useTheme();
   const { pagePadding } = useLayout();
   // 玻璃卡上的次要字色（§4 硬指标）：夜间玻璃被 web BlurView 洗亮，70% 白的 text.secondary 只有 ~4.2
   const t = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
+  // 外层 ScrollView：贴边自动滚动要它 + 当前滚动量 / 内容高度
+  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollYSV = useSharedValue(0);
+  const contentHRef = useRef(0);
+  const { height: windowH } = useWindowDimensions();
+
+  // —— 大分组拖拽状态（长按组头整组移动，落库仍走 GROUP_ORDER_KEY，不新造存储键） ——
+  const [groupDrag, setGroupDrag] = useState<{ group: string; from: number; hover: number } | null>(null);
+  const listRef = useRef<View | null>(null);
+  const groupBoxRef = useRef<Map<string, GroupBox>>(new Map());
+  const sectionsRef = useRef<CategorySection[]>([]);
+  const groupDragRef = useRef<string | null>(null);
+  const groupFingerYRef = useRef(-1);
+  const groupLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const groupTickRef = useRef<() => void>(() => {});
+  const gMoveY = useSharedValue(0);
+  const gScale = useSharedValue(1);
+  const gFrom = useSharedValue(0);
+  const gCur = useSharedValue(0);
+  const gBaseY = useSharedValue(0);
+  const gTransY = useSharedValue(0);
+  const gCount = useSharedValue(0);
+  const gTops = useSharedValue<number[]>([]);
+  const gEnds = useSharedValue<number[]>([]);
+  const gListTop = useSharedValue(0);
+  const gScroll0 = useSharedValue(0);
+  const gLastY = useSharedValue(0);
+  const groupDragShared: GroupDragShared = useMemo(
+    () => ({
+      moveY: gMoveY,
+      scale: gScale,
+      from: gFrom,
+      cur: gCur,
+      baseY: gBaseY,
+      transY: gTransY,
+      count: gCount,
+      tops: gTops,
+      ends: gEnds,
+      listTop: gListTop,
+      scroll0: gScroll0,
+      lastY: gLastY,
+    }),
+    [gMoveY, gScale, gFrom, gCur, gBaseY, gTransY, gCount, gTops, gEnds, gListTop, gScroll0, gLastY]
+  );
+  // 页面滚动：既要喂浮空 Tab 栏的收起逻辑，也要记下滚动量（网格拖拽把绝对坐标换算成内容坐标用）
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollYSV.value = e.nativeEvent.contentOffset.y;
+      onTabScroll?.(e);
+    },
+    [onTabScroll, scrollYSV]
+  );
   // 样式表记忆化：转场期间 blur/focus 重渲染不再重建 60+ 条样式
   const styles = useMemo(() => makeStyles(semantic, spacing), [semantic, spacing]);
   // 选择模式：财务规划的计划表单跳进来时带 selectMode=true——此时点分类是"选中并返回"，
   // 不进入管理交互（删除徽章隐藏、添加入口保留），选中后 navigate 回传 pickedCategoryId
   const selectMode = !!(route?.params && route.params.selectMode);
-  // 编辑排列模式：点右上角"编辑"进入，组内出现拖拽排序的三横手柄
-  const [reorderMode, setReorderMode] = useState(false);
   // 顶部支出/收入切换：只显示并编辑对应类型的大组；跳转方可带 initialType 直接落到对应类型
   const [manageType, setManageType] = useState<'expense' | 'income'>(
     route?.params?.initialType === 'income' ? 'income' : 'expense'
@@ -124,8 +340,6 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   // 两步小卡第二步：119 图标选择底部弹层开关
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
-    // 编辑/完成 按钮：改到页面自定义顶栏右侧（顶栏样式与"记一笔"一致：圆环返回键 + 标题 + 编辑）
-
   // 载入组内排序编号 + 大分组排列顺序
   useEffect(() => {
     AsyncStorage.getItem(CAT_ORDER_KEY)
@@ -145,6 +359,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     AsyncStorage.setItem(CAT_ORDER_KEY, JSON.stringify(next)).catch(() => {});
   };
 
+  // 大分组本身拖拽结束：按新顺序把 0..n-1 写回每个大分组的编号（沿用旧的存储键）
   const persistGroupOrder = (next: Record<string, number>) => {
     setGroupOrder(next);
     AsyncStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(next)).catch(() => {});
@@ -157,15 +372,6 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
       next[item.id] = index;
     });
     persistCatOrder(next);
-  };
-
-  // 大分组本身拖拽结束：按新顺序把 0..n-1 写回每个大分组的编号
-  const handleGroupsReorder = (newSections: CategorySection[]) => {
-    const next: Record<string, number> = {};
-    newSections.forEach((s, index) => {
-      next[s.group] = index;
-    });
-    persistGroupOrder(next);
   };
 
   // 组列表：默认5组 + 自定义组（空组也显示，方便直接往里加），组内按排序编号排列
@@ -198,6 +404,167 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     // 大分组按持久化的排列顺序排（没编号的排最后，保持原有相对顺序）
     return out.sort((a, b) => (groupOrder[a.group] ?? 9999) - (groupOrder[b.group] ?? 9999));
   }, [categories, categoryGroups, catOrder, groupOrder, manageType]);
+  // 手势回调是稳定闭包，读"当前渲染顺序"走 ref
+  sectionsRef.current = sections;
+
+  // —— 大分组拖拽：JS 侧控制器（量测、落点、自动滚动、落库） ——
+  const readGroupBoxes = useCallback(() => {
+    const list = sectionsRef.current;
+    return {
+      tops: list.map((s) => groupBoxRef.current.get(s.group)?.top ?? 0),
+      ends: list.map((s) => {
+        const box = groupBoxRef.current.get(s.group);
+        return box ? box.bottom : 0;
+      }),
+    };
+  }, []);
+
+  const handleGroupCardLayout = useCallback(
+    (group: string, top: number, height: number) => {
+      groupBoxRef.current.set(group, { top, bottom: top + height });
+      const boxes = readGroupBoxes();
+      gTops.value = boxes.tops;
+      gEnds.value = boxes.ends;
+    },
+    [gEnds, gTops, readGroupBoxes]
+  );
+
+  const stopGroupLoop = useCallback(() => {
+    if (groupLoopRef.current != null) {
+      clearInterval(groupLoopRef.current);
+      groupLoopRef.current = null;
+    }
+  }, []);
+
+  const startGroupLoop = useCallback(() => {
+    if (groupLoopRef.current == null) groupLoopRef.current = setInterval(() => groupTickRef.current(), 16);
+  }, []);
+
+  // 贴边自动滚动（与网格同一套阈值/步长）：页面在手指下滚了，幽灵（列表坐标）补回同样的量，落点重算
+  groupTickRef.current = () => {
+    if (groupDragRef.current == null) {
+      stopGroupLoop();
+      return;
+    }
+    const fingerY = groupFingerYRef.current;
+    const dir = fingerY > windowH - GRID_EDGE_ZONE ? 1 : fingerY < GRID_EDGE_ZONE ? -1 : 0;
+    if (!dir) return;
+    const max = Math.max(0, contentHRef.current - windowH);
+    const current = scrollYSV.value;
+    const next = Math.min(max, Math.max(0, current + dir * GRID_SCROLL_STEP));
+    if (next === current) return;
+    scrollRef.current?.scrollTo({ y: next, animated: false });
+    gMoveY.value = gBaseY.value + gTransY.value + (next - gScroll0.value);
+    const idx = groupIndexAt(
+      fingerY,
+      gListTop.value,
+      next - gScroll0.value,
+      gTops.value,
+      gEnds.value,
+      gCount.value
+    );
+    if (idx !== gCur.value) {
+      gCur.value = idx;
+      setGroupDrag((prev) => (prev && prev.hover !== idx ? { ...prev, hover: idx } : prev));
+    }
+  };
+
+  const handleGroupDragStart = useCallback(
+    (group: string, absY: number) => {
+      const list = sectionsRef.current;
+      const from = Math.max(0, list.findIndex((s) => s.group === group));
+      const boxes = readGroupBoxes();
+      groupDragRef.current = group;
+      groupFingerYRef.current = absY;
+      gFrom.value = from;
+      gCur.value = from;
+      gCount.value = list.length;
+      gTops.value = boxes.tops;
+      gEnds.value = boxes.ends;
+      gBaseY.value = boxes.tops[from] ?? 0;
+      gScroll0.value = scrollYSV.value;
+      gMoveY.value = gBaseY.value;
+      setGroupDrag({ group, from, hover: from });
+      listRef.current?.measureInWindow((_x, y) => {
+        gListTop.value = y;
+      });
+      startGroupLoop();
+    },
+    [gBaseY, gCount, gCur, gEnds, gFrom, gMoveY, gScroll0, gTops, readGroupBoxes, scrollYSV, startGroupLoop]
+  );
+
+  const handleGroupDragHover = useCallback((index: number, absY: number) => {
+    groupFingerYRef.current = absY;
+    setGroupDrag((prev) => (prev && prev.hover !== index ? { ...prev, hover: index } : prev));
+  }, []);
+
+  const handleGroupDragMove = useCallback((absY: number) => {
+    groupFingerYRef.current = absY;
+  }, []);
+
+  const handleGroupDragEnd = useCallback(
+    (from: number, to: number) => {
+      groupFingerYRef.current = -1;
+      stopGroupLoop();
+      // 等幽灵滑到目标槽位再改顺序 + 卸载幽灵
+      setTimeout(() => {
+        groupDragRef.current = null;
+        setGroupDrag(null);
+        if (to !== from) {
+          const list = sectionsRef.current;
+          const moved = moveInArray(
+            list.map((_, i) => i),
+            from,
+            to
+          );
+          const next: Record<string, number> = {};
+          moved.forEach((natural, order) => {
+            next[list[natural].group] = order;
+          });
+          persistGroupOrder(next);
+        }
+      }, GRID_LAND_MS);
+    },
+    [stopGroupLoop]
+  );
+
+  const handleGroupDragCancel = useCallback(() => {
+    groupDragRef.current = null;
+    groupFingerYRef.current = -1;
+    stopGroupLoop();
+    setGroupDrag(null);
+  }, [stopGroupLoop]);
+
+  useEffect(() => () => stopGroupLoop(), [stopGroupLoop]);
+
+  // 让位算量：被拖整组留在原槽位（变淡），其余组卡按"腾出来的空位"上下平移
+  const groupShifts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!groupDrag) return map;
+    const from = sections.findIndex((s) => s.group === groupDrag.group);
+    if (from < 0) return map;
+    const moved = moveInArray(
+      sections.map((_, i) => i),
+      from,
+      groupDrag.hover
+    );
+    const displayOf: number[] = new Array(sections.length).fill(0);
+    moved.forEach((natural, display) => {
+      displayOf[natural] = display;
+    });
+    const tops = sections.map((s) => groupBoxRef.current.get(s.group)?.top ?? 0);
+    sections.forEach((s, natural) => {
+      map.set(s.group, s.group === groupDrag.group ? 0 : tops[displayOf[natural]] - tops[natural]);
+    });
+    return map;
+  }, [sections, groupDrag]);
+
+  const groupGhostStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: gMoveY.value }, { scale: gScale.value }],
+  }));
+
+  const ghostSection = groupDrag ? sections.find((s) => s.group === groupDrag.group) : undefined;
+
 
   const handleInlineAdd = async (groupName: string) => {
     const name = inlineName.trim();
@@ -257,80 +624,32 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     });
   };
 
-  // 编辑排列模式下的组内条目：三横手柄长按拖动排序 + 删除角标
-  const renderReorderItem = ({ item: c, drag, isActive }: RenderItemParams<Category>) => (
-    <ScaleDecorator>
-      <TouchableOpacity
-        style={[styles.reorderItem, isActive && { opacity: 0.85 }]}
-        activeOpacity={0.8}
-        onLongPress={drag}
-        delayLongPress={150}
-      >
-        {/* UI V2.1 §5：立体光泽球 */}
-        <IconCircle size={36} color={c.color} icon={c.icon as CategoryIconName} />
-        <AppText variant="subhead" weight="600" numberOfLines={1} style={styles.reorderLabel}>
-          {getCategoryLabel(c, t)}
-        </AppText>
-        <TouchableOpacity
-          style={styles.reorderDeleteBadge}
-          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-          onPress={() => handleDeleteCategory(c.id, c.name)}
-        >
-          <Ionicons name="remove-circle" size={18} color={semantic.danger} />
-        </TouchableOpacity>
-        <Ionicons name="reorder-three-outline" size={22} color={semantic.textTertiary} />
-      </TouchableOpacity>
-    </ScaleDecorator>
+  // 选择模式：回调把选中 id 交回表单 + goBack 弹栈返回——
+  // 之前用 navigate(merge:true) 跳转，跨栈找不到目标时会再压一个新页面，反复点就无限套娃
+  const handlePickCategory = useCallback(
+    (id: string) => {
+      const pick = route?.params?.onPickCategory;
+      if (typeof pick === 'function') pick(id);
+      navigation.goBack();
+    },
+    [navigation, route]
   );
 
-  // 编辑排列模式下的大分组卡片：长按标题栏拖动整组排序，组内再用嵌套的拖拽列表排子分类
-  const renderGroupReorderCard = ({ item, drag, isActive }: RenderItemParams<CategorySection>) => {
-    const { group, items, custom } = item;
-    return (
-      <ScaleDecorator>
-        <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={isActive ? [styles.groupCard, { opacity: 0.85 }] : styles.groupCard}>
-          <TouchableOpacity
-            style={styles.groupHeader}
-            activeOpacity={0.8}
-            onLongPress={drag}
-            delayLongPress={150}
-          >
-            <Ionicons name="reorder-three-outline" size={16} color={semantic.textTertiary} style={styles.groupDragHandle} />
-            <AppText variant="subhead" weight="600" style={styles.groupTitle}>{getGroupLabel(group, t)}</AppText>
-            {custom && (
-              <TouchableOpacity
-                style={styles.groupDeleteBtn}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.delete')}
-                hitSlop={{ top: 13, bottom: 13, left: 13, right: 13 }}
-                onPress={() => handleDeleteGroup(group, items)}
-              >
-                <Ionicons name="trash-outline" size={18} color={semantic.danger} />
-              </TouchableOpacity>
-            )}
-            <AppText variant="caption2" color={semantic.textSecondary} style={styles.groupCount}>
-              {t('addTx.itemsUnit', { count: items.length })}
-            </AppText>
-          </TouchableOpacity>
-
-          {items.length > 0 ? (
-            <View style={styles.reorderWrap}>
-              <NestableDraggableFlatList
-                data={items}
-                keyExtractor={(c) => c.id}
-                onDragEnd={({ data }) => handleCatGroupReorder(group, data)}
-                renderItem={renderReorderItem}
-              />
-            </View>
-          ) : (
-            <AppText variant="footnote" color={semantic.textSecondary} style={styles.groupEmpty}>
-              {t('addTx.emptySubcats')}
-            </AppText>
-          )}
-        </GlassView>
-      </ScaleDecorator>
-    );
-  };
+  // 网格最后一项的虚线「＋」磁贴：开/收本组的新增小卡（管理态长表单 / 选择态两步小卡共用这一份开关）
+  const handleToggleAdd = useCallback(
+    (groupName: string) => {
+      if (addingGroupName === groupName) {
+        setAddingGroupName(null);
+        setInlineName('');
+        return;
+      }
+      setInlineName('');
+      setInlineIcon(ICON_OPTIONS[0]);
+      setInlineColor(COLOR_OPTIONS[0]);
+      setAddingGroupName(groupName);
+    },
+    [addingGroupName]
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}
@@ -338,53 +657,22 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     >
       {/* UI V2.1 §1：渐变铺满整页，一切卡片浮在渐变上 */}
       <HeroGradient fill />
-      {/* 玻璃二级页头：返回 + 居中标题 + 右侧「编辑 / 完成」玻璃胶囊 */}
+      {/* 玻璃二级页头：返回 + 居中标题（本页进入即编辑态，不再有「编辑 / 完成」开关） */}
       <GlassBackHeader
         title={selectMode ? t('addTx.selectCategory') : t('addTx.categoryMgmt')}
         onBack={() => navigation?.goBack()}
-        right={
-          <PressableScale
-            activeScale={0.95}
-            onPress={() => setReorderMode((prev) => !prev)}
-            accessibilityRole="button"
-            accessibilityLabel={reorderMode ? t('common.done') : t('addTx.edit')}
-          >
-            <GlassView intensity={WEB_GLASS_INTENSITY} radius={999} style={styles.editPill}>
-              <Ionicons
-                name={reorderMode ? 'checkmark-outline' : 'reorder-three-outline'}
-                size={15}
-                color={semantic.textPrimary}
-              />
-              <AppText variant="caption" weight="600" color={semantic.textPrimary}>
-                {reorderMode ? t('common.done') : t('addTx.edit')}
-              </AppText>
-            </GlassView>
-          </PressableScale>
-        }
       />
-      {reorderMode ? (
-        // 编辑排列模式：整页变成一个可拖拽列表，长按组标题拖大分组、长按组内条目拖子分类
-        <NestableScrollContainer
-          onScroll={onTabScroll ?? undefined}
-          scrollEventThrottle={16}
-          contentContainerStyle={{ paddingBottom: tabClearance, paddingHorizontal: pagePadding }}
-        >
-          <AppText variant="footnote" color={semantic.textSecondary} style={styles.reorderHint}>
-            {t('addTx.reorderHint')}
-          </AppText>
-          <NestableDraggableFlatList
-            data={sections}
-            keyExtractor={(s) => s.group}
-            onDragEnd={({ data }) => handleGroupsReorder(data)}
-            renderItem={renderGroupReorderCard}
-          />
-        </NestableScrollContainer>
-      ) : (
-        <ScrollView
-          onScroll={onTabScroll ?? undefined}
-          scrollEventThrottle={16}
-          contentContainerStyle={{ paddingBottom: tabClearance, paddingTop: 2, paddingHorizontal: pagePadding }}
-        >
+      <ScrollView
+        ref={scrollRef}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        onContentSizeChange={(_w, h) => {
+          contentHRef.current = h;
+        }}
+        contentContainerStyle={{ paddingBottom: tabClearance, paddingTop: 2, paddingHorizontal: pagePadding }}
+      >
+        {/* 内容包一层：组卡 onLayout 的 y 与"列表顶边量测"用同一个参照系（整组拖拽的坐标换算） */}
+        <View ref={listRef}>
           {/* 顶部 支出/收入 切换：玻璃分段控件（V2.1 §2：夜白胶囊 / 日紫胶囊），带各自类别数（稿） */}
           {!selectMode && (
             <View style={styles.typeSegWrap}>
@@ -396,24 +684,33 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                   { label: t('addTx.incomeTabCount', { count: categories.filter((c) => c.type === 'income').length }), value: 'income' },
                 ]}
                 selected={manageType}
-                onSelect={(v) => {
-                  setManageType(v as 'expense' | 'income');
-                  setReorderMode(false);
-                }}
+                onSelect={(v) => setManageType(v as 'expense' | 'income')}
               />
             </View>
           )}
 
           {/* 每张大组一张玻璃卡：组内成员 + 该组自己的添加入口；自定义组可删除 */}
-          {sections.map(({ group, items, custom }) => {
+          {sections.map(({ group, items }) => {
             const isAdding = addingGroupName === group;
             // TASK-020③：selectMode 照搬记一笔——折叠状态在 Set 里，点头部行收/展（管理模式不受影响）
             const expanded = !selectMode || !collapsedGroups.has(group);
             return (
-            <GlassView intensity={WEB_GLASS_INTENSITY} key={group} radius={26} style={styles.groupCard}>
-              {/* TASK-020③：selectMode 头部行照搬记一笔组卡（箭头+组名+＋药丸+🗑+数量胶囊，整行可点收展）；
-                  管理模式保持原头部不变 */}
-              {selectMode ? (
+            /* 组头整行 = 长按拖动整组的把手（短按行为不变：selectMode 收/展，管理态垃圾桶可点） */
+            <GroupCardSlot
+              key={group}
+              group={group}
+              dimmed={!!groupDrag && groupDrag.group === group}
+              shiftYTarget={groupShifts.get(group) ?? 0}
+              styles={styles}
+              drag={groupDragShared}
+              scrollY={scrollYSV}
+              onCardLayout={handleGroupCardLayout}
+              onDragStart={handleGroupDragStart}
+              onDragHover={handleGroupDragHover}
+              onDragMove={handleGroupDragMove}
+              onDragEnd={handleGroupDragEnd}
+              onDragCancel={handleGroupDragCancel}
+              header={selectMode ? (
                 <Pressable
                   style={styles.groupHeader}
                   onPress={() => {
@@ -428,28 +725,6 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                 >
                   <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={semantic.textPrimary} />
                   <AppText variant="subhead" weight="600" style={styles.groupTitle}>{getGroupLabel(group, t)}</AppText>
-                  {/* ＋入口移入标题行（记一笔同款药丸）：点开组内两步小卡 */}
-                  <PressableScale
-                    style={[styles.catHeaderAddBtn, { backgroundColor: semantic.accentSoft }]}
-                    activeScale={0.92}
-                    onPress={() => {
-                      if (isAdding) {
-                        setAddingGroupName(null);
-                        setInlineName('');
-                      } else {
-                        setInlineName('');
-                        setInlineIcon(ICON_OPTIONS[0]);
-                        setInlineColor(COLOR_OPTIONS[0]);
-                        setAddingGroupName(group);
-                      }
-                    }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name={isAdding ? 'remove' : 'add'} size={13} color={semantic.textPrimary} />
-                    <AppText variant="caption2" weight="700" color={semantic.textPrimary}>
-                      {isAdding ? t('addTx.headerCollapse') : t('addTx.headerAdd')}
-                    </AppText>
-                  </PressableScale>
                   <AppText variant="caption2" color={semantic.textSecondary} style={styles.groupCount}>
                     {t('addTx.itemsUnit', { count: items.length })}
                   </AppText>
@@ -478,55 +753,32 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                   {t('addTx.itemsUnit', { count: items.length })}
                 </AppText>
               </View>
-              )}
+              )}>
 
-              {/* TASK-020③：selectMode 折叠时组内容不渲染（记一笔同款）；管理模式永远显示 */}
-              {(expanded || !selectMode) && (items.length > 0 ? (
-                <View style={styles.groupGrid}>
-                  {items.map((c) => (
-                    <View key={c.id} style={styles.gridItem}>
-                      {/* 选择模式下整格可点：选中分类并返回表单；管理模式保持纯展示 */}
-                      {selectMode ? (
-                        <PressableScale
-                          style={styles.gridSelectWrap}
-                          activeScale={0.97}
-                          onPress={() => {
-                            // 选择模式：回调把选中 id 交回表单 + goBack 弹栈返回——
-                            // 之前用 navigate(merge:true) 跳转，跨栈找不到目标时会再压一个新页面，反复点就无限套娃
-                            const pick = route?.params?.onPickCategory;
-                            if (typeof pick === 'function') pick(c.id);
-                            navigation.goBack();
-                          }}
-                        >
-                          <IconCircle size={52} color={c.color} icon={c.icon as CategoryIconName} />
-                          <AppText variant="caption" numberOfLines={1} style={styles.gridLabel}>
-                            {getCategoryLabel(c, t)}
-                          </AppText>
-                        </PressableScale>
-                      ) : (
-                        <>
-                          <IconCircle size={52} color={c.color} icon={c.icon as CategoryIconName} />
-                          <PressableScale
-                            style={styles.gridDeleteBadge}
-                            activeScale={0.90}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            onPress={() => handleDeleteCategory(c.id, c.name)}
-                          >
-                            <Ionicons name="remove-circle" size={18} color={semantic.danger} />
-                          </PressableScale>
-                          <AppText variant="caption" numberOfLines={1} style={styles.gridLabel}>
-                            {getCategoryLabel(c, t)}
-                          </AppText>
-                        </>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <AppText variant="footnote" color={semantic.textSecondary} style={styles.groupEmpty}>
-                  {t('addTx.noCatsAddHint')}
-                </AppText>
-              ))}
+              {/* TASK-020③：selectMode 折叠时组内容不渲染（记一笔同款）；管理模式永远显示。
+                  网格最后一项是虚线「＋」磁贴（新增入口），其余磁贴长按即拖 */}
+              {(expanded || !selectMode) && (
+                <>
+                  {items.length === 0 && (
+                    <AppText variant="footnote" color={semantic.textSecondary} style={styles.groupEmpty}>
+                      {t('addTx.noCatsAddHint')}
+                    </AppText>
+                  )}
+                  <CategoryGridEditor
+                    items={items}
+                    columns={3}
+                    draggable={!selectMode}
+                    isAdding={isAdding}
+                    scrollRef={scrollRef}
+                    contentH={contentHRef}
+                    scrollY={scrollYSV}
+                    onReorder={(next) => handleCatGroupReorder(group, next)}
+                    onDelete={selectMode ? undefined : handleDeleteCategory}
+                    onPick={selectMode ? handlePickCategory : undefined}
+                    onToggleAdd={() => handleToggleAdd(group)}
+                  />
+                </>
+              )}
 
               {/* 该组的添加入口：TASK-020③ selectMode 照搬记一笔两步小卡（图标预览+名称+✓ + 16 色格，
                   图标在弹层里选）；管理模式保持原长表单不变 */}
@@ -667,28 +919,8 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                     </PressableScale>
                   </View>
                 </View>
-              ) : (
-                /* TASK-020 纠偏：selectMode 不再渲染底部「添加」入口行——添加入口已在组卡标题行＋里
-                   （长表单分支只在管理模式出现，selectMode 到这里就是收尾，不渲染任何东西） */
-                !selectMode && (
-                  <PressableScale
-                    style={[styles.inlineAddEntry, { backgroundColor: semantic.accentSoft }]}
-                    activeScale={0.97}
-                    onPress={() => {
-                      setInlineName('');
-                      setAddingGroupName(group);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('common.add')}
-                  >
-                    <Ionicons name="add-circle-outline" size={17} color={semantic.textPrimary} />
-                    <AppText variant="footnote" weight="600" color={semantic.textPrimary} style={styles.inlineAddEntryText}>
-                      {t('common.add')}
-                    </AppText>
-                  </PressableScale>
-                )
-              )}
-            </GlassView>
+              ) : null}
+            </GroupCardSlot>
           );
           })
           }
@@ -756,8 +988,27 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
               </GlassView>
             </PressableScale>
           )}
-        </ScrollView>
-      )}
+          {/* 被拖起的整组：跟手的组头胶囊（组名 + 项数），落点槽位上原卡变淡留白 */}
+          {groupDrag && ghostSection && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.groupGhost,
+                { backgroundColor: glass.fill, boxShadow: glass.shadow },
+                groupGhostStyle,
+              ]}
+            >
+              <Ionicons name="reorder-three-outline" size={16} color={semantic.textTertiary} style={styles.groupGhostHandle} />
+              <AppText variant="subhead" weight="600" style={styles.groupTitle}>
+                {getGroupLabel(groupDrag.group, t)}
+              </AppText>
+              <AppText variant="caption2" color={semantic.textSecondary} style={styles.groupCount}>
+                {t('addTx.itemsUnit', { count: ghostSection.items.length })}
+              </AppText>
+            </Animated.View>
+          )}
+        </View>
+      </ScrollView>
 
       {/* TASK-020③：图标选择底部弹层（两步小卡第二步）——119 个图标 6 列网格，
           点选回填小卡预览方块；记一笔同款（JSX 与样式整套照搬，防两处漂移） */}
@@ -818,14 +1069,6 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
     // 玻璃页头：透明返回键底下那枚 44 玻璃圆钮（与 ScreenHeader 左侧槽位对齐）
     headerGlass: { position: 'absolute', width: 44, height: 44 },
     headerGlassInner: { width: 44, height: 44 },
-    // 右侧「编辑 / 完成」玻璃胶囊（稿：高 40 / padding 0 14 / radius 999）
-    editPill: {
-      height: 40,
-      paddingHorizontal: 14,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-    },
     // 顶部 支出/收入 分段：贴紧页头（上移），玻璃槽自带圆角
     typeSegWrap: { marginBottom: spacing.md },
     groupCard: {
@@ -833,17 +1076,25 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       paddingBottom: spacing.xs + 2,
     },
     groupHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 3 },
-    groupDragHandle: { marginRight: spacing.xs + 2 },
     groupTitle: { flexShrink: 1 },
     groupDeleteBtn: { marginLeft: spacing.sm },
     groupCount: { marginLeft: 'auto' },
-    reorderHint: { paddingBottom: spacing.sm },
-    groupGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
-    gridItem: { width: '33.33%', alignItems: 'center', marginBottom: spacing.lg },
-    // 选择模式下包住图标+文字的可点区域（覆盖整格宽度，方便点按）
-    gridSelectWrap: { alignItems: 'center', width: '100%' },
-    gridDeleteBadge: { position: 'absolute', top: -4, right: 8 },
-    gridLabel: { marginTop: 5, textAlign: 'center' },
+    // 正在被拖走的那张组卡：留在原位变淡（幽灵在手指底下），其余组卡让位平移
+    groupDragging: { opacity: 0.35 },
+    groupGhostHandle: { marginRight: spacing.xs + 2 },
+    // 整组拖拽的幽灵（跟手的组头胶囊）：与组卡同宽（内容包了 padding，这里 left/right 0 即对齐卡片）
+    groupGhost: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      height: 56,
+      borderRadius: 20,
+      paddingHorizontal: spacing.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      zIndex: 30,
+    },
     groupEmpty: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
     // ---------- TASK-020③：selectMode 照搬记一笔的两步小卡 + 图标弹层样式（原样搬，防两处漂移） ----------
     catInlineCard: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, paddingTop: spacing.xs },
@@ -882,16 +1133,7 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       paddingHorizontal: 2,
     },
     catMiniColorDot: { width: 26, height: 26, borderRadius: 999, marginRight: 10, marginBottom: spacing.sm },
-    // 标题行药丸「新增」键 + 垃圾桶（记一笔同款规格）
-    catHeaderAddBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      height: 24,
-      borderRadius: 12,
-      paddingHorizontal: 9,
-      marginLeft: spacing.sm,
-      gap: 2,
-    },
+    // selectMode 头部行的垃圾桶（新增入口已移到网格最后一项的虚线磁贴）
     catHeaderDeleteBtn: { marginLeft: spacing.sm, padding: 2 },
     iconPickerOverlay: {
       flex: 1,
@@ -928,35 +1170,9 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       justifyContent: 'center',
       borderRadius: 12,
     },
-    // 编辑排列模式条目
-    reorderWrap: { paddingHorizontal: 10 },
-    reorderItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: semantic.accentSoft,
-      borderRadius: 16,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      marginBottom: spacing.sm,
-    },
-    reorderLabel: { flex: 1, marginLeft: spacing.sm + 2 },
-    reorderDeleteBadge: { marginRight: 10 },
     // 组内联添加
     inlineAddCard: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     inlineBtnRow: { flexDirection: 'row', marginTop: spacing.md, alignItems: 'center' },
-    // 添加入口胶囊行：与记一笔选择类别页的 catAddTile 同观感（accentSoft 圆底 + accentText 文字）
-    inlineAddEntry: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      alignSelf: 'center',
-      marginHorizontal: spacing.lg,
-      marginBottom: 10,
-      marginTop: spacing.xs,
-      paddingVertical: 9,
-      paddingHorizontal: 18,
-      borderRadius: 999,
-    },
-    inlineAddEntryText: { marginLeft: spacing.xs + 2 },
     cancelBtn: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 18, marginRight: spacing.sm },
     // 新增大分类
     newGroupCard: { marginTop: spacing.xs, padding: spacing.lg },

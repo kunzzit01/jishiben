@@ -16,8 +16,8 @@ import {
   Keyboard,
   BackHandler,
 } from 'react-native';
-import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSharedValue } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,8 +32,11 @@ import { useT, useLanguage } from '../i18n/LanguageContext';
 import { getCategoryLabel, getGroupLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { scanReceipt } from '../utils/scanReceipt';
+import { isAiConfigured } from '../config/aiConfig';
 import { getCurrencySymbol } from '../utils/currencies';
 import { CATEGORY_ICON_OPTIONS, CATEGORY_COLOR_OPTIONS, CategoryIconName } from '../constants/categoryAddOptions';
+// 分类网格编辑器（虚线占位框 / 长按 200ms 拖拽 / 虚线＋新增磁贴 / 删除角标）——与管理类别页同一个组件
+import { CategoryGridEditor, sortByOrder } from '../components/CategoryGridEditor';
 import { hapticLight, hapticSelection, hapticSuccess, hapticWarning } from '../utils/haptics';
 import { useTheme } from '../theme/useTheme';
 import { useLayout } from '../theme/useLayout';
@@ -280,7 +283,7 @@ function SaveSuccessFlash() {
     ]).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const { gradients } = useTheme();
+  const { gradients, semantic } = useTheme();
   return (
     <View style={v2Styles.saveFlashOverlay} pointerEvents="none">
       <Animated.View style={[v2Styles.saveFlashBadge, { opacity, transform: [{ scale }] }]}>
@@ -291,7 +294,7 @@ function SaveSuccessFlash() {
           end={gradients.accent.end}
           style={StyleSheet.absoluteFill}
         />
-        <Ionicons name="checkmark" size={34} color="#FFFFFF" />
+        <Ionicons name="checkmark" size={34} color={semantic.onAccent} />
       </Animated.View>
     </View>
   );
@@ -320,6 +323,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const { colors, isDark, semantic, spacing, layout, radius } = useTheme();
   // 矮屏（可用高 < 700）：金额卡内边距 / 行距再收紧一档，保证「金额 + 至少 2 行类别 + 键盘」一屏可见
   const { isShort, categoryColumns, keypadKeyHeight } = useLayout();
+  // 设计稿 03 屏：类别九宫格固定四列（36 方块 + 11pt 标签）。窄/矮屏也不再收成 5 列 ——
+  // useLayout().categoryColumns 是全局版型参数（theme/** 不在本次改动范围），所以在本页覆写
+  const gridColumns = 4;
   // 自绘计算器面板总高（备注行 + 4 行分格键 + 缝，随键高档位变化；不含底部安全区补白）。
   // 遮挡高度与类别网格停止线都用它，和键盘真实渲染高度保持一致
   const keypadPanelH = keypadPanelHeight(keypadKeyHeight, isShort, true);
@@ -482,7 +488,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 折叠状态只在本页用，保存后重置。搜索时全部强制展开并按名字过滤。
   // 编辑模式（长按任一图标进入，iOS 风格）：图标抖动 + 删除角标，把分类拖到目标大组卡片标题上即换组
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [catEditMode, setCatEditMode] = useState(false);
   // 组内联添加（TASK-004：从类别分类页并入——能力补齐后选择类别页自成一页，不再跳转）
   const [addingGroupName, setAddingGroupName] = useState<string | null>(null);
   const [inlineName, setInlineName] = useState('');
@@ -491,6 +496,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // TASK-012④：名称输入框跟随焦点——聚焦时若被键盘挡住，滚动到输入框可见
   const inlineInputRef = useRef<TextInput | null>(null);
   const categoryScrollRef = useRef<ScrollView | null>(null);
+  // 网格拖拽用：页面滚动量（内容坐标换算）+ 内容高度（贴边自动滚动夹取）
+  const categoryScrollYSV = useSharedValue(0);
+  const categoryContentHRef = useRef(0);
   const keyboardHeightRef = useRef(0);
   // TASK-016⑥：聚焦时把输入框滚到键盘上方。
   // measureLayout 在新架构(Fabric)下要求原生 ref，getInnerViewNode() 直接报
@@ -597,7 +605,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 离开本页/切换类型时重置编辑与搜索状态（分组默认全部展开，点卡片空白处可收起）
   useEffect(() => {
     setCollapsedGroups(new Set<string>());
-    setCatEditMode(false);
     setNewGroupFormOpen(false);
     setNewGroupName('');
   }, [type, step, categoryGroups]);
@@ -707,11 +714,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 网格区是可滚动的 flex:1 区域：实测到多少高度就铺多少格（至少 2 行 —— 计划 8.2 第 7 条
   // 「金额 + 至少 2 行类别 + 键盘」一屏可见）；历史用过的类别超出可见容量时靠网格滚动查看，不再裁剪
   const [gridH, setGridH] = useState<number | null>(null);
-  /** 一格高度 = 48 圆（V2） + 4 标签间距 + 16 单行标签预留 + 4 顶距 + 4 行距 = 76
+  /** 一格高度 = 36 方块（稿） + 4 标签间距 + 16 单行标签预留 + 4 顶距 + 12 行距 = 72
    *  （与 catCell / catCellLabel / catGridContent 样式同步；两行标签的格子自然变高，网格可滚动） */
-  const CAT_CELL_ROW_HEIGHT = 76;
+  const CAT_CELL_ROW_HEIGHT = 72;
   const gridVisibleRows = gridH == null ? null : Math.max(2, Math.floor(gridH / CAT_CELL_ROW_HEIGHT));
-  const gridMaxCount = gridVisibleRows == null ? null : gridVisibleRows * categoryColumns - 1;
+  const gridMaxCount = gridVisibleRows == null ? null : gridVisibleRows * gridColumns - 1;
   // ---------- 网格顺序冻结（T15 修正）----------
   // 进入页面 / 切换支出·收入 / 列表数据落地（catListsGen）/ 保存后重进页面（resetAll）时重建一次；
   // 本次会话里「点网格格子」只高亮、不重排 —— 修「手指下的格子弹到第 1 格」；
@@ -748,14 +755,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     gridOrder.forEach(push);
     // TASK-024 / T15：补齐目标 = 可见容量（gridMaxCount 已为「全部」预留 -1 格），
     // 首帧容量未知时至少补 2 行；冻结顺序（本次选过 + 最近用过）永远排在补齐类别前面
-    const fillTarget = gridMaxCount ?? categoryColumns * 2;
+    const fillTarget = gridMaxCount ?? gridColumns * 2;
     for (const c of filteredCategories) {
       if (pinned.length >= fillTarget) break;
       push(c.id);
     }
     return pinned;
     // 补齐目标跟随可见容量（键盘弹出/收起、Hero 压缩都会改变 gridMaxCount）
-  }, [gridOrder, filteredCategories, categoryColumns, gridMaxCount]);
+  }, [gridOrder, filteredCategories, gridColumns, gridMaxCount]);
   // 金额币种只认所选账户（2026-09-24 用户定版）：选什么账户显示什么货币，没选账户用全局设置货币；
   // 弹层里的币种项只做账户筛选，不再改金额币种（displayCurrencyCode 直选机制已移除）
   const selectedAsset = assets.find((a) => a.id === assetId);
@@ -1374,6 +1381,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 纯云端模式：统一走云端 OCR 解析（本地 AICore 模块已移除，ML Kit GenAI 依赖在
   // EAS 上无法解析——公开仓库不含该 artifact，恢复本地模式时从 Zcode 备份取回）
   const runScan = async (base64: string, uri: string) => {
+    // 未配置 AI 密钥（环境变量缺失）→ 优雅降级：不请求、不崩，提示后让用户手动记账
+    if (!isAiConfigured) {
+      dialog.alert({ title: t('addTx.scanUnavailableTitle'), message: t('addTx.scanUnavailableMsg') });
+      return;
+    }
     setScanning(true);
     try {
       const result = await scanReceipt(base64);
@@ -1416,6 +1428,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [cameraMode, setCameraMode] = useState<'scan' | 'receipt' | null>(null);
 
   const handleScanPress = () => {
+    // 没有 AI 密钥时不必开相机（拍了也解析不了）——直接给不可用提示
+    if (!isAiConfigured) {
+      dialog.alert({ title: t('addTx.scanUnavailableTitle'), message: t('addTx.scanUnavailableMsg') });
+      return;
+    }
     setCameraMode('scan');
   };
 
@@ -1898,35 +1915,35 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       <EdgeBackSwipe onBack={edgeBackHome}>
       <SafeAreaView style={styles.container} edges={['top']}
       onTouchStart={() => { Keyboard.dismiss(); }}>
-        {/* 二级页标准页头（T15 换 ScreenHeader）：返回 + 居中标题 + 编辑（进排版模式） */}
+        {/* 二级页标准页头（T15 换 ScreenHeader）：返回 + 居中标题；本页进入即编辑态，没有编辑/完成开关 */}
         <ScreenHeader
           title={t('addTx.selectCategory')}
           onBack={() => setStep('detail')}
-          right={
-            <Button
-              title={catEditMode ? t('common.done') : t('addTx.edit')}
-              icon={catEditMode ? 'checkmark' : 'create-outline'}
-              variant={catEditMode ? 'primary' : 'secondary'}
-              size="sm"
-              fullWidth={false}
-              onPress={() => {
-                hapticLight();
-                setCatEditMode((prev) => !prev);
-              }}
-            />
-          }
         />
 
         {/* 类别选择页不再显示 支出/收入/转账/兑换 切换栏：进来是什么类型就只显示该类型的类别 */}
 
-
-        <ScrollView ref={categoryScrollRef} onScroll={onTabScroll ?? undefined} scrollEventThrottle={16} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: tabClearance }}>
-          {/* 按大类分节（每节一张圆角卡片、可折叠）；编辑模式行式拖动排序 + ⊖ 删除，自定义大类可左滑删除 */}
+        <ScrollView
+          ref={categoryScrollRef}
+          onScroll={(e) => {
+            // 网格拖拽要把绝对坐标换算成内容坐标：顺手记下滚动量，再喂给浮空 Tab 栏
+            categoryScrollYSV.value = e.nativeEvent.contentOffset.y;
+            onTabScroll?.(e);
+          }}
+          onContentSizeChange={(_w, h) => {
+            categoryContentHRef.current = h;
+          }}
+          scrollEventThrottle={16}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: tabClearance }}
+        >
+          {/* 按大类分节（每节一张圆角卡片、可折叠）；本页进入即编辑态（没有「编辑 / 完成」开关）：
+              点磁贴 = 选中该分类并返回 · 长按 200ms 抬起可拖动组内排序 · 图标右上角红色角标删除 ·
+              网格最后一项是虚线「＋」磁贴，复用组内两步小卡的新增流程 */}
           {groupedExpenseSections.map(({ group, items, custom }) => {
-              const expanded = catEditMode || !collapsedGroups.has(group);
+              const expanded = !collapsedGroups.has(group);
               const themeColor = colors.link;
               const toggleGroup = () => {
-                if (catEditMode) return;
                 setCollapsedGroups((prev) => {
                   const next = new Set(prev);
                   if (next.has(group)) next.delete(group);
@@ -1934,17 +1951,22 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   return next;
                 });
               };
-              // 编辑模式行式列表：组内按拖拽顺序排，没序号的按原数组顺序殿后
-              const orderedItems = catEditMode
-                ? [...items].sort((a, b) => {
-                    const oa = categoryOrder[a.id];
-                    const ob = categoryOrder[b.id];
-                    if (oa === undefined && ob === undefined) return 0;
-                    if (oa === undefined) return 1;
-                    if (ob === undefined) return -1;
-                    return oa - ob;
-                  })
-                : items;
+              // 新增入口的开关：组头药丸与网格末尾的虚线＋磁贴共用同一份状态
+              const toggleInlineAdd = () => {
+                hapticLight();
+                if (addingGroupName === group) {
+                  setAddingGroupName(null);
+                  setInlineName('');
+                } else {
+                  setInlineName('');
+                  setInlineIcon(CATEGORY_ICON_OPTIONS[0]);
+                  setInlineColor(CATEGORY_COLOR_OPTIONS[0]);
+                  setAddingGroupName(group);
+                }
+              };
+              // 组内按持久化序号排（与「管理类别」页共用 @jizhang/categoryOrder）：
+              // 拖过的顺序 reload 后仍然保持，没序号的按原数组顺序殿后
+              const orderedItems = sortByOrder(items, categoryOrder);
               const card = (
                 <Pressable
                   key={group}
@@ -1959,101 +1981,41 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   <Pressable style={styles.catGroupHeader} onPress={toggleGroup} hitSlop={{ top: 6, bottom: 6 }}>
                     <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={themeColor} />
                     <Text style={[styles.catGroupTitle, { color: themeColor }]}>{getGroupLabel(group, t)}</Text>
-                    {/* TASK-016①：＋入口移入标题行（组名隔壁），点开组内两步小卡；编辑态不显示 */}
-                    {!catEditMode && (
-                      <TouchableOpacity
-                        style={styles.catHeaderAddBtn}
-                        onPress={() => {
-                          hapticLight();
-                          if (addingGroupName === group) {
-                            setAddingGroupName(null);
-                            setInlineName('');
-                          } else {
-                            setInlineName('');
-                            setInlineIcon(CATEGORY_ICON_OPTIONS[0]);
-                            setInlineColor(CATEGORY_COLOR_OPTIONS[0]);
-                            setAddingGroupName(group);
-                          }
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name={addingGroupName === group ? 'remove' : 'add'} size={13} color={colors.fabIcon} />
-                        <Text style={styles.catHeaderAddText}>
-                          {addingGroupName === group ? t('addTx.headerCollapse') : t('addTx.headerAdd')}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
+                    {/* 新增入口只在网格末尾的虚线＋磁贴上（分组头不再挂「＋ 新增」药丸） */}
                     <View style={styles.catGroupCountWrap}>
                       <Text style={styles.catGroupCount}>{t('addTx.itemsCount', { count: items.length })}</Text>
                     </View>
-                    {/* TASK-016①：整组删除入口（原左滑删除改这里）：垃圾桶贴数量胶囊右侧；编辑态不显示 */}
-                    {!catEditMode && (
-                      <TouchableOpacity
-                        style={styles.catHeaderDeleteBtn}
-                        onPress={() => confirmDeleteGroup(group, items.length)}
-                        hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('common.delete')}
-                      >
-                        <Ionicons name="trash-outline" size={15} color={colors.expense} />
-                      </TouchableOpacity>
-                    )}
+                    {/* TASK-016①：整组删除入口（原左滑删除改这里）：垃圾桶贴数量胶囊右侧 */}
+                    <TouchableOpacity
+                      style={styles.catHeaderDeleteBtn}
+                      onPress={() => confirmDeleteGroup(group, items.length)}
+                      hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('common.delete')}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={colors.expense} />
+                    </TouchableOpacity>
                   </Pressable>
-                  {expanded && catEditMode && (
-                    /* 编辑模式：行式拖动排序（资产页三条横线同款）——长按行拖动组内排序、⊖ 删除；
-                       scrollEnabled=false 嵌在页面 ScrollView 里（资产页同款，无手势冲突） */
-                    <View style={styles.catEditListWrap}>
-                      <DraggableFlatList
-                        data={orderedItems}
-                        scrollEnabled={false}
-                        keyExtractor={(item) => item.id}
-                        onDragEnd={({ data }) => handleCatReorder(data)}
-                        renderItem={({ item: c, drag, isActive }: RenderItemParams<Category>) => (
-                          <ScaleDecorator>
-                            <TouchableOpacity
-                              style={[styles.catEditRow, isActive && styles.catEditRowActive]}
-                              activeOpacity={0.8}
-                              onLongPress={drag}
-                              delayLongPress={150}
-                            >
-                              <View style={[styles.catEditRowIcon, { backgroundColor: c.color + '22' }]}>
-                                <Ionicons name={c.icon as IconName} size={20} color={c.color} />
-                              </View>
-                              <Text style={styles.catEditRowName} numberOfLines={1}>
-                                {getCategoryLabel(c, t)}
-                              </Text>
-                              <TouchableOpacity
-                                style={styles.catEditRowDelete}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                onPress={() => confirmDeleteCategory(c)}
-                              >
-                                <Ionicons name="remove-circle" size={20} color={colors.expense} />
-                              </TouchableOpacity>
-                              <Ionicons name="reorder-three-outline" size={22} color={colors.textTertiary} />
-                            </TouchableOpacity>
-                          </ScaleDecorator>
-                        )}
-                      />
-                    </View>
+                  {/* 分类网格（与管理类别页同一个组件）：虚线占位框 + 长按 200ms 拖拽排序 +
+                      虚线＋磁贴；点磁贴仍是"选中并返回"，拖完那一下松手不会被当成点击 */}
+                  {expanded && (
+                    <CategoryGridEditor
+                      items={orderedItems}
+                      columns={4}
+                      isAdding={addingGroupName === group}
+                      scrollRef={categoryScrollRef}
+                      contentH={categoryContentHRef}
+                      scrollY={categoryScrollYSV}
+                      onPick={handlePickCategory}
+                      onDelete={(id) => {
+                        const target = filteredCategories.find((c) => c.id === id);
+                        if (target) confirmDeleteCategory(target);
+                      }}
+                      onReorder={handleCatReorder}
+                      onToggleAdd={toggleInlineAdd}
+                    />
                   )}
-                  {expanded && !catEditMode && (
-                    <View style={styles.catGrid}>
-                      {items.map((c) => (
-                        <View key={c.id} style={styles.catItem}>
-                          <TouchableOpacity
-                            activeOpacity={0.7}
-                            onPress={() => handlePickCategory(c.id)}
-                          >
-                            <View style={[styles.catIconCircle, { backgroundColor: c.color + '22' }]}>
-                              <Ionicons name={c.icon as IconName} size={22} color={c.color} />
-                            </View>
-                          </TouchableOpacity>
-                          <Text style={styles.catLabel}>{getCategoryLabel(c, t)}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                  {expanded && !catEditMode && addingGroupName === group && (
+                  {expanded && addingGroupName === group && (
                     /* TASK-016②：两步小卡——一行（图标预览 + 名称 + ✓）+ 单行色条；
                        图标在弹层里选（点预览方块打开底部弹层） */
                     <View
@@ -2125,69 +2087,53 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               return card;
             })}
 
-          {/* 新增大分类：点击展开表单，填写名字+主题色后创建（空组也会显示，编辑模式下可拖分类进去） */}
-          {!catEditMode && (
-            <View style={[styles.catGroupCard, styles.newGroupCard]}>
-              {newGroupFormOpen ? (
-                <>
-                  <View style={styles.newCatTitleRow}>
-                    <Text style={styles.newCatTitle}>{t('addTx.addGroup')}</Text>
-                    <TouchableOpacity
-                      onPress={() => setNewGroupFormOpen(false)}
-                      hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('common.close')}
-                    >
-                      <Ionicons name="close" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-                  <TextInput
-                    style={styles.newCatInput}
-                    value={newGroupName}
-                    onChangeText={setNewGroupName}
-                    placeholder={t('addTx.groupNamePlaceholder')}
-                    placeholderTextColor={colors.textTertiary}
-                    maxLength={10}
-                  />
+          {/* 新增大分类：点击展开表单，填写名字+主题色后创建（空组也会显示） */}
+          <View style={[styles.catGroupCard, styles.newGroupCard]}>
+            {newGroupFormOpen ? (
+              <>
+                <View style={styles.newCatTitleRow}>
+                  <Text style={styles.newCatTitle}>{t('addTx.addGroup')}</Text>
                   <TouchableOpacity
-                    style={[styles.newCatBtnFull, !newGroupName.trim() && { opacity: 0.4 }]}
-                    disabled={!newGroupName.trim()}
-                    onPress={() => {
-                      const name = newGroupName.trim();
-                      if (!name) return;
-                      hapticSuccess();
-                      addCategoryGroup({ name, icon: 'folder-outline', type: type as 'expense' | 'income' });
-                      setNewGroupName('');
-                      setNewGroupFormOpen(false);
-                    }}
+                    onPress={() => setNewGroupFormOpen(false)}
+                    hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.close')}
                   >
-                    <Text style={styles.newCatBtnFullText}>{t('addTx.createGroup')}</Text>
+                    <Ionicons name="close" size={16} color={colors.textSecondary} />
                   </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity style={styles.newGroupEntry} onPress={() => setNewGroupFormOpen(true)}>
-                  <Ionicons name="add-circle-outline" size={18} color={colors.link} />
-                  <Text style={styles.newGroupEntryText}>{t('addTx.addGroup')}</Text>
+                </View>
+                <TextInput
+                  style={styles.newCatInput}
+                  value={newGroupName}
+                  onChangeText={setNewGroupName}
+                  placeholder={t('addTx.groupNamePlaceholder')}
+                  placeholderTextColor={colors.textTertiary}
+                  maxLength={10}
+                />
+                <TouchableOpacity
+                  style={[styles.newCatBtnFull, !newGroupName.trim() && { opacity: 0.4 }]}
+                  disabled={!newGroupName.trim()}
+                  onPress={() => {
+                    const name = newGroupName.trim();
+                    if (!name) return;
+                    hapticSuccess();
+                    addCategoryGroup({ name, icon: 'folder-outline', type: type as 'expense' | 'income' });
+                    setNewGroupName('');
+                    setNewGroupFormOpen(false);
+                  }}
+                >
+                  <Text style={styles.newCatBtnFullText}>{t('addTx.createGroup')}</Text>
                 </TouchableOpacity>
-              )}
-            </View>
-          )}
+              </>
+            ) : (
+              <TouchableOpacity style={styles.newGroupEntry} onPress={() => setNewGroupFormOpen(true)}>
+                <Ionicons name="add-circle-outline" size={18} color={colors.link} />
+                <Text style={styles.newGroupEntryText}>{t('addTx.addGroup')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
         </ScrollView>
-
-        {/* 编辑模式提示条（TASK-016：三条横线行式排序——按住行拖动、⊖ 删除）+ 底部完成键 */}
-        {catEditMode && (
-          <View style={styles.catEditHintBar} pointerEvents="none">
-            <Text style={styles.catEditHintText} numberOfLines={1}>
-              {t('addTx.catEditHint')}
-            </Text>
-          </View>
-        )}
-        {catEditMode && (
-          <TouchableOpacity style={styles.catEditDoneBtn} onPress={() => setCatEditMode(false)}>
-            <Text style={styles.catEditDoneText}>{t('common.done')}</Text>
-          </TouchableOpacity>
-        )}
 
         {/* TASK-016③：图标选择底部弹层（两步小卡的第二步）——119 个图标 6 列网格，
             点选回填小卡预览方块；挂在选择类别页自己的 return 分支内（详情分支的 Modal 在这里渲染不到） */}
@@ -2337,16 +2283,42 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* 账户 / 日期 / 月度结转：一行 V2 实底 Chip（夜 surfaceSunken / 日白底轻投影，稿），居中排布 */}
+        {/* 币种行（设计稿 03 屏）：账户 + 币种 / 可用余额 + chevron —— 点按仍是原「选择账户」抽屉，
+            数据与行为不变，只是把账户从一行胶囊换成一张 surface 卡 */}
+        <PressableScale
+          activeScale={0.98}
+          hitSlop={0}
+          onPress={() => setAssetPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={t('addTx.selectAccount')}
+          style={styles.currencyRow}
+          testID="addtx-currency-row"
+        >
+          <View
+            style={[
+              styles.currencyBadge,
+              { backgroundColor: withAlpha(selectedAsset?.color ?? semantic.accent, 0.12) },
+            ]}
+          >
+            <AppText variant="caption2" weight="600" color={semantic.textPrimary}>
+              {amountCurrencyCode}
+            </AppText>
+          </View>
+          <View style={styles.currencyInfo}>
+            <AppText variant="subhead" weight="500" color={semantic.textPrimary} numberOfLines={1}>
+              {selectedAsset ? `${selectedAsset.name} · ${amountCurrencyCode}` : t('common.notSelected')}
+            </AppText>
+            {assetId != null && (
+              <AppText variant="caption2" color={semantic.textTertiary} numberOfLines={1}>
+                {`${t('addTx.availableBalance')} ${formatMoney(getAssetBalance(assetId))}`}
+              </AppText>
+            )}
+          </View>
+          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+        </PressableScale>
+
+        {/* 日期 / 月度结转：一行 V2 实底 Chip（夜 surfaceSunken / 日白底轻投影，稿），居中排布 */}
         <View style={[styles.heroChipsRow, isShort && styles.heroChipsRowShort]}>
-          <TransactionChip
-            label={selectedAsset ? selectedAsset.name : t('common.notSelected')}
-            dotColor={selectedAsset?.color}
-            trailingIcon="chevron-down"
-            compact={isShort}
-            onPress={() => setAssetPickerOpen(true)}
-            accessibilityLabel={t('addTx.selectAccount')}
-          />
           <TransactionChip
             label={formatDateLabel(date, langMode, { style: 'monthDay' })}
             trailingIcon="chevron-down"
@@ -2389,7 +2361,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           {displayCategories.map((c) => {
             const active = categoryId === c.id;
             return (
-              <View key={c.id} style={[styles.catCellWrap, { width: `${100 / categoryColumns}%` as unknown as `${number}%` }]}>
+              <View key={c.id} style={[styles.catCellWrap, { width: `${100 / gridColumns}%` as unknown as `${number}%` }]}>
                 <PressableScale
                   style={[styles.catCell, isShort && styles.catCellShort]}
                   activeScale={0.94}
@@ -2398,28 +2370,27 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   accessibilityLabel={getCategoryLabel(c, t)}
                   accessibilityState={{ selected: active }}
                 >
-                  {/* UI V2 稿：48 圆图标（未选中 = 类别色淡底；选中 = 类别色实底 + 外圈）。
-                      外圈 = 两层嵌套 View 画的真圆（不依赖 boxShadow）：58 圆 borderWidth 2
-                      （夜 = 类别色 60% / 日 = #9B5BD6），与 48 实心圆之间留 3 的页面底间隙；
-                      绝对定位在 48 盒子上，不占布局、选中时图标不位移 */}
-                  <View style={styles.catIconBox}>
-                    <IconCircle size={48} color={c.color} icon={c.icon as IconName} selected={active} />
-                    {active ? (
-                      <View
-                        pointerEvents="none"
-                        style={[
-                          styles.catRing,
-                          { borderColor: isDark ? withAlpha(c.color, categoryRing.darkAlpha) : categoryRing.light },
-                        ]}
-                      />
-                    ) : null}
-                  </View>
+                  {/* 设计稿 03 屏：36 圆角方块 + 线条图标（IconCircle shape="tile"）；
+                      选中 = accentSoft 实底 + accent 1px 描边 + 标签提成 accentText/600
+                      —— 不再用 V2 的 48 圆 + 58 外圈 */}
+                  <IconCircle
+                    size={36}
+                    shape="tile"
+                    color={c.color}
+                    icon={c.icon as IconName}
+                    style={{
+                      borderRadius: radius.sm,
+                      ...(active
+                        ? { backgroundColor: semantic.accentSoft, borderWidth: 1, borderColor: semantic.accent }
+                        : null),
+                    }}
+                  />
                   <AppText
-                    variant="caption"
+                    variant="caption2"
                     align="center"
                     numberOfLines={2}
                     weight={active ? '600' : undefined}
-                    color={active ? semantic.textPrimary : semantic.textSecondary}
+                    color={active ? semantic.accentText : semantic.textSecondary}
                     style={styles.catCellLabel}
                   >
                     {getCategoryLabel(c, t)}
@@ -2431,7 +2402,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
 
           {/* 「全部」殿后格：与类别格同尺寸，打开完整列表抽屉（组内新增 / 排序 / 删除都在「管理类别」页）；
               稿里是中性圆（夜 surfaceSunken / 日白底轻投影）+ 九宫格图标 */}
-          <View style={[styles.catCellWrap, { width: `${100 / categoryColumns}%` as unknown as `${number}%` }]}>
+          <View style={[styles.catCellWrap, { width: `${100 / gridColumns}%` as unknown as `${number}%` }]}>
             <PressableScale
               style={[styles.catCell, isShort && styles.catCellShort]}
               activeScale={0.94}
@@ -2439,8 +2410,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               accessibilityRole="button"
               accessibilityLabel={t('common.all')}
             >
-              <IconCircle size={48} icon="grid-outline" />
-              <AppText variant="caption" align="center" color={semantic.textSecondary} style={styles.catCellLabel}>
+              <IconCircle size={36} shape="tile" icon="grid-outline" style={{ borderRadius: radius.sm }} />
+              <AppText variant="caption2" align="center" color={semantic.textSecondary} style={styles.catCellLabel}>
                 {t('common.all')}
               </AppText>
             </PressableScale>
@@ -2569,10 +2540,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   container: { flex: 1, backgroundColor: semantic.bg },
   scanningWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scanningText: { marginTop: 16, color: colors.textSecondary, fontSize: 14 },
-  catGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12 },
-  catItem: { width: '25%', alignItems: 'center', marginBottom: 14 },
-  catIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  catLabel: { fontSize: 12, color: colors.textPrimary, marginTop: 6 },
   // 组内联添加（TASK-004 自类别分类页并入；TASK-016 两步小卡：图标预览 + 名称 + ✓ 一行 + 单行色条）
   catInlineCard: { paddingHorizontal: 14, paddingBottom: 12, paddingTop: 2 },
   catInlineInput: {
@@ -2621,22 +2588,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   },
   catMiniColorDot: { width: 26, height: 26, borderRadius: 13, marginRight: 10, marginBottom: 8 },
   catMiniColorDotActive: { borderWidth: 2, borderColor: colors.textPrimary },
-  // 右上编辑键（TASK-006）：与返回键同尺寸圆框，未激活 link 描边、激活 fabBg 实底
-  // TASK-016⑤：编辑模式行式列表（资产页三条横线同款）
-  catEditListWrap: { paddingHorizontal: 10, paddingBottom: 8 },
-  catEditRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.bg,
-    borderRadius: 12,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    marginBottom: 6,
-  },
-  catEditRowActive: { opacity: 0.85 },
-  catEditRowIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  catEditRowName: { flex: 1, fontSize: 13, color: colors.textPrimary },
-  catEditRowDelete: { marginRight: 10 },
   // 大组分节：每节一张圆角卡片（图1 样式：外框 boarder + 卡片内标题行 + 九宫格）
   catGroupCard: {
     backgroundColor: colors.card,
@@ -2659,23 +2610,7 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   catGroupTitle: { fontSize: 13, fontWeight: '700', color: colors.link, marginLeft: 6 },
   catGroupCountWrap: { marginLeft: 'auto', backgroundColor: colors.bg, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 },
   catGroupCount: { fontSize: 10, color: colors.textTertiary },
-  // 标题行药丸「新增」键 + 垃圾桶（TASK-016①：添加/删除入口都在标题行，左滑删除退役）
-  catHeaderAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.fabBg,
-    paddingHorizontal: 9,
-    marginLeft: 8,
-    gap: 2,
-    shadowColor: colors.fabBg,
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  catHeaderAddText: { color: colors.fabIcon, fontSize: 11, fontWeight: '700' },
+  // 标题行只剩垃圾桶（新增入口已收敛到网格末尾的虚线＋磁贴）
   catHeaderDeleteBtn: { marginLeft: 8, padding: 2 },
   // 新增大分类：底部入口 + 表单 + 主题色板
   newGroupCard: { marginTop: 14, padding: 14 },
@@ -2702,30 +2637,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     color: colors.textPrimary,
     paddingVertical: 0,
   },
-  // 编辑模式：提示条 + 底部完成键（三条横线行式排序的行样式在 catEditRow* 上）
-  catEditHintBar: {
-    position: 'absolute',
-    bottom: 90,
-    alignSelf: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.dividerHair,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    maxWidth: '90%',
-  },
-  catEditHintText: { fontSize: 12, color: colors.textSecondary },
-  catEditDoneBtn: {
-    position: 'absolute',
-    bottom: 40,
-    alignSelf: 'center',
-    backgroundColor: colors.fabBg,
-    borderRadius: 14,
-    paddingHorizontal: 22,
-    paddingVertical: 8,
-  },
-  catEditDoneText: { color: colors.fabIcon, fontWeight: '700', fontSize: 13 },
 
   // ---------- 键盘停靠区（V2）：面板自身画 keypadPanel 底 + 顶部 30 圆角，这里只留底部安全区补白 ----------
   stickyFooter: {
@@ -2805,6 +2716,27 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   heroAmountBox: { alignSelf: 'stretch', marginTop: 2 },
   heroAmountTouch: { alignSelf: 'stretch', minWidth: 0, alignItems: 'center', justifyContent: 'center' },
   // 账户 / 日期 / 月度结转 Chip 行（稿）：整行居中、放不下整块掉第二行，不截断、不缩字
+  // 币种行（设计稿 03 屏）：surface 实底 12 圆角卡 —— 币种徽标 + 账户·币种 + 余额 + chevron
+  currencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: spacing.md,
+    marginHorizontal: layout.page,
+    marginTop: spacing.sm,
+    paddingHorizontal: layout.card,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: semantic.surface,
+  },
+  currencyBadge: {
+    minWidth: 42,
+    height: 24,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  currencyInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   heroChipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
