@@ -651,7 +651,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
 
   const groupList = () => orderedExpenseSectionsRef.current.map((s) => s.group);
 
-  /** 落点判定：手指所在整卡的中心越过谁的"中线"，就排到谁后面（自然支持拖到最底） */
+  /** 落点判定：手指所在整卡的中心越过谁的"中线"，就排到谁后面（自然支持拖到最底）。
+   *  dy 传"有效位移"= 手指位移 + 拖动期间自动滚动产生的滚动量，否则贴边滚动时落点算不对。 */
   const computeHover = (group: string, dy: number) => {
     const list = groupList();
     const box = gBoxRef.current[group];
@@ -677,6 +678,32 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     return 0;
   };
 
+  /** 拖动期间持续采样：手指停在边缘带里就滚动列表，让用户能拖到看不见的位置（含最底部） */
+  const gScroll0Ref = useRef(0);
+  const gFingerYRef = useRef(-1);
+  const gLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopGroupScrollLoop = () => {
+    if (gLoopRef.current) {
+      clearInterval(gLoopRef.current);
+      gLoopRef.current = null;
+    }
+  };
+  const startGroupScrollLoop = () => {
+    stopGroupScrollLoop();
+    gLoopRef.current = setInterval(() => {
+      const fingerY = gFingerYRef.current;
+      if (fingerY < 0) return;
+      const winH = Dimensions.get('window').height;
+      const EDGE = 140;
+      let delta = 0;
+      if (fingerY < EDGE) delta = -12;
+      else if (fingerY > winH - EDGE) delta = 12;
+      if (!delta) return;
+      const next = Math.max(0, categoryScrollYSV.value + delta);
+      categoryScrollRef.current?.scrollTo({ y: next, animated: false });
+    }, 16);
+  };
+
   const getGroupPanHandlers = (group: string) => {
     const cached = groupPanCache.current[group];
     if (cached) return cached.panHandlers;
@@ -695,17 +722,25 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       },
       onMoveShouldSetPanResponder: () => false,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
+      onPanResponderGrant: (_e, g) => {
         hapticLight();
         const from = Math.max(0, groupList().indexOf(group));
+        gScroll0Ref.current = categoryScrollYSV.value;
+        gFingerYRef.current = g.y0;
+        startGroupScrollLoop();
         setGDrag({ group, from, dy: 0, hover: from });
       },
       onPanResponderMove: (_e, g) => {
         const from = Math.max(0, groupList().indexOf(group));
-        const hover = computeHover(group, g.dy);
-        setGDrag({ group, from, dy: g.dy, hover });
+        gFingerYRef.current = g.moveY;
+        // 有效位移 = 手指位移 + 自动滚动产生的滚动量（贴边滚动时卡片仍跟手）
+        const eff = g.dy + (categoryScrollYSV.value - gScroll0Ref.current);
+        const hover = computeHover(group, eff);
+        setGDrag({ group, from, dy: eff, hover });
       },
       onPanResponderRelease: () => {
+        stopGroupScrollLoop();
+        gFingerYRef.current = -1;
         setGDrag((cur) => {
           if (cur) {
             const list = groupList();
@@ -719,7 +754,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           return null;
         });
       },
-      onPanResponderTerminate: () => setGDrag(null),
+      onPanResponderTerminate: () => {
+        stopGroupScrollLoop();
+        gFingerYRef.current = -1;
+        setGDrag(null);
+      },
     });
     groupPanCache.current[group] = responder;
     return responder.panHandlers;
