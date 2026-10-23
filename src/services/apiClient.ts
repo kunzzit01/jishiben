@@ -583,8 +583,27 @@ export interface ReceiptScanDto {
   suggestedCategory?: string | null;
 }
 
+/**
+ * 语音记账结果（POST /api/ai/voice-parse）。服务端顺序做两步（转写 → 记账解析），
+ * 形状与 utils/voiceAccounting.ts 的 VoiceAccountingResult 一一对应；除 transcript 外
+ * 每个「识别不到」的字段都是 null，且 Spring 的 non_null 序列化会整体省略 → 可能 undefined。
+ */
+export interface VoiceParseDto {
+  amount?: number | null;
+  merchant?: string | null;
+  /** YYYY-MM-DD */
+  date?: string | null;
+  type?: 'expense' | 'income' | null;
+  suggestedCategory?: string | null;
+  note?: string | null;
+  transcript?: string | null;
+}
+
 /** 服务端上游超时 30s + 连接 5s，客户端留出余量，避免先于服务端报「网络超时」。 */
 const AI_SCAN_TIMEOUT_MS = 45_000;
+
+/** 语音是两步上游调用（转写 + 解析），这里再放宽一档，仍由服务端的 504 兜底。 */
+const AI_VOICE_TIMEOUT_MS = 90_000;
 
 export const authApi = {
   register: (email: string, password: string, displayName?: string) =>
@@ -705,6 +724,13 @@ export const api = {
     authorizedRequest<ReceiptScanDto>('POST', '/api/ai/receipt-scan', {
       body: { imageBase64 },
       timeoutMs: AI_SCAN_TIMEOUT_MS,
+    }),
+
+  // AI 语音记账：录音只发给自家后端（服务端做转写 + 记账解析），第三方密钥永远不进 APP 包。
+  aiVoiceParse: (audioBase64: string, format: string) =>
+    authorizedRequest<VoiceParseDto>('POST', '/api/ai/voice-parse', {
+      body: { audioBase64, format },
+      timeoutMs: AI_VOICE_TIMEOUT_MS,
     }),
 };
 
