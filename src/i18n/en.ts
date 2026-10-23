@@ -256,6 +256,13 @@ export const en = {
     creditLimitLabel: 'Credit Limit',
     accountName: 'Account Name',
     accountNamePlaceholder: 'e.g. Bank card ****',
+    // 账户名称输入提示按账户类型分档（现金 / 银行卡 / 信用卡 / 电子钱包 / 投资 / 其他）
+    accountNamePlaceholderCash: 'e.g. Cash wallet',
+    accountNamePlaceholderBank: 'e.g. Maybank 8888',
+    accountNamePlaceholderCredit: 'e.g. Visa 1234',
+    accountNamePlaceholderEwallet: 'e.g. TnG eWallet',
+    accountNamePlaceholderInvestment: 'e.g. Fund account',
+    accountNamePlaceholderOther: 'e.g. Other account',
     accountType: 'Account Type',
     currencyLabel: 'Currency (long-press to remove)',
     addCurrencyTitle: 'Add Currency',
@@ -447,8 +454,10 @@ export const en = {
     weekdays: 'Sun,Mon,Tue,Wed,Thu,Fri,Sat',
     selectLedger: 'Select Ledger',
     defaultLedger: 'Default',
-    // Name of the real ledger created on first launch (no runtime fallback ledger any more)
+    // Name of the ledger created after the first successful pull, only when the account truly has none
     defaultLedgerName: 'Default Ledger',
+    // In-memory placeholder ledger shown before the server ledger list is known (never stored or synced)
+    pendingLedgerName: 'Local Ledger',
     // Name of the empty ledger created automatically after deleting the last one
     emptyLedgerName: 'My Ledger',
     setDefaultLedger: 'Set as default ledger',

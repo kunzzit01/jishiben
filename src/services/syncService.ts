@@ -34,6 +34,7 @@ import {
 } from '../types';
 import { amountKey, optionalAmount, optionalRate, parseAmount, rateKey } from '../utils/money4';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
+import { t as translate } from '../i18n';
 
 /**
  * 云端按行同步服务。
@@ -72,6 +73,15 @@ export interface LocalSnapshot {
 
 /** 云端行（canonical 形状：只包含本 App 负责的字段，金额是 4 位定点字符串） */
 type Row = Record<string, unknown>;
+
+/**
+ * 冷启动占位账本的保留 id：App 还没拿到服务端账本列表时，界面上需要一本"账本"来落点，
+ * 但那本**只活在内存里**——不写本地账本快照、不参与同步。真正落一笔账本记录必须等到
+ * 「已登录 + 首次拉取成功 + 服务端确实 0 本」（见 reconcileLedgers）。
+ * 它同时也是本地记账数据的临时归属 id：服务端账本列表到位后，reconcileLedgers 会把
+ * 挂在这个 id 下的流水/账户改挂到真正的当前账本上。
+ */
+export const PENDING_LEDGER_ID = '__pending_ledger__';
 
 const MIRROR_KEY = '@jizhang/syncMirror'; // 最近一次成功同步的数据镜像，用于 diff 出变更行
 const LAST_SYNC_KEY = '@jizhang/lastSyncAt';
@@ -857,6 +867,8 @@ async function writeLocalSnapshot(s: LocalSnapshot): Promise<void> {
 interface CloudPull {
   /** canonical 形状的云端行（用于合并设置字段与镜像） */
   cloud: SyncMirror;
+  /** 账号里被标记为"默认账本"的那本（服务端 is_default=true），没有则 null */
+  defaultLedgerUid: string | null;
   /** DTO 转成的本地实体（合并时用） */
   entities: {
     ledgers: Ledger[];
@@ -899,7 +911,11 @@ async function fetchAll(): Promise<CloudPull> {
     budgets: budgets.map((b) => budgetToRow(b, profile.currency)),
     profile,
   };
-  return { cloud, entities: { ledgers, assets, categoryGroups, categories, transactions, budgets } };
+  return {
+    cloud,
+    defaultLedgerUid: ledgerDtos.find((d) => d.defaultLedger)?.clientUid ?? null,
+    entities: { ledgers, assets, categoryGroups, categories, transactions, budgets },
+  };
 }
 
 // ────────────────────────────── 推送 ──────────────────────────────
@@ -1129,13 +1145,33 @@ function formatRowFailures(failedRows: RowFailure[]): string {
 }
 
 /** 把快照 diff 后推送到云端：只上传有变化的行、删除云端多余行，最后更新镜像 */
-async function pushSnapshot(s: LocalSnapshot): Promise<RowFailure[]> {
+async function pushSnapshot(
+  s: LocalSnapshot,
+  opts: { skipUnsyncedEmptyLedgers?: boolean } = {}
+): Promise<RowFailure[]> {
+  // 本地账本表为空 = 还没拿到服务端账本列表（冷启动首次拉取未完成 / 离线）。
+  // 这种状态下 diff 会把云端每一本账本都当成"本地已删除"，推上去就是全量删账本，
+  // 所以直接跳过推送，等首次拉取落定后再推。
+  if (s.ledgers.length === 0) return [];
   const current = buildAllRows(s);
   const mirror = await loadMirror();
   const failedRows: RowFailure[] = [];
 
+  // 拉取前的预推送（见 fullSync）只允许推"服务端已经认识"的账本行，或确实带数据的账本行：
+  // 空账本 + 镜像里没有 = 服务端从没见过它，先推上去就会把幽灵账本永久写进账号，
+  // 拉取后的对账（reconcileLedgers）也就再也回收不掉它。
+  // 带 0 账户 0 流水的本地新账本留给拉取后的对账判定（真·空账号会被补一本）。
+  let ledgerRows = current.ledgers;
+  if (opts.skipUnsyncedEmptyLedgers) {
+    const known = new Set(mirror.ledgers.map((r) => String(r.clientUid)));
+    const busy = new Set<string>();
+    s.assets.forEach((a) => busy.add(a.ledgerId));
+    s.transactions.forEach((t) => busy.add(t.ledgerId));
+    ledgerRows = ledgerRows.filter((r) => known.has(String(r.clientUid)) || busy.has(String(r.clientUid)));
+  }
+
   const tableRows: Record<string, Row[]> = {
-    ledgers: current.ledgers,
+    ledgers: ledgerRows,
     categoryGroups: current.categoryGroups,
     categories: current.categories,
     assets: current.assets,
@@ -1254,21 +1290,26 @@ function mergeSnapshots(local: LocalSnapshot, pull: CloudPull, cloudWinsAll: boo
   if (cloudWinsAll) {
     const base = emptySnapshot();
     const withSettings = applyProfileRow(base, pull.cloud.profile);
-    return {
-      transactions: pull.entities.transactions,
-      categories: pull.entities.categories,
-      // 内置大组由 defaultCategories 渲染，不进 categoryGroups（否则管理页会出现重复分组）
-      categoryGroups: pull.entities.categoryGroups.filter((g) => !DEFAULT_GROUP_NAMES.has(g.name)),
-      budgets: pull.entities.budgets,
-      ledgers: pull.entities.ledgers,
-      assets: pull.entities.assets,
-      activeLedgerId: withSettings.activeLedgerId,
-      currency: withSettings.currency,
-      periodPreference: withSettings.periodPreference,
-      dateFormat: withSettings.dateFormat,
-      weekStartsOn: withSettings.weekStartsOn,
-      decimalPlaces: withSettings.decimalPlaces,
-    };
+    return reconcileLedgers(
+      {
+        transactions: pull.entities.transactions,
+        categories: pull.entities.categories,
+        // 内置大组由 defaultCategories 渲染，不进 categoryGroups（否则管理页会出现重复分组）
+        categoryGroups: pull.entities.categoryGroups.filter((g) => !DEFAULT_GROUP_NAMES.has(g.name)),
+        budgets: pull.entities.budgets,
+        ledgers: pull.entities.ledgers,
+        assets: pull.entities.assets,
+        activeLedgerId: withSettings.activeLedgerId,
+        currency: withSettings.currency,
+        periodPreference: withSettings.periodPreference,
+        dateFormat: withSettings.dateFormat,
+        weekStartsOn: withSettings.weekStartsOn,
+        decimalPlaces: withSettings.decimalPlaces,
+      },
+      pull,
+      // 换账号：本机上一账号的当前账本没有任何参考价值
+      ''
+    );
   }
 
   const merged: LocalSnapshot = {
@@ -1292,7 +1333,91 @@ function mergeSnapshots(local: LocalSnapshot, pull: CloudPull, cloudWinsAll: boo
     weekStartsOn: local.weekStartsOn,
     decimalPlaces: local.decimalPlaces,
   };
-  return applyProfileRow(merged, pull.cloud.profile);
+  return reconcileLedgers(applyProfileRow(merged, pull.cloud.profile), pull, local.activeLedgerId);
+}
+
+/** 生成一条真实账本记录（与 AppContext 的新建账本同形状：id/icon/color/createdAt 都要齐） */
+function makeLedgerRecord(name: string): Ledger {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    name,
+    icon: FALLBACK_ICON,
+    color: FALLBACK_COLOR,
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * 拉取成功后的账本对账（每次 fullSync 都会走）：
+ *
+ * 1. 回收"幽灵账本"：云端账本列表里没有 + 0 账户 + 0 流水 的本地账本 = 旧版空环境兜底
+ *    凭空造出来的空壳。它从来不是用户建的，留着会一直占着抽屉和当前账本，
+ *    推上去还会永久污染账号——本地直接丢弃（不写回、不推送）。
+ *    有账户或流水的本地账本可能是用户离线建的，保留并正常同步。
+ * 2. 账本表全空时：只有「服务端确实 0 本」才真的建一本空的——这是真·空账号，
+ *    建一本合理；拉取失败根本走不到这里（不会凭空造）。
+ * 3. 选当前账本（优先级从高到低）：
+ *    profile.activeLedgerUid（服务端记住的）> 账号标记的默认账本 > 本地当前选择仍然有效
+ *    > 有资产的（避免一进来就是空账本）> 第一本
+ * 4. 挂在占位账本 id（PENDING_LEDGER_ID）下的流水/账户改挂到真正的当前账本。
+ */
+function reconcileLedgers(merged: LocalSnapshot, pull: CloudPull, localActiveId: string): LocalSnapshot {
+  const serverIds = new Set(pull.entities.ledgers.map((l) => l.id));
+  // 回收判据用"全部账户（含已归档）"：只有归档账户的账本同样是有数据的账本，不能当空壳删
+  const anyAssetCount = new Map<string, number>();
+  merged.assets.forEach((a) => anyAssetCount.set(a.ledgerId, (anyAssetCount.get(a.ledgerId) ?? 0) + 1));
+  // 选当前账本用"活跃账户数"：已归档账户不该把用户拽进一本看不见钱的书里
+  const assetCount = new Map<string, number>();
+  merged.assets.forEach((a) => {
+    if (a.archivedAt) return;
+    assetCount.set(a.ledgerId, (assetCount.get(a.ledgerId) ?? 0) + 1);
+  });
+  const txCount = new Map<string, number>();
+  merged.transactions.forEach((t) => txCount.set(t.ledgerId, (txCount.get(t.ledgerId) ?? 0) + 1));
+
+  const kept = merged.ledgers.filter(
+    (l) => serverIds.has(l.id) || (anyAssetCount.get(l.id) ?? 0) > 0 || (txCount.get(l.id) ?? 0) > 0
+  );
+  // 服务端 0 本 + 本地也没有带数据的账本 = 真·空账号 → 建一本（唯一允许凭空建账本的路径）
+  const ledgers = kept.length > 0 ? kept : [makeLedgerRecord(translate('home.defaultLedgerName'))];
+  const ids = new Set(ledgers.map((l) => l.id));
+
+  const pickAssetsFirst = (): string => {
+    let best = '';
+    let bestCount = 0;
+    ledgers.forEach((l) => {
+      const n = assetCount.get(l.id) ?? 0;
+      if (n > bestCount) {
+        bestCount = n;
+        best = l.id;
+      }
+    });
+    return best || ledgers[0].id;
+  };
+
+  const preferred = pull.cloud.profile?.activeLedgerUid ?? null;
+  let activeLedgerId: string;
+  if (preferred && ids.has(preferred)) {
+    activeLedgerId = preferred;
+  } else if (localActiveId && ids.has(localActiveId)) {
+    // 服务端没记住当前账本（或记的那本已不存在）时，不要打掉本机用户刚选的账本
+    activeLedgerId = localActiveId;
+  } else if (pull.defaultLedgerUid && ids.has(pull.defaultLedgerUid)) {
+    activeLedgerId = pull.defaultLedgerUid;
+  } else {
+    activeLedgerId = pickAssetsFirst();
+  }
+
+  const remap = <T extends { ledgerId: string }>(row: T): T =>
+    row.ledgerId === PENDING_LEDGER_ID ? { ...row, ledgerId: activeLedgerId } : row;
+
+  return {
+    ...merged,
+    ledgers,
+    activeLedgerId,
+    transactions: merged.transactions.map(remap),
+    assets: merged.assets.map(remap),
+  };
 }
 
 // ────────────────────────────── 对外 API ──────────────────────────────
@@ -1336,7 +1461,9 @@ export async function fullSync(): Promise<SyncResult> {
       pushTimer = null;
     }
     pushDeferred = false;
-    if (hadPending && !preCloudWinsAll) await pushLocalSnapshot();
+    // 拉取前的预推送：只补发"服务端已认识的账本"下面的本地修改，绝不把本地空壳账本推上云
+    // （冷启动时 AppContext 的加载副作用总会排一次推送，所以这条路径每次启动都会走）
+    if (hadPending && !preCloudWinsAll) await pushLocalSnapshot({ skipUnsyncedEmptyLedgers: true });
 
     // 网络拉取不占锁（可能很慢）；本地「读快照 → 合并 → 写回」在锁内用拉取后的最新本地数据完成，
     // 与 AppContext 的持久化写入串行，避免读写之间的编辑被合并结果覆盖
@@ -1395,14 +1522,14 @@ export function schedulePush(delayMs = 2000): void {
 }
 
 /** 读取本地快照（先规范化并自愈写回）后推上云。调用方须已持有 syncing 锁 */
-async function pushLocalSnapshot(): Promise<RowFailure[]> {
+async function pushLocalSnapshot(opts: { skipUnsyncedEmptyLedgers?: boolean } = {}): Promise<RowFailure[]> {
   const { snapshot: fixed, changed } = await runStorageExclusive(async () => {
     const result = normalizeSnapshot(await readLocalSnapshot());
     if (result.changed) await writeLocalSnapshot(result.snapshot);
     return result;
   });
   if (changed) notifyDataReplaced();
-  return pushSnapshot(fixed);
+  return pushSnapshot(fixed, opts);
 }
 
 /** 立即推送当前本地数据（设置页"立即同步"按钮用：拉+推走 fullSync 更稳妥） */

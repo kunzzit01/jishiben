@@ -17,7 +17,7 @@ import {
 import { DEFAULT_CATEGORIES } from '../utils/defaultCategories';
 import { getCurrencySymbol } from '../utils/currencies';
 import { computePlanOccurrences } from '../utils/paymentPlans';
-import { budgetId, onLocalDataReplaced, schedulePush } from '../services/syncService';
+import { PENDING_LEDGER_ID, budgetId, onLocalDataReplaced, schedulePush } from '../services/syncService';
 import { runStorageExclusive } from '../services/storageQueue';
 import { api } from '../services/apiClient';
 import { t as translate } from '../i18n';
@@ -269,7 +269,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [budgets, setBudgets] = useState<Budget[]>([]);
-  // 账本列表由存档驱动：读取前是空的，loadFromStorage 会保证至少落一条真实账本记录
+  // 账本列表由存档驱动：读取前是空的。空账本表不等于"该建一本"——真账本要么来自存档，
+  // 要么由 syncService 首次拉取成功后对账落定（见 useEffect 里的占位账本）
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   // 同步 ledgers 最新值的 ref：deleteLedger 在同一帧内做「删除+回落/重建」时读最新列表
   const ledgersRef = useRef<Ledger[]>([]);
@@ -290,6 +291,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [decimalPlaces, setDecimalPlacesState] = useState<DecimalPlaces>(DEFAULT_DECIMAL_PLACES);
   const [paymentPlans, setPaymentPlans] = useState<PaymentPlan[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // 冷启动占位账本：真账本列表还没到位（首次拉取未完成 / 离线 / 未登录）时给界面一个落点。
+  // 它只活在内存里——不写 @jizhang/ledgers、不参与同步、不推云端（见 syncService.reconcileLedgers）。
+  const pendingLedger = useMemo<Ledger>(
+    () => ({
+      id: PENDING_LEDGER_ID,
+      name: translate('home.pendingLedgerName'),
+      icon: LEDGER_DEFAULT_ICON,
+      color: LEDGER_DEFAULT_COLOR,
+      createdAt: 0,
+    }),
+    []
+  );
+
+  // 当前账本的有效 id：占位期间是占位 id；存档里选中的那本已不存在时回落到第一本
+  const effectiveActiveLedgerId =
+    ledgers.length === 0
+      ? PENDING_LEDGER_ID
+      : ledgers.some((l) => l.id === activeLedgerId)
+        ? activeLedgerId
+        : ledgers[0].id;
 
   // 启动时读取本地数据；抽成函数是因为云同步把"云端合并结果"写回 AsyncStorage 后
   // 会回调 onLocalDataReplaced → loadFromStorage，把恢复/换机登录拉回来的数据刷进内存 state
@@ -334,23 +356,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const { result: migratedLed, changed: ledChanged } = migrateLedgerIcons(
           Array.isArray(storedLedgers) ? storedLedgers : []
         );
-        // 账本表为空（首次启动 / 老存档被删空）→ 真的写入一条账本记录
-        const resolvedLedgers =
-          migratedLed.length > 0 ? migratedLed : [makeLedger(translate('home.defaultLedgerName'))];
+        // 账本表为空 = 还没拿到服务端账本列表（首次启动 / 换新机 / 清过缓存）。
+        // 这里**绝不**凭空落一条账本记录：那会立刻被同步推上云，账号里就多出一本空壳账本。
+        // 界面在 ledgers 为空时用内存占位账本落点；真正建账本只在
+        // syncService.reconcileLedgers 里「已登录 + 拉取成功 + 服务端确实 0 本」时发生。
+        const resolvedLedgers = migratedLed;
         // 存档记的当前账本已不存在（含旧的幽灵 'default'）→ 回落到第一本
-        const primaryLedgerId = resolvedLedgers.some((l) => l.id === activeLedRaw)
-          ? (activeLedRaw as string)
-          : resolvedLedgers[0].id;
+        const primaryLedgerId =
+          resolvedLedgers.length === 0
+            ? ''
+            : resolvedLedgers.some((l) => l.id === activeLedRaw)
+              ? (activeLedRaw as string)
+              : resolvedLedgers[0].id;
         // 默认账本同理：存档里的默认还在就沿用，否则由当前账本接管 —— 永远恰好一本
-        const resolvedDefaultId = resolvedLedgers.some((l) => l.id === defaultLedRaw)
-          ? (defaultLedRaw as string)
-          : primaryLedgerId;
+        const resolvedDefaultId =
+          resolvedLedgers.length === 0
+            ? ''
+            : resolvedLedgers.some((l) => l.id === defaultLedRaw)
+              ? (defaultLedRaw as string)
+              : primaryLedgerId;
         setLedgers(resolvedLedgers);
         setActiveLedgerIdState(primaryLedgerId);
         setDefaultLedgerIdState(resolvedDefaultId);
         if (
           ledChanged ||
-          resolvedLedgers !== migratedLed ||
           !ledRaw ||
           activeLedRaw !== primaryLedgerId ||
           defaultLedRaw !== resolvedDefaultId
@@ -359,7 +388,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (txRaw) {
           const parsedTx: Transaction[] = JSON.parse(txRaw);
-          setTransactions(parsedTx.map((t) => (t.ledgerId ? t : { ...t, ledgerId: primaryLedgerId })));
+          // 缺 ledgerId 的老流水，以及占位账本期间记的流水（离线冷启动），都改挂到真正的当前账本
+          setTransactions(
+            parsedTx.map((t) =>
+              t.ledgerId && t.ledgerId !== PENDING_LEDGER_ID
+                ? t
+                : primaryLedgerId
+                  ? { ...t, ledgerId: primaryLedgerId }
+                  : t
+            )
+          );
         }
         if (catRaw) {
           const parsedCat: Category[] = JSON.parse(catRaw);
@@ -383,7 +421,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (assetRaw) {
           const parsedAsset: Asset[] = JSON.parse(assetRaw);
           const { result: migratedAsset, changed: assetChanged } = migrateAssetIcons(parsedAsset);
-          setAssets(migratedAsset);
+          setAssets(
+            primaryLedgerId
+              ? migratedAsset.map((a) =>
+                  a.ledgerId === PENDING_LEDGER_ID ? { ...a, ledgerId: primaryLedgerId } : a
+                )
+              : migratedAsset
+          );
           if (assetChanged) {
             persistItem(STORAGE_KEYS.assets, JSON.stringify(migratedAsset));
           }
@@ -407,6 +451,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 1) 本地任一数据变化 → 防抖推送到云端（未登录时 syncService 内部直接跳过，行为同纯本地）
   useEffect(() => {
     if (loading) return;
+    // 账本表为空 = 还没拿到服务端账本列表：此状态下推送会把云端账本当"本地已删除"全删掉
+    if (ledgers.length === 0) return;
     schedulePush();
   }, [
     transactions,
@@ -480,7 +526,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...t,
       id: genId(),
       createdAt: Date.now(),
-      ledgerId: activeLedgerId,
+      ledgerId: effectiveActiveLedgerId,
     };
     setTransactions((prev) => [newTx, ...prev]);
   };
@@ -625,7 +671,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addAsset: AppContextValue['addAsset'] = async (a) => {
-    const newAsset: Asset = { ...a, id: genId(), ledgerId: activeLedgerId, createdAt: Date.now() };
+    const newAsset: Asset = { ...a, id: genId(), ledgerId: effectiveActiveLedgerId, createdAt: Date.now() };
     setAssets((prev) => [...prev, newAsset]);
   };
 
@@ -713,7 +759,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       date,
       note,
       createdAt: Date.now(),
-      ledgerId: activeLedgerId,
+      ledgerId: effectiveActiveLedgerId,
       fromAssetId,
       toAssetId,
       exchangeRate,
@@ -733,7 +779,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         date,
         note: `转账手续费${fromAsset ? `（${fromAsset.name}）` : ''}`,
         createdAt: Date.now() + 1,
-        ledgerId: activeLedgerId,
+        ledgerId: effectiveActiveLedgerId,
       });
     }
 
@@ -811,9 +857,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         transactions,
         categories,
         budgets,
-        ledgers,
-        activeLedgerId,
-        defaultLedgerId,
+        // 界面永远拿到至少一本账本（真账本未到位时是内存占位，不落盘、不参与同步）
+        ledgers: ledgers.length > 0 ? ledgers : [pendingLedger],
+        activeLedgerId: effectiveActiveLedgerId,
+        // 占位账本不是什么"默认账本"，别给它挂默认标记
+        defaultLedgerId:
+          ledgers.length === 0
+            ? ''
+            : ledgers.some((l) => l.id === defaultLedgerId)
+              ? defaultLedgerId
+              : effectiveActiveLedgerId,
         currency,
         currencySymbol: getCurrencySymbol(currency),
         periodPreference,

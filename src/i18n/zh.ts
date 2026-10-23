@@ -258,6 +258,13 @@ export const zh = {
     creditLimitLabel: '信用额度',
     accountName: '账户名称',
     accountNamePlaceholder: '例如：银行卡尾号****',
+    // 账户名称输入提示按账户类型分档（现金 / 银行卡 / 信用卡 / 电子钱包 / 投资 / 其他）
+    accountNamePlaceholderCash: '例如：现金钱包',
+    accountNamePlaceholderBank: '例如：大众银行 8888',
+    accountNamePlaceholderCredit: '例如：Visa 1234',
+    accountNamePlaceholderEwallet: '例如：TnG eWallet',
+    accountNamePlaceholderInvestment: '例如：基金账户',
+    accountNamePlaceholderOther: '例如：其他账户',
     accountType: '账户类型',
     currencyLabel: '货币（长按显示移除按钮）',
     addCurrencyTitle: '添加货币',
@@ -449,8 +456,10 @@ export const zh = {
     weekdays: '日,一,二,三,四,五,六',
     selectLedger: '选择账本',
     defaultLedger: '默认',
-    // 首启时真正建出来的那本账本的名字（不再有运行时兜底账本）
+    // 账号确实一本账本都没有时，服务端首次拉取成功后才建出来的那本的名字
     defaultLedgerName: '默认账本',
+    // 还没拿到服务端账本列表时的内存占位账本（不落盘、不参与同步）
+    pendingLedgerName: '本机账本',
     // 删到一本不剩后自动新建的空账本的名字
     emptyLedgerName: '我的账本',
     setDefaultLedger: '设为默认账本',
