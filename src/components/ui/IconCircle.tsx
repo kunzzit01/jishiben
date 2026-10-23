@@ -13,8 +13,18 @@
 //   <IconCircle size={48} color={cat.color} icon={cat.icon} selected />
 //   <IconCircle icon="grid-outline" />   // 中性「全部」
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Defs, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { useTheme } from '../../theme/useTheme';
@@ -156,6 +166,37 @@ export function IconCircle({
 }: IconCircleProps) {
   const { isDark, semantic } = useTheme();
   const { base, light, dark } = useMemo(() => ballColors(color), [color]);
+  // 选中态的「动」：进选中时弹一下（1.0 → 1.12 → 1.06 弹簧），随后外圈光晕缓慢呼吸。
+  // reduceMotion 下两者都停：只留静态描边 + 静态光晕（无障碍要求，抖动/呼吸对前庭敏感者不适）。
+  const reduceMotion = useReducedMotion();
+  const glowP = useSharedValue(0.45);
+  const popP = useSharedValue(1);
+  useEffect(() => {
+    if (!selected) {
+      glowP.value = 0.45;
+      popP.value = withTiming(1, { duration: 140 });
+      return;
+    }
+    if (reduceMotion) {
+      glowP.value = 0.7;
+      popP.value = 1.06;
+      return;
+    }
+    popP.value = withSequence(
+      withTiming(1.12, { duration: 130, easing: Easing.out(Easing.quad) }),
+      withSpring(1.06, { damping: 12, stiffness: 180 })
+    );
+    glowP.value = withRepeat(
+      withSequence(
+        withTiming(0.9, { duration: 900, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0.4, { duration: 900, easing: Easing.inOut(Easing.quad) })
+      ),
+      -1,
+      false
+    );
+  }, [selected, reduceMotion, glowP, popP]);
+  const animatedRoot = useAnimatedStyle(() => ({ transform: [{ scale: popP.value }] }));
+  const animatedGlow = useAnimatedStyle(() => ({ opacity: selected ? glowP.value : 0 }));
   const radius = size / 2;
   // 渐变定义 id 带基色指纹：同色实例共用一份定义（web 的 url(#id) 按文档解析），异色不会串
   const ballId = `ic3d${base.replace(/[^0-9a-zA-Z]/g, '')}`;
@@ -204,13 +245,14 @@ export function IconCircle({
   //   2) 近距同色光晕（8px 扩散）—— 让环有光感，不是一条死线
   //   3) 更远的地面投影（18px，暗色）—— 层次拉开，不糊成一片
   // 不再依赖"把其它格子压暗"来制造对比（用户明确不要其它图标发蒙）。
+  // 选中环改「白色贴边 + 球色光晕」：
+  // 之前的 accent 紫环压在红球上是一对互补色（蓝紫 vs 红橙），看着像贴纸；
+  // 白环是中性色，任何球色下都清晰，且它描的是球体自己的边 —— 不引入第二种颜色身份。
+  // 光晕交给下面那层会呼吸的 Animated.View（用球体基色，同色系不刺眼）。
+  // ⚠ 白环不能挂在根节点的 boxShadow 上：子层的呼吸光晕（后绘制）会把它盖掉。
+  // 所以根节点只留地面投影，白环改由顶层那个绝对定位的描边层画（见 JSX 末尾）。
   const selectedShadow = selected
-    ? [
-        `0px 0px 0px 2.5px ${semantic.accent}`,
-        `0px 0px 12px 0px ${withAlpha(semantic.accent, 0.55)}`,
-        `0px 14px 22px -8px ${withAlpha(semantic.accent, 0.45)}`,
-        `0px 6px 10px -4px rgba(0,0,0,0.25)`,
-      ].join(', ')
+    ? `0px 10px 20px -8px ${withAlpha(base, 0.5)}, 0px 6px 10px -4px rgba(0,0,0,0.22)`
     : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
@@ -218,7 +260,7 @@ export function IconCircle({
   const innerShadow = `inset 0px 2px 1px rgba(255,255,255,0.55), inset 0px -3px 6px ${dark}`;
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.root,
         {
@@ -226,11 +268,23 @@ export function IconCircle({
           height: size,
           borderRadius: radius,
           boxShadow: selectedShadow,
-          transform: selected ? [{ scale: 1.06 }] : undefined,
         },
+        animatedRoot,
         style,
       ]}
     >
+      {/* 选中光晕（用球体基色、会呼吸）：画在球面下面，靠 box-shadow 向外扩散。
+          放在子节点最底层，所以不吃触摸、也不遮住球面与图标。 */}
+      {selected ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { borderRadius: radius, boxShadow: `0px 0px 18px 4px ${withAlpha(base, 0.75)}` },
+            animatedGlow,
+          ]}
+        />
+      ) : null}
       {/* 球面：radial-gradient(circle at 32% 26%, 亮 → 基色 48% → 暗) + V2.2 弧形高光 */}
       <Svg width={size} height={size} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
@@ -276,8 +330,22 @@ export function IconCircle({
           style={styles.icon}
         />
       ) : null}
+      {/* 选中白环：画在球面与图标之上（紧贴球边、无间隙），中性色所以任何球色下都清晰 */}
+      {selected ? (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              borderRadius: radius,
+              borderWidth: 2,
+              borderColor: 'rgba(255,255,255,0.95)',
+            },
+          ]}
+        />
+      ) : null}
       {children}
-    </View>
+    </Animated.View>
   );
 }
 
