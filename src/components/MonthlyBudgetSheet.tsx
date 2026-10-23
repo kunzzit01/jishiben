@@ -15,16 +15,22 @@
 //   总预算卡：左「已用 / 总预算」+ 右百分比 → 大金额 → 10 高轨道
 //   分类行卡：28 图标块 + 名称 + 右百分比（22/600，涨跌不给色，色只给条）→ 8 高轨道 → 金额行
 // 颜色一律取语义 token：条色 = status.success / status.warning / status.danger（阈值 65% / 90%）。
+//
+// 超支（用超过额度）的展示语义：百分比一旦 > 100% 就不再是「进度」而是「超支幅度」——
+// 标签显示 −N%（N = 超支幅度的百分点），条固定满格且固定 danger；读屏改用「超支 N%」
+// （负号会被念成「负七十三」）。总预算与分类预算共用 utils/budgetPct.ts 的 formatBudgetPct
+// （首页净资产卡的预算槽用的是同一份），别处不要再写百分比三元表达式。
 
 import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/useTheme';
 import { useT } from '../i18n/LanguageContext';
+import { formatBudgetPct } from '../utils/budgetPct';
 import AppText from './ui/AppText';
 import BottomSheet from './ui/BottomSheet';
 import MoneyText from './ui/MoneyText';
-import ProgressBar, { progressToneOf } from './ui/ProgressBar';
+import ProgressBar from './ui/ProgressBar';
 import PressableScale from './PressableScale';
 import { withAlpha } from './ui/color';
 
@@ -130,8 +136,7 @@ export function MonthlyBudgetSheet({
     [semantic, spacing, radius, layout]
   );
 
-  const totalRatio = totalLimit > 0 ? totalUsed / totalLimit : 0;
-  const totalTone = progressToneOf(totalRatio);
+  const totalPct = formatBudgetPct(totalUsed, totalLimit, t);
 
   return (
     <BottomSheet
@@ -150,8 +155,14 @@ export function MonthlyBudgetSheet({
               {t('home.budgetTotalRow')}
             </AppText>
             {totalLimit > 0 ? (
-              <AppText variant="title2" weight="600" color={semantic.accent}>
-                {`${Math.round(totalRatio * 100)}%`}
+              <AppText
+                variant="title2"
+                weight="600"
+                color={semantic.accent}
+                accessibilityLabel={totalPct.a11y}
+                testID="budget-total-pct"
+              >
+                {totalPct.text}
               </AppText>
             ) : (
               <PressableScale
@@ -177,7 +188,7 @@ export function MonthlyBudgetSheet({
                 </AppText>
                 <MoneyText value={totalLimit} kind="plain" variant="subhead" color={semantic.textSecondary} hidden={hidden} />
               </View>
-              <ProgressBar ratio={totalRatio} tone={totalTone} height={10} testID="budget-total-bar" />
+              <ProgressBar ratio={totalPct.fillRatio} tone={totalPct.tone} height={10} testID="budget-total-bar" />
             </>
           ) : (
             <AppText variant="subhead" color={semantic.textTertiary}>
@@ -204,8 +215,7 @@ export function MonthlyBudgetSheet({
 
         <View style={styles.rowList}>
           {rows.map((row) => {
-            const ratio = row.limit > 0 ? row.used / row.limit : 0;
-            const tone = progressToneOf(ratio);
+            const pct = formatBudgetPct(row.used, row.limit, t);
             const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
             const tint = row.color ?? semantic.accent;
             return (
@@ -215,7 +225,7 @@ export function MonthlyBudgetSheet({
                 onPress={() => onEditCategory(row.categoryId)}
                 onLongPress={() => onClearCategory(row.categoryId)}
                 accessibilityRole="button"
-                accessibilityLabel={`${row.name} ${Math.round(ratio * 100)}%`}
+                accessibilityLabel={`${row.name} ${pct.a11y}`}
                 style={styles.card}
                 testID={`budget-cat-${row.categoryId}`}
               >
@@ -229,11 +239,18 @@ export function MonthlyBudgetSheet({
                     </AppText>
                   </View>
                   {/* 稿：百分比 22/600 主文字色 —— 是否超支只由条色表达，数字不重复上色 */}
-                  <AppText variant="title2" weight="600" color={semantic.textPrimary} style={styles.pctText}>
-                    {`${Math.round(ratio * 100)}%`}
+                  <AppText
+                    variant="title2"
+                    weight="600"
+                    color={semantic.textPrimary}
+                    style={styles.pctText}
+                    accessibilityLabel={pct.a11y}
+                    testID={`budget-cat-pct-${row.categoryId}`}
+                  >
+                    {pct.text}
                   </AppText>
                 </View>
-                <ProgressBar ratio={ratio} tone={tone} height={8} testID={`budget-cat-bar-${row.categoryId}`} />
+                <ProgressBar ratio={pct.fillRatio} tone={pct.tone} height={8} testID={`budget-cat-bar-${row.categoryId}`} />
                 <View style={styles.totalAmountRow}>
                   <MoneyText value={row.used} kind="plain" variant="caption" color={semantic.textTertiary} hidden={hidden} />
                   <AppText variant="caption" color={semantic.textTertiary}>

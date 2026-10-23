@@ -23,6 +23,7 @@ import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler, useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { ThemeColors, Elevation, Layout, Radius, SemanticColors, Spacing, layout as pageLayout } from '../theme/theme';
 import { formatMoney as fmtMoney, HIDDEN_AMOUNT } from '../utils/formatMoney';
+import { formatBudgetPct } from '../utils/budgetPct';
 import { formatDate } from '../utils/formatDate';
 import type { Ledger, Transaction } from '../types';
 import { UNCATEGORIZED_ICON, UNCATEGORIZED_NAME, UNCATEGORIZED_COLOR } from '../constants/uncategorized';
@@ -1055,9 +1056,9 @@ const HeroCardPage = React.memo(function HeroCardPage({
         }),
     [onPressAmount]
   );
-  const over = budget > 0 && expense > budget;
-  // 超支时显示真实百分比（如 130%）；条宽仍由 ProgressBar 封顶 100%
-  const pctText = budget > 0 ? Math.round((expense / budget) * 100) : 0;
+  // 百分比口径与月度预算抽屉同源（utils/budgetPct）：未超支 "130%"，超支 "−30%"，
+  // 条 ratio 固定满格 + tone 固定 danger；读屏走 a11y（不含负号）
+  const pct = formatBudgetPct(expense, budget, t);
   return (
     <View style={[styles.heroPagerPage, { width, minWidth: width }]}>
       {/* 金额槽：判档宽度 = 父级页宽（定值）—— MoneyText 自身盒宽恒等于内容宽，
@@ -1130,7 +1131,8 @@ const HeroCardPage = React.memo(function HeroCardPage({
               <View style={styles.heroBudgetBarRow}>
                 <View style={styles.heroBudgetBarWrap}>
                   <ProgressBar
-                    ratio={budget > 0 ? expense / budget : 0}
+                    ratio={pct.fillRatio}
+                    tone={pct.tone}
                     height={6}
                     style={styles.heroBudgetBar}
                     testID={testID ? `${testID}-bar` : undefined}
@@ -1139,10 +1141,12 @@ const HeroCardPage = React.memo(function HeroCardPage({
                 <AppText
                   variant="caption"
                   weight="600"
-                  color={over ? semantic.danger : textColor}
+                  color={pct.over ? semantic.danger : textColor}
                   style={styles.heroBudgetPct}
+                  accessibilityLabel={pct.a11y}
+                  testID={testID ? `${testID}-pct` : undefined}
                 >
-                  {`${pctText}%`}
+                  {pct.text}
                 </AppText>
               </View>
             </>
