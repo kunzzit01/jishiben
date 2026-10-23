@@ -17,7 +17,18 @@ import type { Category, Transaction } from '../types';
 import { useTheme } from '../theme/useTheme';
 import { useT } from '../i18n/LanguageContext';
 import AppText from './ui/AppText';
+import EmptyState from './ui/EmptyState';
 import TransactionRow from './ui/TransactionRow';
+
+/**
+ * 行副标题里的时间：流水只有日期（YYYY-MM-DD）→ 本年只印 MM-DD，跨年补年份。
+ * 纯展示，不参与排序 / 归属口径（那两件仍在 AssetScreen 的 accountTransactions 里）。
+ */
+function rowDateLabel(date: string): string {
+  const [y, m, d] = date.split('-');
+  if (!m || !d) return date;
+  return y === String(new Date().getFullYear()) ? `${m}-${d}` : `${y}-${m}-${d}`;
+}
 
 export interface AccountTransactionListProps {
   /** 已按账户筛好的交易（新的在前） */
@@ -26,6 +37,11 @@ export interface AccountTransactionListProps {
   /** 最多显示多少条（其余只报数量，不做分页——账户详情是抽屉，不是流水页面） */
   limit?: number;
   hideAmount?: boolean;
+  /**
+   * 不画本组标题行（抽屉里的「交易记录」分段已经给了段名，避免标题重复）；
+   * 默认 false = 保留「账户流水 + 条数」，其他调用点外观不变。
+   */
+  hideHeader?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -37,6 +53,7 @@ export function AccountTransactionList({
   categories,
   limit = 8,
   hideAmount,
+  hideHeader,
   style,
   testID,
 }: AccountTransactionListProps) {
@@ -57,7 +74,6 @@ export function AccountTransactionList({
         wrap: { gap: spacing.xs },
         head: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
         divider: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline },
-        empty: { paddingVertical: spacing.sm },
         rest: { paddingTop: spacing.xs },
       }),
     [semantic, spacing]
@@ -65,19 +81,26 @@ export function AccountTransactionList({
 
   return (
     <View style={[styles.wrap, style]} testID={testID}>
-      <View style={styles.head}>
-        <AppText variant="headline" color={semantic.textPrimary}>
-          {t('asset.recentTransactions')}
-        </AppText>
-        <AppText variant="caption" color={semantic.textTertiary}>
-          {transactions.length}
-        </AppText>
-      </View>
-      <View style={styles.divider} />
+      {!hideHeader && (
+        <>
+          <View style={styles.head}>
+            <AppText variant="headline" color={semantic.textPrimary}>
+              {t('asset.recentTransactions')}
+            </AppText>
+            <AppText variant="caption" color={semantic.textTertiary}>
+              {transactions.length}
+            </AppText>
+          </View>
+          <View style={styles.divider} />
+        </>
+      )}
       {shown.length === 0 ? (
-        <AppText variant="footnote" color={semantic.textTertiary} style={styles.empty}>
-          {t('asset.transactionsEmpty')}
-        </AppText>
+        /* 空态统一走 ui/EmptyState（全 App 只有这一种空状态画法） */
+        <EmptyState
+          icon="receipt-outline"
+          title={t('asset.transactionsEmpty')}
+          testID={testID ? `${testID}-empty` : undefined}
+        />
       ) : (
         shown.map((tx) => {
           const cat = tx.categoryId ? categoryById.get(tx.categoryId) : undefined;
@@ -91,12 +114,13 @@ export function AccountTransactionList({
               note={tx.note || tx.displayName}
               categoryName={
                 cat?.name ??
-                (tx.type === 'transfer' ? t('home.transfer') : (tx.displayName ?? t(FEE_LABEL_KEY)))
+                (tx.type === 'transfer' ? t('addTx.transfer') : (tx.displayName ?? t(FEE_LABEL_KEY)))
               }
               categoryIcon={cat?.icon as React.ComponentProps<typeof TransactionRow>['categoryIcon']}
               categoryColor={cat?.color}
               amount={amount}
               kind={kind}
+              meta={rowDateLabel(tx.date)}
               hideAmount={hideAmount}
               testID={`asset-tx-${tx.id}`}
             />

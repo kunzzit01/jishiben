@@ -4,7 +4,7 @@
 //
 // 三块结构
 //   左：40 图标方块（类别色 12% 底 + 100% 类别色图标；全 App 同一种画法，不上大色块）
-//   中：标题（有备注用备注，没备注用类别名，最多 2 行）+ 副标题（类别 · 账户，1 行）
+//   中：标题（有备注用备注，没备注用类别名，最多 2 行）+ 副标题（类别 · 账户 · 时间，1 行）
 //   右：MoneyText（等宽数字、自带 flexShrink:0 —— 金额永不被挤压、永不换行）
 //
 // 中英文不撞（UI_RULES 第 6 节）
@@ -12,7 +12,7 @@
 // - 中间文字块 flex:1：长备注换行 / 变窄都行，金额始终被顶到行尾对齐；
 // - 字号全部走 AppText / MoneyText 的令牌档位，不缩字、不省略（备注 2 行封顶是唯一上限）。
 //
-// 用法
+// 用法（副标题第三段 meta 只给「账户详情里的流水」补时间，其他调用点不传就不占位）
 //   <TransactionRow note={tx.note} categoryName="餐饮" categoryIcon="restaurant-outline"
 //                  categoryColor={cat.color} accountName="现金" amount={36.5} kind="expense"
 //                  onPress={() => openDetail(tx)} />
@@ -50,6 +50,8 @@ export interface TransactionRowProps {
   categoryColor?: string;
   /** 账户名（副标题第二段） */
   accountName?: string;
+  /** 副标题第三段（账户详情里的流水时间，如 10-23）；缺省不占位 */
+  meta?: string;
   amount: number;
   /** 金额语义（默认 'expense'：中性色 + 真减号） */
   kind?: MoneyKind;
@@ -71,6 +73,7 @@ export function TransactionRow({
   categoryIcon,
   categoryColor,
   accountName,
+  meta,
   amount,
   kind = 'expense',
   hideAmount,
@@ -94,8 +97,10 @@ export function TransactionRow({
   // 空备注（含纯空白）不算备注：空着一行反而显脏，这时标题给类别名
   const trimmedNote = note?.trim() ?? '';
   const title = trimmedNote.length > 0 ? trimmedNote : categoryName;
-  // 副标题：类别 · 账户（账户缺失时只有类别，不留下孤零零的分隔点）
-  const subtitle = [categoryName, accountName].filter((part): part is string => !!part).join(' · ');
+  // 副标题：类别 · 账户 · 时间（缺哪段就少哪段，不留下孤零零的分隔点）
+  const subtitle = [categoryName, accountName, meta]
+    .filter((part): part is string => !!part)
+    .join(' · ');
 
   const tint = categoryColor ?? semantic.accent;
   const iconTint = categoryColor ?? semantic.accentText;

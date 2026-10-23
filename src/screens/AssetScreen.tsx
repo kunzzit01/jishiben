@@ -191,6 +191,56 @@ function GlassPillButton({
 }
 
 /**
+ * 账户详情头部的动作胶囊（稿 08 屏：转账 / 编辑 / 更多，三等分横排）。
+ * 为什么不用共享 Button：Button 的左右内衬 24，390 视口三等分每格约 110、320 只剩 90，
+ * 图标 + 文字会被挤成两行；这里按胶囊规格组合「图标 18 + 间距 6 + 13/600 文字 + 内衬 8」，
+ * 材质与 Button 的 secondary 档一致（accentSoft 底 + accentText 字），
+ * 颜色 / 圆角 / 间距全部取令牌，触控高度 44（≥44 下限），文字单行不换行。
+ */
+function AccountActionPill({
+  icon,
+  label,
+  onPress,
+  active,
+  testID,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  /** 当前动作处于展开态（「更多」托盘打开时反色） */
+  active?: boolean;
+  testID?: string;
+}) {
+  const { semantic, radius, spacing } = useTheme();
+  const foreground = active ? semantic.onAccent : semantic.accentText;
+  return (
+    <PressableScale
+      onPress={onPress}
+      activeScale={0.97}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      testID={testID}
+      style={{
+        minHeight: 44,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        columnGap: 6,
+        paddingHorizontal: spacing.sm,
+        borderRadius: radius.full,
+        backgroundColor: active ? semantic.accent : semantic.accentSoft,
+      }}
+    >
+      <Ionicons name={icon} size={18} color={foreground} />
+      <AppText variant="footnote" weight="600" color={foreground} numberOfLines={1}>
+        {label}
+      </AppText>
+    </PressableScale>
+  );
+}
+
+/**
  * 分组头右侧的展开 / 收起指示：圆形 chevron 按钮。
  * 材质与币种胶囊同一套（surfaceElevated 实底 + 7% accentText 叠层 + accentText 图标）——
  * 不新增颜色语言，浅色 / 深色都跟着令牌走；收起朝下、展开朝上，用 transform 旋转过渡
@@ -795,6 +845,11 @@ export default function AssetScreen() {
   // 同一次编辑会话（"放弃修改"对话框点取消后抽屉弹回）不重新预填，用户已输入的内容不丢
   const prefilledIdRef = useRef<string | null>(null);
 
+  // 账户详情三段（稿 08 屏：交易记录 / 月度统计 / 账户设置）+ 头部「更多」托盘（归档 / 恢复 / 删除）
+  type DetailTab = 'tx' | 'monthly' | 'settings';
+  const [detailTab, setDetailTab] = useState<DetailTab>('tx');
+  const [moreOpen, setMoreOpen] = useState(false);
+
   const [viewName, setViewName] = useState('');
   const [viewBalanceStr, setViewBalanceStr] = useState('');
   const [viewKeypadOpen, setViewKeypadOpen] = useState(false);
@@ -887,6 +942,9 @@ export default function AssetScreen() {
 
   useEffect(() => {
     if (!viewingAssetId) return;
+    // 每次打开（含"放弃修改"点取消后弹回）都回到第一段，动作托盘收起
+    setDetailTab('tx');
+    setMoreOpen(false);
     // 同一次编辑会话：不重新预填（"放弃修改"对话框点取消后抽屉弹回时保留已输入内容）
     if (prefilledIdRef.current === viewingAssetId) return;
     const asset = assets.find((a) => a.id === viewingAssetId);
@@ -961,6 +1019,47 @@ export default function AssetScreen() {
     closeDetail();
   };
 
+  /**
+   * 「编辑」动作：落到「账户设置」段并把光标放进名称框 —— 编辑的就是原来那个输入框，
+   * 没有新增编辑状态，也没有新增保存路径。
+   */
+  const handleDetailEdit = () => {
+    setDetailTab('settings');
+    setTimeout(() => viewNameInputRef.current?.focus(), 60);
+  };
+
+  /**
+   * 「转账」动作：只开记账页的转账档（金额 / 账户 / 汇率 / 校验仍全由记账页决定，
+   * 与 AI 专区跳记账页同一套 params 用法，不新增记账规则）。
+   * 有未保存修改时先走既有的「放弃修改」确认，不静默丢掉用户正在改的名称 / 金额。
+   */
+  const handleDetailTransfer = () => {
+    // 记一笔带类型：Tab 里的「记一笔」是长驻实例（state 只在挂载时取预设），
+    // 从父级 Tab 的「首页」栈 push 一个新鲜实例，预设才一定生效（与首页快捷方块同一套参数）。
+    const go = () =>
+      navigation.navigate(ROUTES.TAB_HOME, { screen: ROUTES.ADD_TX, params: { presetType: 'transfer' } });
+    // 关抽屉（有未保存修改时已走过确认）+ 跳转：与「关闭」按钮同一条路径，不多绕一层状态
+    const leave = () => {
+      closeDetail();
+      go();
+    };
+    if (!viewEditDirty) {
+      leave();
+      return;
+    }
+    dialog.alert({
+      title: t('asset.discardEditTitle'),
+      buttons: [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.discard'),
+          style: 'destructive',
+          onPress: leave,
+        },
+      ],
+    });
+  };
+
   const saveViewChanges = async (overrideBalance?: number) => {
     if (!viewingAsset || !viewName.trim()) return;
     // 自绘键盘还开着：先把屏幕上正在输入的表达式求值落回金额行再保存——
@@ -1015,6 +1114,23 @@ export default function AssetScreen() {
       .filter(Boolean)
       .join(' · ');
   }, [sheetAsset, t]);
+
+  // 头部大余额：信用卡按欠费口径（与原欠款块完全一致：欠款显示成绝对值 + 减号），其余显示当前余额
+  const sheetHeroBalance = sheetAsset
+    ? sheetAsset.type === 'credit'
+      ? -Math.max(0, -getAssetBalance(sheetAsset.id))
+      : getAssetBalance(sheetAsset.id)
+    : 0;
+
+  // 详情分段（稿 08 屏）：值只是展示层枚举，标签取 i18n
+  const detailSegmentOptions = useMemo(
+    () => [
+      { label: t('asset.tabTransactions'), value: 'tx' },
+      { label: t('asset.tabMonthly'), value: 'monthly' },
+      { label: t('asset.tabSettings'), value: 'settings' },
+    ],
+    [t]
+  );
 
   // 账户详情里的「该账户流水」：归属口径与 computeAssetFlowStats 一致
   // （expense/income 看 assetId，transfer 看 fromAssetId / toAssetId），新的在前。
@@ -1494,235 +1610,336 @@ export default function AssetScreen() {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={[styles.sheetContent, { paddingHorizontal: layout.card }]}
             >
-              {/* V2.2c B1：信用卡详情第一屏 = 欠款大字（title2/600，完整两位小数、不带币种）
-                  + 还款日 / 账单日一行（账单日只在数据已有该字段时显示，不新增字段） */}
-              {sheetAsset.type === 'credit' && (
-                <View style={styles.debtBlock}>
-                  <View style={styles.debtRow}>
-                    <AppText variant="footnote" color={semantic.textSecondary} style={styles.debtLabel}>
-                      {t('asset.creditDebt')}
-                    </AppText>
-                    <MoneyText
-                      value={-Math.max(0, -getAssetBalance(sheetAsset.id))}
-                      variant="title2"
+              {/* 头部 AccountDetailHero（稿 08 屏）：账户名 + 币种 + 大余额。
+                  银行卡 / 现金 = 当前余额；信用卡两套口径同屏 —— 大字 = 欠费（原欠款块口径一字未动），
+                  副行 = 可用额度（viewingStatement.available）+ 还款日 / 账单日。
+                  材质 = 品牌 Hero 渐变（与资产页顶部卡同一套 gradients.hero 令牌，设计稿同款品牌卡）。 */}
+              <LinearGradient
+                colors={gradients.hero.colors}
+                start={gradients.hero.start}
+                end={gradients.hero.end}
+                style={styles.heroCard}
+                testID="asset-detail-hero"
+              >
+                <View style={styles.heroTopRow}>
+                  <AppText
+                    variant="headline"
+                    weight="600"
+                    color={semantic.textInverse}
+                    numberOfLines={1}
+                    style={styles.heroName}
+                    testID="asset-detail-hero-name"
+                  >
+                    {sheetAsset.name}
+                  </AppText>
+                  <View style={[styles.heroCodeChip, { backgroundColor: withAlpha(semantic.textInverse, 0.16) }]}>
+                    <AppText
+                      variant="caption"
                       weight="600"
-                    />
-                  </View>
-                  {!!creditDayLine && (
-                    <AppText variant="footnote" color={semantic.textSecondary} style={styles.debtMeta}>
-                      {creditDayLine}
+                      color={semantic.textInverse}
+                      testID="asset-detail-hero-currency"
+                    >
+                      {sheetAsset.currency}
                     </AppText>
+                  </View>
+                </View>
+                <AppText variant="footnote" color={withAlpha(semantic.textInverse, 0.86)} style={styles.heroLabel}>
+                  {sheetAsset.type === 'credit' ? t('asset.creditDebt') : t('asset.currentBalance')}
+                </AppText>
+                <View testID="asset-detail-hero-balance">
+                  <MoneyText value={sheetHeroBalance} variant="display" weight="600" color={semantic.textInverse} />
+                </View>
+                {sheetAsset.type === 'credit' && (
+                  <>
+                    {!!viewingStatement && (
+                      <View style={styles.heroMetaItem} testID="asset-detail-available">
+                        <AppText variant="caption" color={withAlpha(semantic.textInverse, 0.86)}>
+                          {t('asset.availableLimit')}
+                        </AppText>
+                        <MoneyText
+                          value={viewingStatement.available}
+                          variant="subhead"
+                          weight="600"
+                          color={semantic.textInverse}
+                        />
+                      </View>
+                    )}
+                    {!!creditDayLine && (
+                      <AppText
+                        variant="caption"
+                        color={withAlpha(semantic.textInverse, 0.86)}
+                        style={styles.heroMetaLine}
+                      >
+                        {creditDayLine}
+                      </AppText>
+                    )}
+                  </>
+                )}
+              </LinearGradient>
+
+              {/* 三个动作（稿 08 屏）：转账 / 编辑 / 更多 —— flex 三等分，320 视口也不换行、不挤压 */}
+              {/* 三等分靠外层 View 的 flex:1（PressableScale 的 Pressable 才是 flex 子项，
+                  内层 Animated.View 上的 flex 不参与父容器分配宽度） */}
+              <View style={styles.heroActions}>
+                <View style={styles.heroActionSlot}>
+                  <AccountActionPill
+                    icon="swap-horizontal"
+                    label={t('asset.actionTransfer')}
+                    onPress={handleDetailTransfer}
+                    testID="asset-detail-transfer"
+                  />
+                </View>
+                <View style={styles.heroActionSlot}>
+                  <AccountActionPill
+                    icon="create-outline"
+                    label={t('asset.actionEdit')}
+                    onPress={handleDetailEdit}
+                    testID="asset-detail-edit"
+                  />
+                </View>
+                <View style={styles.heroActionSlot}>
+                  <AccountActionPill
+                    icon="ellipsis-horizontal"
+                    label={t('asset.actionMore')}
+                    onPress={() => setMoreOpen((v) => !v)}
+                    active={moreOpen}
+                    testID="asset-detail-more"
+                  />
+                </View>
+              </View>
+
+              {/* 更多：归档 / 恢复 / 删除 —— 三个既有动作原样保留，只是从面板底部收到这里 */}
+              {moreOpen && (
+                <View style={styles.moreTray} testID="asset-detail-more-tray">
+                  {sheetAsset.archivedAt ? (
+                    <Button
+                      title={t('asset.unarchive')}
+                      variant="secondary"
+                      size="sm"
+                      onPress={() => {
+                        unarchiveAsset(sheetAsset.id);
+                        closeDetail();
+                      }}
+                      testID="asset-detail-unarchive"
+                    />
+                  ) : assetRecordCount(sheetAsset.id) > 0 ? (
+                    <Button
+                      title={t('asset.archive')}
+                      variant="secondary"
+                      size="sm"
+                      onPress={() => handleArchive(sheetAsset.id, sheetAsset.name)}
+                      testID="asset-detail-archive"
+                    />
+                  ) : (
+                    <Button
+                      title={t('asset.deleteAccount')}
+                      variant="destructive"
+                      size="sm"
+                      onPress={() => handleDelete(sheetAsset.id, sheetAsset.name)}
+                      testID="asset-detail-delete"
+                    />
                   )}
                 </View>
               )}
 
-              {/* 名称：内联可改（为空时描边转 danger，"保存"变灰）。
-                  V2.2c B3：输入框改胶囊，小标签放框上方、左边与框内文字对齐 */}
-              <View
-                onLayout={(e) => {
-                  nameBlockYRef.current = e.nativeEvent.layout.y;
-                }}
-              >
-                <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
-                  {t('addTx.accountName')}
-                </AppText>
-                <TextInput
-                  ref={viewNameInputRef}
-                  style={[
-                    styles.nameInput,
-                    { backgroundColor: semantic.bg, borderColor: semantic.hairline, color: semantic.textPrimary },
-                    !viewName.trim() && { borderColor: semantic.danger },
-                  ]}
-                  value={viewName}
-                  onChangeText={setViewName}
-                  onFocus={() => {
-                    nameFocusedRef.current = true;
+              {/* 分段（稿 08 屏）：交易记录 / 月度统计 / 账户设置 —— 复用 SegmentedControl，外观全走令牌 */}
+              <View style={styles.detailSegWrap} testID="asset-detail-segments">
+                <SegmentedControl
+                  options={detailSegmentOptions}
+                  selected={detailTab}
+                  onSelect={(v) => {
+                    setDetailTab(v as DetailTab);
+                    // 自绘键盘只服务「账户设置」里的金额行，切段时收起来
+                    if (v !== 'settings') setViewKeypadOpen(false);
                   }}
-                  onBlur={() => {
-                    nameFocusedRef.current = false;
-                  }}
-                  placeholder={t('addTx.accountNamePlaceholder')}
-                  placeholderTextColor={semantic.textTertiary}
-                  selectionColor={semantic.accent}
-                  returnKeyType="done"
-                  testID="asset-detail-name"
+                  stretch
+                  thumb="accent"
                 />
               </View>
 
-              {/* V2.2c B2：信用额度 / 当前余额下移到只读信息行之后（可编辑行放最后一段） */}
-
-              {/* 信用卡：账单周期明细（计算原样，只读信息行 = 标签 15 常规次要色 / 值 15-600 主色） */}
-              {sheetAsset.type === 'credit' ? (
-                !viewingStatement ? (
-                  <AppText variant="footnote" color={semantic.textTertiary} style={styles.sheetNote}>
-                    {t('asset.noStatement')}
-                  </AppText>
-                ) : (
-                  <View style={styles.sheetList}>
-                    <SheetInfoRow
-                      label={t('asset.availableLimit')}
-                      value={<MoneyText value={viewingStatement.available} variant="subhead" weight="600" />}
-                      separator
-                    />
-                    <SheetInfoRow
-                      label={t('asset.currentSpend')}
-                      value={
-                        <MoneyText value={viewingStatement.currentCycleSpend} variant="subhead" weight="600" />
-                      }
-                      separator
-                    />
-                    <SheetInfoRow
-                      label={t('asset.lastStatement')}
-                      value={
-                        <MoneyText
-                          value={viewingStatement.lastStatementAmount}
-                          variant="subhead"
-                          weight="600"
-                        />
-                      }
-                      separator={viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0}
-                    />
-                    {viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0 && (
-                      <SheetInfoRow
-                        label={t('asset.estInterest')}
-                        value={
-                          <MoneyText
-                            value={viewingStatement.estimatedInterest}
-                            variant="subhead"
-                            kind="expense"
-                            weight="600"
-                          />
-                        }
-                      />
-                    )}
-                  </View>
-                )
-              ) : (
-                viewingFlowStats && (
-                  <View style={styles.sheetList}>
-                    <SheetInfoRow
-                      label={t('asset.inflow')}
-                      value={<MoneyText value={viewingFlowStats.inflowAmount} variant="subhead" kind="income" weight="600" />}
-                      caption={t('asset.inflowCount', { count: viewingFlowStats.inflowCount })}
-                      separator
-                    />
-                    <SheetInfoRow
-                      label={t('asset.outflow')}
-                      value={<MoneyText value={viewingFlowStats.outflowAmount} variant="subhead" kind="expense" weight="600" />}
-                      caption={t('asset.inflowCount', { count: viewingFlowStats.outflowCount })}
-                      separator
-                    />
-                    <SheetInfoRow
-                      label={t('asset.netChange')}
-                      value={
-                        <MoneyText
-                          value={viewingFlowStats.inflowAmount - viewingFlowStats.outflowAmount}
-                          variant="subhead"
-                          weight="600"
-                        />
-                      }
-                    />
-                  </View>
-                )
+              {detailTab === 'tx' && (
+                <View style={styles.sheetSection} testID="asset-detail-seg-tx">
+                  {/* 该账户的流水（缺口补齐）：抽屉里直接可查，不必回首页筛账户；
+                      行规格 = ui/TransactionRow（图标块 + 类别·时间 + 右侧金额） */}
+                  <AccountTransactionList
+                    transactions={accountTransactions}
+                    categories={categories}
+                    hideHeader
+                    testID="asset-detail-transactions"
+                  />
+                </View>
               )}
 
-              {/* V2.2c B2：可编辑金额行（信用卡 = 信用额度，其余 = 当前余额）——胶囊框 + 框上小标签；
-                  点整格调起计算器键盘，长按拖动可把光标放到任意字符处 */}
-              <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
-                {sheetAsset.type === 'credit' ? t('addTx.creditLimitLabel') : t('asset.currentBalance')}
-              </AppText>
-              <View {...amountCursorPan.panHandlers}>
-                <PressableScale
-                  style={[styles.amountBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
-                  activeScale={0.98}
-                  {...amountBoxPressProps}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    sheetAsset.type === 'credit' ? t('addTx.creditLimitLabel') : t('asset.currentBalance')
-                  }
-                  testID="asset-detail-amount"
-                >
-                  <View style={styles.amountValueRow}>
-                    {viewKeypadOpen ? (
-                      <Text
-                        ref={amountTextRef}
-                        onLayout={refreshAmountTextBox}
-                        style={[
-                          styles.amountText,
-                          { color: semantic.textPrimary },
-                        ]}
-                      >
-                        <Text style={styles.amountText}>{viewDisplayRef.current.slice(0, viewCursorIdx)}</Text>
-                        <BlinkingCursor style={[styles.amountText, { color: semantic.accentText }]} />
-                        <Text style={styles.amountText}>{viewDisplayRef.current.slice(viewCursorIdx)}</Text>
-                      </Text>
+              {detailTab === 'monthly' && (
+                <View style={styles.sheetSection} testID="asset-detail-seg-monthly">
+                  {sheetAsset.type === 'credit' ? (
+                    !viewingStatement ? (
+                      <AppText variant="footnote" color={semantic.textTertiary} style={styles.sheetNote}>
+                        {t('asset.noStatement')}
+                      </AppText>
                     ) : (
-                      <MoneyText value={parseFloat(viewBalanceStr) || 0} variant="title3" weight="600" />
-                    )}
-                  </View>
-                  <Ionicons name="pencil" size={16} color={semantic.accentText} />
-                </PressableScale>
-              </View>
-
-              {/* 该账户的交易流水（缺口补齐）：抽屉里直接可查，不必回首页筛账户 */}
-              <View style={styles.sheetSection}>
-                <AccountTransactionList
-                  transactions={accountTransactions}
-                  categories={categories}
-                  testID="asset-detail-transactions"
-                />
-              </View>
-
-              {/* 设为默认账户：Switch 行（随"保存"一并提交） */}
-              <View style={styles.sheetList}>
-                <ListRow
-                  title={t('asset.setDefaultRow')}
-                  trailing={
-                    <Switch
-                      value={viewSetDefault}
-                      onValueChange={setViewSetDefault}
-                      accessibilityLabel={t('asset.setDefaultRow')}
-                    />
-                  }
-                />
-              </View>
-
-              <Button
-                title={t('common.save')}
-                variant="gradient"
-                onPress={() => saveViewChanges()}
-                disabled={!viewName.trim()}
-                style={styles.sheetButton}
-                testID="asset-detail-save"
-              />
-              {sheetAsset && sheetAsset.archivedAt ? (
-                <Button
-                  title={t('asset.unarchive')}
-                  variant="secondary"
-                  onPress={() => {
-                    unarchiveAsset(sheetAsset.id);
-                    closeDetail();
-                  }}
-                  style={styles.sheetButton}
-                  testID="asset-detail-unarchive"
-                />
-              ) : sheetAsset && assetRecordCount(sheetAsset.id) > 0 ? (
-                <Button
-                  title={t('asset.archive')}
-                  variant="secondary"
-                  onPress={() => handleArchive(sheetAsset.id, sheetAsset.name)}
-                  style={styles.sheetButton}
-                  testID="asset-detail-archive"
-                />
-              ) : (
-                <Button
-                  title={t('asset.deleteAccount')}
-                  variant="destructive"
-                  onPress={() => sheetAsset && handleDelete(sheetAsset.id, sheetAsset.name)}
-                  style={styles.sheetButton}
-                  testID="asset-detail-delete"
-                />
+                      <View style={styles.sheetList}>
+                        <SheetInfoRow
+                          label={t('asset.availableLimit')}
+                          value={<MoneyText value={viewingStatement.available} variant="subhead" weight="600" />}
+                          separator
+                        />
+                        <SheetInfoRow
+                          label={t('asset.currentSpend')}
+                          value={<MoneyText value={viewingStatement.currentCycleSpend} variant="subhead" weight="600" />}
+                          separator
+                        />
+                        <SheetInfoRow
+                          label={t('asset.lastStatement')}
+                          value={
+                            <MoneyText
+                              value={viewingStatement.lastStatementAmount}
+                              variant="subhead"
+                              weight="600"
+                            />
+                          }
+                          separator={viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0}
+                        />
+                        {viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0 && (
+                          <SheetInfoRow
+                            label={t('asset.estInterest')}
+                            value={
+                              <MoneyText
+                                value={viewingStatement.estimatedInterest}
+                                variant="subhead"
+                                kind="expense"
+                                weight="600"
+                              />
+                            }
+                          />
+                        )}
+                      </View>
+                    )
+                  ) : (
+                    viewingFlowStats && (
+                      <View style={styles.sheetList}>
+                        <SheetInfoRow
+                          label={t('asset.inflow')}
+                          value={<MoneyText value={viewingFlowStats.inflowAmount} variant="subhead" kind="income" weight="600" />}
+                          caption={t('asset.inflowCount', { count: viewingFlowStats.inflowCount })}
+                          separator
+                        />
+                        <SheetInfoRow
+                          label={t('asset.outflow')}
+                          value={<MoneyText value={viewingFlowStats.outflowAmount} variant="subhead" kind="expense" weight="600" />}
+                          caption={t('asset.inflowCount', { count: viewingFlowStats.outflowCount })}
+                          separator
+                        />
+                        <SheetInfoRow
+                          label={t('asset.netChange')}
+                          value={
+                            <MoneyText
+                              value={viewingFlowStats.inflowAmount - viewingFlowStats.outflowAmount}
+                              variant="subhead"
+                              weight="600"
+                            />
+                          }
+                        />
+                      </View>
+                    )
+                  )}
+                </View>
               )}
+
+              {detailTab === 'settings' && (
+                <View testID="asset-detail-seg-settings">
+                  {/* 名称：内联可改（为空时描边转 danger，"保存"变灰）；小标签在框上方、左边与框内文字对齐 */}
+                  <View
+                    onLayout={(e) => {
+                      nameBlockYRef.current = e.nativeEvent.layout.y;
+                    }}
+                  >
+                    <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
+                      {t('addTx.accountName')}
+                    </AppText>
+                    <TextInput
+                      ref={viewNameInputRef}
+                      style={[
+                        styles.nameInput,
+                        { backgroundColor: semantic.bg, borderColor: semantic.hairline, color: semantic.textPrimary },
+                        !viewName.trim() && { borderColor: semantic.danger },
+                      ]}
+                      value={viewName}
+                      onChangeText={setViewName}
+                      onFocus={() => {
+                        nameFocusedRef.current = true;
+                      }}
+                      onBlur={() => {
+                        nameFocusedRef.current = false;
+                      }}
+                      placeholder={t('addTx.accountNamePlaceholder')}
+                      placeholderTextColor={semantic.textTertiary}
+                      selectionColor={semantic.accent}
+                      returnKeyType="done"
+                      testID="asset-detail-name"
+                    />
+                  </View>
+
+                  {/* 可编辑金额行（信用卡 = 信用额度，其余 = 当前余额）—— 胶囊框 + 框上小标签；
+                      点整格调起计算器键盘，长按拖动可把光标放到任意字符处 */}
+                  <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
+                    {sheetAsset.type === 'credit' ? t('addTx.creditLimitLabel') : t('asset.currentBalance')}
+                  </AppText>
+                  <View {...amountCursorPan.panHandlers}>
+                    <PressableScale
+                      style={[styles.amountBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
+                      activeScale={0.98}
+                      {...amountBoxPressProps}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        sheetAsset.type === 'credit' ? t('addTx.creditLimitLabel') : t('asset.currentBalance')
+                      }
+                      testID="asset-detail-amount"
+                    >
+                      <View style={styles.amountValueRow}>
+                        {viewKeypadOpen ? (
+                          <Text
+                            ref={amountTextRef}
+                            onLayout={refreshAmountTextBox}
+                            style={[styles.amountText, { color: semantic.textPrimary }]}
+                          >
+                            <Text style={styles.amountText}>{viewDisplayRef.current.slice(0, viewCursorIdx)}</Text>
+                            <BlinkingCursor style={[styles.amountText, { color: semantic.accentText }]} />
+                            <Text style={styles.amountText}>{viewDisplayRef.current.slice(viewCursorIdx)}</Text>
+                          </Text>
+                        ) : (
+                          <MoneyText value={parseFloat(viewBalanceStr) || 0} variant="title3" weight="600" />
+                        )}
+                      </View>
+                      <Ionicons name="pencil" size={16} color={semantic.accentText} />
+                    </PressableScale>
+                  </View>
+
+                  {/* 设为默认账户：Switch 行（随"保存"一并提交） */}
+                  <View style={styles.sheetList}>
+                    <ListRow
+                      title={t('asset.setDefaultRow')}
+                      trailing={
+                        <Switch
+                          value={viewSetDefault}
+                          onValueChange={setViewSetDefault}
+                          accessibilityLabel={t('asset.setDefaultRow')}
+                        />
+                      }
+                    />
+                  </View>
+
+                  <Button
+                    title={t('common.save')}
+                    variant="gradient"
+                    onPress={() => saveViewChanges()}
+                    disabled={!viewName.trim()}
+                    style={styles.sheetButton}
+                    testID="asset-detail-save"
+                  />
+                </View>
+              )}
+
               {/* 键盘高度的底部垫片：让滚动区能把名称框滚到键盘上方 */}
               {sheetKbHeight > 0 && <View style={{ height: sheetKbHeight }} />}
             </ScrollView>
@@ -1858,11 +2075,36 @@ function makeStyles(
     sheetColumn: { flexShrink: 1 },
     sheetScroll: { flexShrink: 1 },
     sheetContent: { paddingBottom: spacing.md },
-    // V2.2c B1：欠款大字块（信用卡详情顶部）
-    debtBlock: { paddingTop: spacing.sm, paddingBottom: spacing.xs },
-    debtRow: { flexDirection: 'row', alignItems: 'baseline', columnGap: spacing.sm },
-    debtLabel: { flexShrink: 0 },
-    debtMeta: { marginTop: spacing.xs },
+    // 头部 AccountDetailHero：品牌渐变卡（20 圆角 / 卡内衬 16）——名称与币种胶囊一行，大余额在下
+    heroCard: { borderRadius: radius.lg, padding: layout.card, rowGap: spacing.xs },
+    heroTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      columnGap: spacing.sm,
+    },
+    // 长账户名先收窄，不把币种胶囊挤出卡外
+    heroName: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+    heroCodeChip: {
+      height: 22,
+      minWidth: 44,
+      paddingHorizontal: 9,
+      borderRadius: radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroLabel: { marginTop: spacing.sm },
+    // 信用卡副行：可用额度（标签 + 金额一行），还款日 / 账单日另起一行
+    heroMetaItem: { flexDirection: 'row', alignItems: 'baseline', columnGap: spacing.xs },
+    heroMetaLine: { marginTop: spacing.xs },
+    // 三个动作：等宽三等分（每格 slot flex:1），间距 spacing.sm；320 视口由 flex 平摊，不换行
+    heroActions: { flexDirection: 'row', columnGap: spacing.sm, marginTop: spacing.md },
+    // 宽度三等分落在 slot 上：PressableScale 的 Pressable 才是 flex 子项
+    heroActionSlot: { flex: 1, minWidth: 0 },
+    // 「更多」托盘：归档 / 恢复 / 删除三个既有动作
+    moreTray: { marginTop: spacing.sm, rowGap: spacing.sm },
+    // 分段与头部动作区之间 16
+    detailSegWrap: { marginTop: spacing.lg },
     // V2.2c B3：小标签在输入框上方，左边与框内文字对齐（内缩 = 输入框 paddingHorizontal）
     fieldLabelInline: { marginTop: spacing.lg, marginBottom: spacing.xs, marginLeft: spacing.lg },
     nameInput: {
