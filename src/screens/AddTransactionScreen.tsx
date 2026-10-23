@@ -623,12 +623,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 后续 move（实测 onStart 从未触发）。PanResponder 走 React 的 responder 协商，
   // 且在 capture 阶段接管 → 长按满 250ms 后纵向移动即抬起整组，短按仍落到组头自己的 onPress。
   const [groupOrder, setGroupOrder] = useState<Record<string, number>>({});
-  const [groupDragState, setGroupDragState] = useState<{ group: string; dy: number } | null>(null);
+  /** 拖动中的整组：from=起始位、hover=当前落点、dy=跟手位移 */
+  const [gDrag, setGDrag] = useState<{ group: string; from: number; dy: number; hover: number } | null>(null);
   const groupPanCache = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
   const groupPressAtRef = useRef(0);
+  /** 每张组卡的布局（相对滚动内容）：拖动时算落点、算其它卡让位、画虚线占位都靠它 */
+  const gBoxRef = useRef<Record<string, { y: number; h: number }>>({});
   const GROUP_HOLD_MS = 250;
   const GROUP_START_DY = 8;
-  const GROUP_SLOT_DY = 180; // 拖动多少像素算换一格（组卡高度差异大，用固定步长更可预期）
 
   useEffect(() => {
     AsyncStorage.getItem(GROUP_ORDER_KEY)
@@ -647,18 +649,32 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     AsyncStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(next)).catch(() => {});
   };
 
-  const moveGroupBySteps = (group: string, steps: number) => {
-    if (!steps) return;
-    const list = orderedExpenseSectionsRef.current.map((s) => s.group);
-    const from = list.indexOf(group);
-    const to = Math.min(list.length - 1, Math.max(0, from + steps));
-    if (from < 0 || to === from) return;
-    const next = [...list];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    const order: Record<string, number> = {};
-    next.forEach((g, i) => (order[g] = i));
-    applyGroupOrder(order);
+  const groupList = () => orderedExpenseSectionsRef.current.map((s) => s.group);
+
+  /** 落点判定：手指所在整卡的中心越过谁的"中线"，就排到谁后面（自然支持拖到最底） */
+  const computeHover = (group: string, dy: number) => {
+    const list = groupList();
+    const box = gBoxRef.current[group];
+    if (!box) return Math.max(0, list.indexOf(group));
+    const center = box.y + dy + box.h / 2;
+    let idx = 0;
+    list.forEach((g, i) => {
+      const b = gBoxRef.current[g];
+      if (b && center >= b.y + b.h / 2) idx = i;
+    });
+    return Math.min(list.length - 1, Math.max(0, idx));
+  };
+
+  /** 其它组卡的让位位移：被拖组跨过谁，谁就往相反方向挪一个"被拖组高度" */
+  const shiftForGroup = (group: string) => {
+    if (!gDrag) return 0;
+    const list = groupList();
+    const i = list.indexOf(group);
+    const draggedH = gBoxRef.current[gDrag.group]?.h ?? 0;
+    if (group === gDrag.group) return 0;
+    if (gDrag.from < gDrag.hover && i > gDrag.from && i <= gDrag.hover) return -draggedH;
+    if (gDrag.from > gDrag.hover && i >= gDrag.hover && i < gDrag.from) return draggedH;
+    return 0;
   };
 
   const getGroupPanHandlers = (group: string) => {
@@ -681,16 +697,29 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         hapticLight();
-        setGroupDragState({ group, dy: 0 });
+        const from = Math.max(0, groupList().indexOf(group));
+        setGDrag({ group, from, dy: 0, hover: from });
       },
       onPanResponderMove: (_e, g) => {
-        setGroupDragState({ group, dy: g.dy });
+        const from = Math.max(0, groupList().indexOf(group));
+        const hover = computeHover(group, g.dy);
+        setGDrag({ group, from, dy: g.dy, hover });
       },
-      onPanResponderRelease: (_e, g) => {
-        moveGroupBySteps(group, Math.round(g.dy / GROUP_SLOT_DY));
-        setGroupDragState(null);
+      onPanResponderRelease: () => {
+        setGDrag((cur) => {
+          if (cur) {
+            const list = groupList();
+            const next = [...list];
+            const [moved] = next.splice(cur.from, 1);
+            next.splice(Math.min(next.length, cur.hover), 0, moved);
+            const order: Record<string, number> = {};
+            next.forEach((g, i) => (order[g] = i));
+            applyGroupOrder(order);
+          }
+          return null;
+        });
       },
-      onPanResponderTerminate: () => setGroupDragState(null),
+      onPanResponderTerminate: () => setGDrag(null),
     });
     groupPanCache.current[group] = responder;
     return responder.panHandlers;
@@ -2040,6 +2069,26 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           {/* 按大类分节（每节一张圆角卡片、可折叠）；本页进入即编辑态（没有「编辑 / 完成」开关）：
               点磁贴 = 选中该分类并返回 · 长按 200ms 抬起可拖动组内排序 · 图标右上角红色角标删除 ·
               网格最后一项是虚线「＋」磁贴，复用组内两步小卡的新增流程 */}
+          {/* 拖动中的虚线占位：贴在原槽位，告诉用户"这张卡原来在这儿" */}
+          {gDrag && gBoxRef.current[gDrag.group] ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: gBoxRef.current[gDrag.group].y,
+                height: gBoxRef.current[gDrag.group].h,
+                borderRadius: 26,
+                borderWidth: 2,
+                borderStyle: 'dashed',
+                borderColor: semantic.accent,
+                backgroundColor: semantic.accentSoft,
+                opacity: 0.5,
+                zIndex: 1,
+              }}
+            />
+          ) : null}
           {orderedExpenseSections.map(({ group, items, custom }) => {
               const expanded = !collapsedGroups.has(group);
               const themeColor = colors.link;
@@ -2073,14 +2122,19 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   {...getGroupPanHandlers(group)}
                   style={[
                     styles.catGroupCard,
-                    groupDragState?.group === group
-                      ? { transform: [{ translateY: groupDragState.dy }], zIndex: 20, opacity: 0.96 }
+                    // 让位：被拖组跨过谁，谁就朝相反方向挪一个"被拖组高度"（与图标磁贴同一手感）
+                    shiftForGroup(group) ? { transform: [{ translateY: shiftForGroup(group) }] } : null,
+                    // 被拖的那张：跟手位移 + 抬到最上层 + 轻微透明
+                    gDrag?.group === group
+                      ? { transform: [{ translateY: gDrag.dy }], zIndex: 20, opacity: 0.97 }
                       : null,
                   ]}
                   /* TASK-016⑥：卡片是 ScrollView 直接子节点，layout.y 即内容坐标——
                      聚焦滚动按组名查这张表，绕开 Fabric 不支持的 measureLayout */
                   onLayout={(e) => {
-                    groupContentYRef.current[group] = e.nativeEvent.layout.y;
+                    const { y, height } = e.nativeEvent.layout;
+                    groupContentYRef.current[group] = y;
+                    gBoxRef.current[group] = { y, h: height };
                   }}
                 >
                   {/* TASK-012②：收起大列表只点头部行（箭头所在行）；点卡片其余区域/空白不收 */}
