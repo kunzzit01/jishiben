@@ -40,10 +40,11 @@ node scripts/import-supabase.mjs --in ./supabase-backup/export-2026-10-23 \
      --email you@example.com --out import.sql
 
 # 3) 上传并执行（走容器里的 mysql 客户端，不依赖宿主机装 mysql）
+#    ⚠️ 必须带 --default-character-set=utf8mb4，否则中文会被按本地编码二次编码成乱码
 scp import.sql root@<vps>:/opt/jishiben/
 ssh root@<vps> 'cd /opt/jishiben && \
   docker exec -i jishiben-mysql sh -c \
-  \'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"\' < import.sql'
+  \'mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"\' < import.sql'
 
 # 4) 看脚本末尾自动打印的核对表（ledgers/assets/categories/transactions/budgets 行数）
 ```
@@ -132,4 +133,30 @@ SELECT COUNT(*) AS tx FROM transactions WHERE user_id=@u;
 SELECT currency, FORMAT(SUM(IF(type=\"expense\",amount,0)),2) exp,
                  FORMAT(SUM(IF(type=\"income\",amount,0)),2) inc
 FROM transactions WHERE user_id=@u GROUP BY currency;"'
+```
+
+
+## ⚠️ 字符集（实测踩过）
+
+第一次导入时没指定客户端字符集，结果中文全部变成二次编码乱码：
+
+```
+恢复的账本  →  µüóÕñìþÜäÞ┤ªµ£¼
+餐饮        →  ÚñÉÚÑ«
+```
+
+原因：Windows 版 `mysql` 客户端默认按本地代码页读取 SQL 文件，把 UTF-8 字节当成了其它编码。
+
+**正确做法**：导入与查询都加 `--default-character-set=utf8mb4`
+
+```bash
+mysql --default-character-set=utf8mb4 -u... -p... db < import.sql
+```
+
+修复后实测（经 /api 校验）：
+
+```
+账本: T1 / T / Tz / Ta / 2 / 恢复的账本 oych
+分类: 餐饮 / 购物 / 日用 / 交通 / 蔬菜 / 水果 / 零食 / 运动
+备注: 唐茶 | GX | 转账手续费（Cash）
 ```
