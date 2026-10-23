@@ -50,7 +50,6 @@ import {
   GRID_EDGE_ZONE,
   GRID_FINGER_STEP,
   GRID_LAND_MS,
-  GRID_LONG_PRESS_MS,
   GRID_SCROLL_STEP,
   moveInArray,
   sortByOrder,
@@ -135,10 +134,17 @@ function groupIndexAt(
 }
 
 const GROUP_DRAG_SCALE = 1.03;
+/** 组头按下后多少纵向位移就抬起整组（够大才不会把点击抖成拖拽，够小才跟得住手指） */
+const GROUP_DRAG_START_DIST = 10;
+/**
+ * 拖拽收尾后屏蔽组头点击的时长：web 上 mouseup 会补一个 click（实测 click@组头），
+ * 不挡就会「一松手整组自己折叠 / 手指停在垃圾桶上顺手把整组删了」。
+ */
+const GROUP_TAP_BLOCK_MS = 500;
 
 /**
- * 一张大组卡的外壳：让位平移量包在外面，长按手势挂在组头那一行上
- * （组名 / 项数 / 垃圾桶都在组头里，短按照旧、长按 200ms 才抬起整组）。
+ * 一张大组卡的外壳：让位平移量包在外面，拖动挂在组头那一行上
+ * （组名 / 项数 / 垃圾桶都在组头里，短按照旧、纵向拖动才抬起整组）。
  */
 function GroupCardSlot({
   group,
@@ -180,10 +186,18 @@ function GroupCardSlot({
   const shiftStyle = useAnimatedStyle(() => ({ transform: [{ translateY: shiftY.value }] }));
 
   // 同磁贴：手势只在挂载时建一次，拖拽中重渲染不会打断正在进行的拖拽
+  //
+  // 这里**不能**用 .activateAfterLongPress(200)：RNGH 在长按计时未到之前，只要位移超过
+  // DEFAULT_TOUCH_SLOP(15px) 就清掉计时器并直接判手势失败
+  // （node_modules/react-native-gesture-handler/src/web/handlers/PanGestureHandler.ts:483 shouldFail
+  //   + src/web/constants.ts:1 DEFAULT_TOUCH_SLOP = 15）；而 GestureDetector 在 web 上给这一层
+  // 打的是 touch-action:none（DOM 实测），浏览器也不会替你滚页面——
+  // 于是"按住一拖"既不起拖、也不滚动，整段手势是死区：这就是用户说的「拖不动」。
+  // 改成位移阈值激活：短按（无位移）照旧走组头自己的 onPress，纵向拖过 10px 立刻抬起整组。
   const gesture = useMemo(
     () =>
       Gesture.Pan()
-        .activateAfterLongPress(GRID_LONG_PRESS_MS)
+        .activeOffsetY([-GROUP_DRAG_START_DIST, GROUP_DRAG_START_DIST])
         .onStart((e) => {
           'worklet';
           scroll0.value = scrollY.value;
@@ -274,6 +288,8 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   const groupBoxRef = useRef<Map<string, GroupBox>>(new Map());
   const sectionsRef = useRef<CategorySection[]>([]);
   const groupDragRef = useRef<string | null>(null);
+  /** 到这个时刻之前，组头上的点击一律忽略（拖拽抬起后浏览器补的那一下 click） */
+  const groupTapBlockUntilRef = useRef(0);
   const groupFingerYRef = useRef(-1);
   const groupLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const groupTickRef = useRef<() => void>(() => {});
@@ -475,6 +491,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
       const from = Math.max(0, list.findIndex((s) => s.group === group));
       const boxes = readGroupBoxes();
       groupDragRef.current = group;
+      groupTapBlockUntilRef.current = Number.MAX_SAFE_INTEGER;
       groupFingerYRef.current = absY;
       gFrom.value = from;
       gCur.value = from;
@@ -505,6 +522,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   const handleGroupDragEnd = useCallback(
     (from: number, to: number) => {
       groupFingerYRef.current = -1;
+      groupTapBlockUntilRef.current = Date.now() + GROUP_TAP_BLOCK_MS;
       stopGroupLoop();
       // 等幽灵滑到目标槽位再改顺序 + 卸载幽灵
       setTimeout(() => {
@@ -529,6 +547,9 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   );
 
   const handleGroupDragCancel = useCallback(() => {
+    // 普通点按也会走 onFinalize(false)：只有真的抬起过整组才需要挡住随后补的那一下 click，
+    // 否则会把组头自己的折叠点击一起吃掉（实测 TILES 5→5）
+    groupTapBlockUntilRef.current = groupDragRef.current != null ? Date.now() + GROUP_TAP_BLOCK_MS : 0;
     groupDragRef.current = null;
     groupFingerYRef.current = -1;
     stopGroupLoop();
@@ -714,6 +735,8 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                 <Pressable
                   style={styles.groupHeader}
                   onPress={() => {
+                    // 拖拽抬起后浏览器补的 click 不算"短按"（否则一松手整组自己折叠）
+                    if (Date.now() < groupTapBlockUntilRef.current) return;
                     setCollapsedGroups((prev) => {
                       const next = new Set(prev);
                       if (next.has(group)) next.delete(group);
@@ -732,7 +755,10 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                   <PressableScale
                     style={styles.catHeaderDeleteBtn}
                     activeScale={0.90}
-                    onPress={() => handleDeleteGroup(group, items)}
+                    onPress={() => {
+                      if (Date.now() < groupTapBlockUntilRef.current) return;
+                      handleDeleteGroup(group, items);
+                    }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     <Ionicons name="trash-outline" size={18} color={semantic.danger} />
@@ -745,7 +771,10 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                   style={styles.groupDeleteBtn}
                   activeScale={0.90}
                   hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  onPress={() => handleDeleteGroup(group, items)}
+                  onPress={() => {
+                    if (Date.now() < groupTapBlockUntilRef.current) return;
+                    handleDeleteGroup(group, items);
+                  }}
                 >
                   <Ionicons name="trash-outline" size={18} color={semantic.danger} />
                 </PressableScale>
