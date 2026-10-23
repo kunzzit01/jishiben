@@ -2069,26 +2069,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           {/* 按大类分节（每节一张圆角卡片、可折叠）；本页进入即编辑态（没有「编辑 / 完成」开关）：
               点磁贴 = 选中该分类并返回 · 长按 200ms 抬起可拖动组内排序 · 图标右上角红色角标删除 ·
               网格最后一项是虚线「＋」磁贴，复用组内两步小卡的新增流程 */}
-          {/* 拖动中的虚线占位：贴在原槽位，告诉用户"这张卡原来在这儿" */}
-          {gDrag && gBoxRef.current[gDrag.group] ? (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                top: gBoxRef.current[gDrag.group].y,
-                height: gBoxRef.current[gDrag.group].h,
-                borderRadius: 26,
-                borderWidth: 2,
-                borderStyle: 'dashed',
-                borderColor: semantic.accent,
-                backgroundColor: semantic.accentSoft,
-                opacity: 0.5,
-                zIndex: 1,
-              }}
-            />
-          ) : null}
+          {/* 原槽位不再画虚线占位（用户定版：虚线隐藏）：
+              被拖的那张卡跟手走、其它卡让位后，原位自然留白，不再额外画框。 */}
           {orderedExpenseSections.map(({ group, items, custom }) => {
               const expanded = !collapsedGroups.has(group);
               const themeColor = colors.link;
