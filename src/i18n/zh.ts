@@ -562,6 +562,8 @@ export const zh = {
     typeOther: '其他',
     // 账户行副行里的默认标记（「银行卡 · 默认」）
     defaultTag: '默认',
+    // 分组头的高亮标记：这一组 = 顶部卡片当前显示的币种
+    currentTag: '当前',
     deleteAssetTitle: '删除资产"%{name}"？',
     deleteAssetMsg: '与该资产相关的转账记录仍会保留，但资产余额将无法再查看',
     liabilityLabel: '负债（信用卡欠款）',

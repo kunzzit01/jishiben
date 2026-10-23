@@ -255,15 +255,19 @@ function CurrencySectionHeader({
   total,
   collapsed,
   onToggle,
+  active,
   testID,
 }: {
   code: string;
   total: number;
   collapsed: boolean;
   onToggle: () => void;
+  /** 是否 = 顶部卡片当前选中的币种（高亮：底色微变 + 「当前」标记） */
+  active?: boolean;
   testID?: string;
 }) {
   const { semantic, spacing, radius, layout } = useTheme();
+  const t = useT();
   return (
     <PressableScale
       onPress={onToggle}
@@ -278,6 +282,9 @@ function CurrencySectionHeader({
         paddingHorizontal: layout.card,
         paddingTop: spacing.md,
         paddingBottom: spacing.sm,
+        // 高亮组：accentText 7% 叠层（与币种胶囊 / 折叠按钮同一套令牌，不新造颜色）；
+        // 不铺底时给 transparent，保持行高与普通组完全一致
+        backgroundColor: active ? withAlpha(semantic.accentText, 0.07) : 'transparent',
       }}
       accessibilityRole="button"
       accessibilityLabel={code}
@@ -287,24 +294,40 @@ function CurrencySectionHeader({
       {/* 胶囊底：不透明软紫 —— 页面底是渐变，直接用 10% 的 accentSoft 会被渐变拉暗
           （实测 12pt 紫字只有 3.4:1，§4 要 4.5）；不透明底 + accent 7%（≈ accentSoft 浅一档）
           落在 4.6:1。底色由「surfaceElevated 实底 + 半透明紫叠层」合成，不手写色值 */}
-      <View
-        style={{
-          height: 24,
-          borderRadius: radius.full,
-          paddingHorizontal: 9,
-          justifyContent: 'center',
-          backgroundColor: semantic.surfaceElevated,
-          overflow: 'hidden',
-          opacity: collapsed ? 0.55 : 1,
-        }}
-      >
+      <View style={{ flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs }}>
         <View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(semantic.accentText, 0.07) }]}
-        />
-        <AppText variant="caption" weight="600" color={semantic.accentText}>
-          {code}
-        </AppText>
+          style={{
+            height: 24,
+            borderRadius: radius.full,
+            paddingHorizontal: 9,
+            justifyContent: 'center',
+            backgroundColor: semantic.surfaceElevated,
+            overflow: 'hidden',
+            opacity: collapsed ? 0.55 : 1,
+          }}
+        >
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(semantic.accentText, 0.07) }]}
+          />
+          <AppText variant="caption" weight="600" color={semantic.accentText}>
+            {code}
+          </AppText>
+        </View>
+        {/* 「当前」= 这张分组就是顶部卡片正在显示的那个币种（收起后也知道自己在看哪个币种） */}
+        {active && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', columnGap: 3 }}>
+            <Ionicons name="ellipse" size={5} color={semantic.accent} />
+            <AppText
+              variant="caption"
+              weight="600"
+              color={semantic.accentText}
+              testID={`asset-group-active-${code}`}
+            >
+              {t('asset.currentTag')}
+            </AppText>
+          </View>
+        )}
       </View>
       {/* 合计一律显示（不再按账户数区分）：同一种分组头一半有数字一半空白，
           用户只会判定「坏了」。单账户组的合计虽然等于那行余额，但它是这一组唯一的
@@ -667,6 +690,10 @@ export default function AssetScreen() {
   const [accountFilter, setAccountFilter] = useState<'all' | 'cash' | 'bank' | 'ewallet'>('all');
   // 总资产卡的隐私开关（稿里的眼睛）：只切显示，不写数据
   const [balanceHidden, setBalanceHidden] = useState(false);
+  // 卡上的币种切换器：null = 自动（全局币种所在分组，否则第一个分组）；
+  // 用户选过币种后，卡片只显示那一种币种的合计（绝不跨币种相加）
+  const [cardCurrency, setCardCurrency] = useState<string | null>(null);
+  const [currencyMenuOpen, setCurrencyMenuOpen] = useState(false);
   type AssetItem = (typeof assets)[number];
   const { semantic, typography, spacing, radius, layout, gradients } = useTheme();
   const { pagePadding, contentMaxWidth } = useLayout();
@@ -1045,33 +1072,18 @@ export default function AssetScreen() {
       }));
   }, [activeAssets, typeOrder, assetOrder, accountFilter]);
 
-  // ---------- 总资产卡（设计稿 02 屏）：总资产（币种）+ 较上月变化 ----------
-  // 口径：同名币种聚合，绝不跨币种相加 —— 主币种 = 全局设置币种在该分组里时用它，否则取第一个分组
+  // ---------- 总资产卡（设计稿 02 屏）：**某一币种**的资产合计，不是一个跨币种的总数 ----------
+  // 口径：同名币种聚合，绝不跨币种相加 —— 卡片币种 = 用户在卡上选的币种（切币种胶囊）；
+  // 没选过 / 选的币种被分段筛选过滤掉时退回自动档：全局设置币种在该分组里时用它，否则取第一个分组
   const primaryGroup = useMemo(() => {
     if (groupedAssets.length === 0) return null;
-    return groupedAssets.find((g) => g.code === currency) ?? groupedAssets[0];
-  }, [groupedAssets, currency]);
+    const picked = cardCurrency ? groupedAssets.find((g) => g.code === cardCurrency) : null;
+    return picked ?? groupedAssets.find((g) => g.code === currency) ?? groupedAssets[0];
+  }, [groupedAssets, currency, cardCurrency]);
   const primaryTotal = useMemo(
     () => (primaryGroup ? primaryGroup.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0) : 0),
     [primaryGroup, getAssetBalance]
   );
-  // 较上月变化（展示口径）：该币种本月收入 − 支出（只统计归属该币种的账单；转账不计，避免跨币种混加）
-  const primaryMonthDelta = useMemo(() => {
-    if (!primaryGroup) return 0;
-    const code = primaryGroup.code;
-    const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const byId = new Map(assets.map((a) => [a.id, a] as const));
-    let delta = 0;
-    transactions.forEach((tx) => {
-      if (!tx.date.startsWith(monthKey)) return;
-      if (tx.type !== 'expense' && tx.type !== 'income') return;
-      const cur = (tx.assetId ? byId.get(tx.assetId)?.currency : undefined) ?? code;
-      if (cur !== code) return;
-      delta += tx.type === 'income' ? tx.amount : -tx.amount;
-    });
-    return delta;
-  }, [primaryGroup, assets, transactions]);
   // 筛选分段（稿：全部账户 / 现金 / 银行 / 电子钱包）—— 标签取现有 i18n 键（i18n 不在本次改动范围）
   const filterOptions = useMemo(
     () => [
@@ -1189,8 +1201,9 @@ export default function AssetScreen() {
           </View>
         </View>
 
-        {/* 总资产卡（稿 02 屏）：渐变卡 + 「总资产 · 币种」+ 大金额 + 较上月变化；
-            隐私开关沿用首页的眼睛图标语义，只切显示不写数据 */}
+        {/* 总资产卡（稿 02 屏）：渐变卡 + 「币种 · 资产」可点胶囊 + 大金额；
+            卡片只代表**一种币种**（绝不跨币种相加），所以币种写在前面、并且可切换；
+            隐私开关沿用首页的眼睛图标语义，只切显示不写数据；本月净变动已下线（余额页只放余额） */}
         {assets.length > 0 && primaryGroup && (
           <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.md }}>
             <LinearGradient
@@ -1200,14 +1213,33 @@ export default function AssetScreen() {
               style={styles.totalCard}
             >
               <View style={styles.totalCardHead}>
-                <AppText
-                  variant="footnote"
-                  color={withAlpha(semantic.textInverse, 0.86)}
-                  numberOfLines={1}
-                  style={{ flexShrink: 1 }}
+                {/* 币种胶囊（与首页净资产卡的币种胶囊同规格：12.5/17 + 600 + 反色 86%）：
+                    点开 = 币种抽屉（现有全部币种 + 各自余额），选一个就把卡片换成那个币种 */}
+                <PressableScale
+                  onPress={() => setCurrencyMenuOpen(true)}
+                  activeScale={0.94}
+                  hitSlop={8}
+                  style={styles.cardPillHit}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('home.currencySheetTitle')}
+                  testID="asset-currency-pill"
                 >
-                  {`${t('asset.summaryAssets')} · ${primaryGroup.code}`}
-                </AppText>
+                  <AppText
+                    variant="caption"
+                    weight="600"
+                    color={withAlpha(semantic.textInverse, 0.86)}
+                    numberOfLines={1}
+                    style={styles.cardPillText}
+                    testID="asset-currency-pill-label"
+                  >
+                    {`${primaryGroup.code} · ${t('asset.summaryAssets')}`}
+                  </AppText>
+                  <Ionicons
+                    name="chevron-down"
+                    size={13}
+                    color={withAlpha(semantic.textInverse, 0.86)}
+                  />
+                </PressableScale>
                 <View style={styles.totalCardHeadActions}>
                   <PressableScale
                     activeScale={0.94}
@@ -1233,16 +1265,6 @@ export default function AssetScreen() {
                 color={semantic.textInverse}
                 hidden={balanceHidden}
               />
-              <View style={styles.totalDeltaRow}>
-                <Ionicons
-                  name={primaryMonthDelta >= 0 ? 'trending-up' : 'trending-down'}
-                  size={14}
-                  color={semantic.textInverse}
-                />
-                <AppText variant="footnote" color={semantic.textInverse} numberOfLines={1} style={{ flexShrink: 1 }}>
-                  {`${primaryMonthDelta >= 0 ? '+' : '−'}${formatMoney(Math.abs(primaryMonthDelta))} ${t('asset.netChange')}`}
-                </AppText>
-              </View>
             </LinearGradient>
           </View>
         )}
@@ -1331,6 +1353,7 @@ export default function AssetScreen() {
                       total={groupTotal}
                       collapsed={isCollapsed}
                       onToggle={() => toggleCurrencyGroup(group.code)}
+                      active={group.code === primaryGroup?.code}
                       testID={`asset-group-${group.code}`}
                     />
                     {!isCollapsed &&
@@ -1400,6 +1423,59 @@ export default function AssetScreen() {
       {/* S4 账户详情：底部抽屉（替换原来的居中弹窗）；删除走 danger 按钮，"设为默认"是 Switch 行。
           V2.2c：面板改高不透明磨砂（复用 tabBar 填充：夜 .88 / 日 .90），背后是全局 scrim 遮罩；
           标题带上币种（「账户详情 · MYR」）—— 抽屉里的金额因此不再带币种后缀 */}
+      {/* 卡上币种切换器 = 币种抽屉：现有全部币种一行一个（左：币种胶囊，右：该币种资产合计），
+          选中项带 accent 勾；选完只换卡片的币种，不动任何账户数据、也不跨币种相加 */}
+      <BottomSheet
+        visible={currencyMenuOpen}
+        onClose={() => setCurrencyMenuOpen(false)}
+        title={t('home.currencySheetTitle')}
+        fill={semantic.homeCard}
+        maxHeightRatio={0.7}
+        testID="asset-currency-sheet"
+      >
+        <ScrollView
+          style={styles.currencySheetScroll}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: spacing.sm }}
+        >
+          {groupedAssets.map((group) => {
+            const active = group.code === primaryGroup?.code;
+            const total = group.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0);
+            return (
+              <PressableScale
+                key={group.code}
+                style={[styles.currencyOption, active && { backgroundColor: semantic.selectedRow }]}
+                activeScale={0.98}
+                onPress={() => {
+                  setCardCurrency(group.code);
+                  setCurrencyMenuOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={group.code}
+                accessibilityState={{ selected: active }}
+                testID={`asset-currency-option-${group.code}`}
+              >
+                <View style={styles.currencyOptionCode}>
+                  <AppText variant="caption" weight="600" color={semantic.accentText}>
+                    {group.code}
+                  </AppText>
+                </View>
+                <MoneyText
+                  value={total}
+                  kind="plain"
+                  currency={group.code}
+                  variant="subhead"
+                  weight="600"
+                  color={active ? semantic.accentText : semantic.textPrimary}
+                  style={styles.currencyOptionAmount}
+                />
+                {active && <Ionicons name="checkmark" size={20} color={semantic.accent} />}
+              </PressableScale>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
       <BottomSheet
         visible={!!viewingAssetId}
         onClose={tryCloseDetail}
@@ -1713,7 +1789,31 @@ function makeStyles(
       columnGap: spacing.sm,
     },
     totalCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
-    totalDeltaRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    // 卡上的币种胶囊（与首页净资产卡的币种胶囊同规格：12.5/17 + 600；宽了就让文字先收，不挤压眼睛按钮）
+    cardPillHit: { flexDirection: 'row', alignItems: 'center', columnGap: 4, flexShrink: 1, minWidth: 0 },
+    cardPillText: { fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
+    // 币种抽屉：行 = 币种胶囊 + 右侧该币种合计（选中行 accentSoft 底，与首页币种抽屉同一套令牌）
+    currencySheetScroll: { flexShrink: 1 },
+    currencyOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      columnGap: spacing.sm,
+      minHeight: 52,
+      paddingHorizontal: layout.card,
+      borderRadius: radius.md,
+      // 金额靠右：中间留白吃掉剩余宽度
+      justifyContent: 'flex-start',
+    },
+    currencyOptionAmount: { marginLeft: 'auto' },
+    currencyOptionCode: {
+      height: 24,
+      minWidth: 44,
+      paddingHorizontal: 9,
+      borderRadius: radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: semantic.accentSoft,
+    },
     // 分段筛选与总资产卡之间 12、与列表之间 24
     filterWrap: { marginTop: spacing.md },
     // V2.2c：所有币种组共用一张玻璃卡（卡内小节头 + hairline 分组），卡与页头之间 24

@@ -560,6 +560,8 @@ export const en = {
     typeOther: 'Other',
     // Default marker in the account-row subtitle ("Bank Card · Default")
     defaultTag: 'Default',
+    // Group-header marker: this group is the currency shown on the card above
+    currentTag: 'Current',
     deleteAssetTitle: 'Delete asset "%{name}"?',
     deleteAssetMsg: 'Related transfer records are kept, but the asset balance can no longer be viewed',
     liabilityLabel: 'Liabilities (credit card debt)',
