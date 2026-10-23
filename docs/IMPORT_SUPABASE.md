@@ -160,3 +160,61 @@ mysql --default-character-set=utf8mb4 -u... -p... db < import.sql
 分类: 餐饮 / 购物 / 日用 / 交通 / 蔬菜 / 水果 / 零食 / 运动
 备注: 唐茶 | GX | 转账手续费（Cash）
 ```
+
+
+---
+
+## 账号表（auth.users）——业务数据之外的唯一缺口
+
+`export.mjs` 只导了 8 张业务表，**没有 `auth.users`**（邮箱、密码哈希都在那里）。
+所以「有几个人注册过」这份备份回答不了，只能回答「有几个人写过业务数据」。
+
+### 好消息：密码哈希可以直接复用
+
+| | Supabase | 本项目 |
+|---|---|---|
+| 字段 | `auth.users.encrypted_password` | `users.password_hash` |
+| 算法 | bcrypt（`$2a$` / `$2b$`） | Spring BCrypt（`$2a$`） |
+
+两者兼容，**直接复制哈希**，用户继续用原密码登录，不需要重设。
+
+### 在 Supabase 控制台导出
+
+Dashboard → SQL Editor → 执行：
+
+```sql
+select id, email, encrypted_password, created_at, last_sign_in_at
+from auth.users
+order by created_at;
+```
+
+结果面板右上角 **Download CSV**，保存为 `auth-users.csv`。
+
+> ⚠️ 这个 CSV 含密码哈希（不可逆，但仍是敏感数据）：不要提交到仓库、不要发群、导入后删除。
+
+### 导入
+
+```bash
+node scripts/import-auth-users.mjs --in auth-users.csv --out users.sql
+
+# 本地
+mysql --default-character-set=utf8mb4 -u... -p... jishiben < users.sql
+
+# 服务器
+ssh root@<vps> 'cd /opt/jishiben && docker exec -i jishiben-mysql sh -c \
+  \'mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"\' < users.sql'
+```
+
+脚本会：
+1. 用 `email` 建账号，`password_hash` 直接取 Supabase 的 bcrypt 值；
+2. 建一条 `profiles` 默认行；
+3. 建临时表 `supa_user_map(supa_uid, email)`，把 Supabase UUID 映射到本地 uid ——
+   业务数据脚本可以据此**按人分配**，而不是全部塞进一个账号；
+4. 全部语句带 `ON DUPLICATE KEY UPDATE`，重复执行安全。
+
+### 核对
+
+```sql
+SELECT m.supa_uid, m.email, u.id AS local_uid
+FROM supa_user_map m JOIN users u ON u.email = m.email;
+```
