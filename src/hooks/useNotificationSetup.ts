@@ -8,7 +8,7 @@ import {
 /**
  * 注册推送通知：
  * - token 的用户归属由后端从登录会话验签得出（见 notifications.ts 的 sendTokenToBackend），
- *   未登录或后端地址未配置（BACKEND_URL 为空）时自动跳过
+ *   未登录（没有访问令牌）时自动跳过
  * - registerForPushNotificationsAsync 在 Expo Go 里拿不到有效 token，会安静跳过；
  *   要在 development build / 正式包里才会真正生效
  * - 同时挂载通知监听器（收到通知 / 用户点击通知），组件卸载时自动清理

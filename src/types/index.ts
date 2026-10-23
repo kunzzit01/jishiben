@@ -43,6 +43,12 @@ export interface Transaction {
 export interface Budget {
   categoryId: string;
   amount: number;
+  /**
+   * 后端返回的预算行 id（budgets.client_uid）。清预算走 DELETE /api/budgets/{clientUid}，
+   * 所以拉回来的预算要把这个 id 带着；本地新建的预算没有该字段，
+   * 由同步层按 (分类|币种) 派生出同样的值（后端缺省 clientUid 时也用同一规则）。
+   */
+  clientUid?: string;
   /** 预算所属币种（'total' 总预算按币种各存一条）；老数据没有该字段 = 跟随全局设置货币 */
   currency?: string;
 }

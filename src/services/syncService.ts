@@ -1,6 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from './supabaseClient';
+import {
+  ApiError,
+  AssetDto,
+  AssetUpsert,
+  BudgetDto,
+  BudgetUpsert,
+  CategoryDto,
+  CategoryGroupDto,
+  CategoryGroupUpsert,
+  CategoryUpsert,
+  LedgerDto,
+  LedgerUpsert,
+  ProfilePatch,
+  TransactionDto,
+  TransactionUpsert,
+  api,
+  isSessionDeadError,
+  listAllTransactions,
+} from './apiClient';
 import { runStorageExclusive } from './storageQueue';
+import { getCurrentUser, hydrateSession } from './sessionStore';
 import {
   Asset,
   Budget,
@@ -13,18 +32,24 @@ import {
   Transaction,
   WeekStartsOn,
 } from '../types';
+import { amountKey, optionalAmount, optionalRate, parseAmount, rateKey } from '../utils/money4';
+import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 
 /**
- * 云端按行同步服务（Part A）。
+ * 云端按行同步服务。
  *
  * 架构：AsyncStorage 仍是本地主存储（离线照常记账），云端按行备份/恢复。
- * - 推（push）：本地数据变化后防抖触发，diff 出增/改/删的行，分别 upsert / delete 到 Supabase
+ * - 推（push）：本地数据变化后防抖触发，diff 出增/改/删的行，逐行 PUT/DELETE 到自研后端
  * - 拉（pull）：登录或重启恢复会话时拉取云端全部行，与本地合并（同 id 以云端为准，
  *   本机独有行保留），合并结果写回 AsyncStorage 并通知 AppContext 重载
  *   —— 换手机登录同一账号即自动恢复全部资料
  *
  * 本文件不 import 任何 React / Context：与 UI 完全解耦，
  * 通过 onLocalDataReplaced 回调让 AppContext 刷新界面。
+ *
+ * 数据口径（docs/API.md）：后端是 camelCase；本地字符串 id == 后端的 clientUid；
+ * 金额是 4 位小数的定点数（这里用定点字符串做 diff，绝不用浮点比较）；
+ * 分类的 group 名 → 大类表的 clientUid；预算用 scope + clientUid，不再自己拼 id 当主键。
  */
 
 // ────────────────────────────── 类型与常量 ──────────────────────────────
@@ -45,14 +70,15 @@ export interface LocalSnapshot {
   decimalPlaces: DecimalPlaces;
 }
 
-/** 数据库行（snake_case，与 supabase/schema.sql 对应） */
+/** 云端行（canonical 形状：只包含本 App 负责的字段，金额是 4 位定点字符串） */
 type Row = Record<string, unknown>;
 
 const MIRROR_KEY = '@jizhang/syncMirror'; // 最近一次成功同步的数据镜像，用于 diff 出变更行
 const LAST_SYNC_KEY = '@jizhang/lastSyncAt';
 const LAST_USER_KEY = '@jizhang/lastUserId';
 
-const CHUNK_SIZE = 50; // upsert/delete 分批大小：块越小，一条坏数据拖垮的行越少
+/** 并发推送上限：太少慢、太多容易撞后端连接池；逐行失败隔离不受影响 */
+const PUSH_CONCURRENCY = 4;
 
 export type SyncStatus = 'idle' | 'syncing' | 'error';
 
@@ -63,7 +89,6 @@ export type SyncErrorCode =
   | 'constraint'
   | 'schema'
   | 'server'
-  | 'clock_skew'
   | 'local_data_corrupt'
   | 'not_logged_in'
   | 'sync_in_progress'
@@ -79,7 +104,7 @@ export interface SyncResult {
 /** 本地快照里存在但 JSON 解析失败的 key：继续同步会把坏数据当空表推上云（误删云端），必须中止 */
 export class LocalDataCorruptError extends Error {
   constructor(keys: string[]) {
-    super(`本地数据解析失败：${keys.join(', ')}`);
+    super('本地数据解析失败：' + keys.join(', '));
     this.name = 'LocalDataCorruptError';
   }
 }
@@ -89,112 +114,83 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 把任意同步异常归类成稳定错误码：
- * - network：fetch 失败/超时/DNS（弱网、部分运营商拦 *.supabase.co）
- * - auth：token 失效 / RLS 拒绝（401/403）
- * - constraint：数据类拒绝（NOT NULL / 外键 / 唯一冲突 / 同语句重复行 / 类型不合法，Postgres 21-23xxx）
- * - schema：云端库结构落后于 App（未执行最新 schema.sql）——表/列在云端还不存在
- *   （Postgres 42P01/42703、PostgREST PGRST204/205；2026-10-20 归档功能的 archived_at 列踩过）
- * - server：Supabase 5xx
+ * 把任意同步异常归类成稳定错误码（界面按码显示中英文提示）：
+ * - network：网络层没拿到响应（弱网 / 后端未启动 / DNS）
+ * - auth：令牌失效或被吊销（TOKEN_EXPIRED 已在 apiClient 里单飞刷新并重放）
+ * - constraint：数据类拒绝（字段校验/引用不存在/唯一冲突/默认账本不可删…）
+ * - schema：服务端没有这个接口（服务端版本落后于 App）
+ * - server：服务端 5xx
  */
-function classifySyncError(e: unknown): Exclude<SyncErrorCode, 'local_data_corrupt' | 'not_logged_in' | 'sync_in_progress'> {
-  const anyE = e as { code?: string; message?: string; details?: string; status?: number } | null;
-  const msg = `${anyE?.message ?? ''} ${anyE?.details ?? ''}`;
-  const code = anyE?.code ?? '';
-  const status = anyE?.status;
-  // TASK-026：Supabase 签票/验票两服务间偶发秒级时钟差——JWT 在验票侧看是"未来"签发的（PGRST303）。
-  // 与用户手机时钟无关（票是服务器签的），等待+换票重试即可自愈，单独归类便于重试器识别
-  if (code === 'PGRST303' || /issued at future/i.test(msg)) return 'clock_skew';
-  if (/fetch|network|timeout|timed out|socket|dns|unable to resolve/i.test(msg)) return 'network';
-  if (status === 401 || status === 403 || /jwt|row-level security|permission denied/i.test(msg)) return 'auth';
-  // 21xxx/22xxx/23xxx = Postgres 数据类错误（21 cardinality 如 21000 同语句重复行、
-  // 22 data_exception 如数值/文本不合法、23 integrity 如 NOT NULL/唯一冲突）。
-  // 统一按"坏行"处理：逐行隔离 + 上报告知，不会再把整批打成 500、也不会落进 unknown
-  //（2026-10-20 budgets 21000 事故教训：当时只认 23xxx，21000 被归成 unknown 导致弹窗无法定位）
-  if (/^2[123]\d{3}$/.test(code) || /violates|duplicate key|null value in column/i.test(msg)) return 'constraint';
-  if (
-    code === 'PGRST204' ||
-    code === 'PGRST205' ||
-    code === 'PGRST202' ||
-    code === '42703' ||
-    code === '42P01' ||
-    /does not exist|schema cache/i.test(msg)
-  )
-    return 'schema';
-  if ((typeof status === 'number' && status >= 500) || /internal error|server error/i.test(msg)) return 'server';
+function classifySyncError(
+  e: unknown
+): Exclude<SyncErrorCode, 'local_data_corrupt' | 'not_logged_in' | 'sync_in_progress'> {
+  if (e instanceof ApiError) {
+    if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT') return 'network';
+    if (
+      isSessionDeadError(e) ||
+      e.code === 'TOKEN_EXPIRED' ||
+      e.code === 'UNAUTHORIZED' ||
+      e.code === 'INVALID_CREDENTIALS' ||
+      e.code === 'FORBIDDEN'
+    ) {
+      return 'auth';
+    }
+    if (e.code === 'NOT_FOUND') return 'schema';
+    if (
+      e.code === 'VALIDATION_FAILED' ||
+      e.code === 'BAD_REQUEST' ||
+      e.code === 'CONFLICT' ||
+      e.code === 'PAYLOAD_TOO_LARGE' ||
+      e.code === 'NOT_IMPLEMENTED'
+    ) {
+      return 'constraint';
+    }
+    if (e.code === 'INTERNAL_ERROR' || e.code === 'UPSTREAM_ERROR' || e.code === 'AI_UNAVAILABLE') {
+      return 'server';
+    }
+    if (e.status >= 500) return 'server';
+    if (e.status >= 400) return 'constraint';
+    return 'unknown';
+  }
+  const message = e instanceof Error ? e.message : String(e);
+  if (/network|fetch|timeout|timed out|socket|dns/i.test(message)) return 'network';
   return 'unknown';
 }
 
-/** TASK-026：时钟偏差类错误（PGRST303 / 401 中的 jwt future）——等待+换票重试可自愈 */
-function isClockSkewError(e: unknown): boolean {
-  const anyE = e as { code?: string; message?: string; details?: string; status?: number } | null;
-  const msg = `${anyE?.message ?? ''} ${anyE?.details ?? ''}`;
-  const code = anyE?.code ?? '';
-  if (code === 'PGRST303' || /issued at future/i.test(msg)) return true;
-  // 慢钟手机：SDK 按本地钟判"未过期"但服务器已判过期（401）——刷新 token 后同样自愈
-  return anyE?.status === 401 || /jwt expired|invalid claim/i.test(msg);
-}
-
-/** 瞬时错误（网络/服务器抖动）值得重试；数据类错误重试没有意义 */
+/** 瞬时错误（网络/服务端抖动）值得重试；数据类错误重试没有意义 */
 function isTransientError(e: unknown): boolean {
-  const c = classifySyncError(e);
-  return c === 'network' || c === 'server';
+  const code = classifySyncError(e);
+  return code === 'network' || code === 'server';
 }
 
-/** 瞬时错误重试 2 次（0.8s/1.6s 退避）；非瞬时错误立即抛出。
- *  注意 postgrest-js 出错时 resolve({error}) 而不是 throw，所以这里比较的是 resolved 值 */
-async function withRetry<T extends { error: unknown }>(fn: () => PromiseLike<T>): Promise<T> {
-  let result = await fn();
-  if (!isTransientError(result.error)) return result;
+/** 瞬时错误重试 2 次（0.8s/1.6s 退避）；非瞬时错误立即抛出 */
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isTransientError(e)) throw e;
+  }
   await sleep(800);
-  result = await fn();
-  if (!isTransientError(result.error)) return result;
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isTransientError(e)) throw e;
+  }
   await sleep(1600);
   return fn();
 }
 
-/**
- * TASK-026：时钟偏差自愈包装器——同步主体（pull+push 整体，upsert 幂等可安全重试）。
- * 遇 PGRST303/401 时钟类错误：刷新 session 换新票 → 递增等待（1.5s/3s/4.5s）重试，最多 3 次。
- * 原理：JWT 的 iat 由服务器签出后固定不变，验票服务器的钟持续前进——等待后"未来的票"
- * 自然变有效；换新票则直接绕开旧 iat。手机快/慢/跨时区与该错误无关，此机制对全部机型生效。
- */
-async function withClockSkewRetry<T>(fn: () => Promise<T>): Promise<T> {
-  // TASK-026 续（用户追问"真到这一步怎么办"）：重试链从 3 次 9 秒加长到 6 次约 63 秒——
-  // 平台级秒级偏差通常 10~30 秒内恢复，加长后兜底分支几乎不可能到达
-  const delays = [1500, 3000, 4500, 8000, 15000, 30000];
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= delays.length; attempt++) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastErr = e;
-      if (attempt === delays.length || !isClockSkewError(e)) throw e;
-      console.warn(`同步遇到时间校验偏差，自动换票重试（第 ${attempt + 1}/${delays.length} 次）`, e);
-      try {
-        // 换一张新票：绕开旧票的 iat；失败（如离线）不阻断，继续走等待重试
-        await supabase.auth.refreshSession();
-      } catch {
-        /* 刷新失败不致命：iat 固定+等待本身就能自愈 */
-      }
-      await sleep(delays[attempt]);
+/** 有限并发（每行独立成败，不因为一行坏数据拖垮整张表） */
+async function runLimited<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      await task(items[index]);
     }
-  }
-  throw lastErr;
-}
-
-/**
- * TASK-026 续：时钟偏差彻底失败的延迟补推——60 秒后自动再同步一次。
- * 数据本地已落库（零丢失），这里只是把"请用户稍后手动重试"变成 App 自己排队收尾；
- * 期间用户任何新数据变化也会各自触发 schedulePush，多路径汇合到同一次成功同步。
- */
-let clockSkewRetimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleClockSkewRetryPush(): void {
-  if (clockSkewRetimer) return; // 已排队则不重复（多次失败共享同一个补推）
-  clockSkewRetimer = setTimeout(() => {
-    clockSkewRetimer = null;
-    void pushNow().catch(() => {});
-  }, 60_000);
+  });
+  await Promise.all(workers);
 }
 
 // ────────────────────────────── 同步状态（供 UI 订阅） ──────────────────────────────
@@ -242,207 +238,353 @@ function notifyDataReplaced() {
   reloadListeners.forEach((cb) => cb());
 }
 
-// ────────────────────────────── 行转换：本地实体 ↔ 数据库行 ──────────────────────────────
+// ────────────────────────────── 小工具 ──────────────────────────────
 
-function txToRow(t: Transaction, userId: string): Row {
+/** 后端 VARCHAR 上限，超长会被 400 整行拒绝——这里先截断，宁可少几个字也不要同步失败 */
+function clip(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+/** 后端 color 是 CHAR(7) 且校验 #RRGGBB；本地老数据里的 emoji/短 hex 归一化掉 */
+function safeColor(value: string | undefined | null, fallback?: string): string | null {
+  if (value && /^#[0-9a-fA-F]{6}$/.test(value)) return value;
+  return fallback ?? null;
+}
+
+/** 后端币种是 CHAR(3) 且校验 ISO-4217；老数据里的异常币种退回全局币种，避免整行 400 */
+function safeCurrency(value: string | undefined | null, fallback: string): string {
+  const upper = (value || fallback || 'MYR').toUpperCase();
+  if (/^[A-Z]{3}$/.test(upper)) return upper;
+  const back = (fallback || 'MYR').toUpperCase();
+  return /^[A-Z]{3}$/.test(back) ? back : 'MYR';
+}
+/** ISO 时间戳 → 毫秒（本地 createdAt 是 number）；失败返回 undefined */
+function toMillis(iso: unknown): number | undefined {
+  if (typeof iso !== 'string') return undefined;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+/** 大类名 == 内置大类（这些组由 defaultCategories 渲染，不进 categoryGroups，避免管理页重复分组） */
+const DEFAULT_GROUP_NAMES = new Set<string>([...EXPENSE_CATEGORY_GROUPS, ...INCOME_CATEGORY_GROUPS]);
+
+// ────────────────────────────── 行转换：本地实体 ↔ 云端行 ──────────────────────────────
+// 所有金额字段在"行"里都是 4 位定点字符串（amountKey）：diff 就是字符串相等，不用浮点比较。
+
+interface LedgerRow extends Row {
+  clientUid: string;
+  name: string;
+  icon: string;
+  color: string | null;
+  sortOrder: number;
+}
+
+interface AssetRow extends Row {
+  clientUid: string;
+  ledgerUid: string;
+  name: string;
+  icon: string;
+  color: string;
+  type: string;
+  currency: string;
+  initialBalance: string;
+  creditLimit: string | null;
+  statementDay: number | null;
+  dueDay: number | null;
+  interestRate: string | null;
+  defaultAsset: boolean;
+  sortOrder: number;
+  archived: boolean;
+}
+
+interface GroupRow extends Row {
+  clientUid: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+  type: string;
+  sortOrder: number;
+}
+
+interface CategoryRow extends Row {
+  clientUid: string;
+  groupUid: string | null;
+  name: string;
+  icon: string;
+  color: string | null;
+  type: string;
+  sortOrder: number;
+}
+
+interface TxRow extends Row {
+  clientUid: string;
+  ledgerUid: string;
+  categoryUid: string | null;
+  assetUid: string | null;
+  fromAssetUid: string | null;
+  toAssetUid: string | null;
+  type: string;
+  amount: string;
+  exchangeRate: string | null;
+  convertedAmount: string | null;
+  fee: string | null;
+  occurredOn: string;
+  note: string;
+  displayName: string | null;
+  receiptPath: string | null;
+}
+
+interface BudgetRow extends Row {
+  clientUid: string;
+  categoryUid: string | null;
+  currency: string;
+  amount: string;
+}
+
+/** 全局设置行（PATCH /api/profile 的字段子集） */
+interface ProfileRow extends Row {
+  currency: string;
+  dateFormat: string | null;
+  weekStartsOn: number;
+  decimalPlaces: number;
+  periodPreference: PeriodPreference;
+  activeLedgerUid: string | null;
+}
+
+function ledgerToRow(l: Ledger, index: number): LedgerRow {
   return {
-    id: t.id,
-    user_id: userId,
-    amount: t.amount,
-    type: t.type,
-    category_id: t.categoryId ?? '',
-    date: t.date,
-    note: t.note ?? '',
-    display_name: t.displayName ?? null,
-    ledger_id: t.ledgerId,
-    asset_id: t.assetId ?? null,
-    from_asset_id: t.fromAssetId ?? null,
-    to_asset_id: t.toAssetId ?? null,
-    exchange_rate: t.exchangeRate ?? null,
-    converted_amount: t.convertedAmount ?? null,
-    fee: t.fee ?? null,
-    receipt_path: t.receiptUri ?? null,
-    created_at: t.createdAt,
+    clientUid: l.id,
+    name: clip(l.name, 100),
+    icon: clip(l.icon || 'book-outline', 64),
+    color: safeColor(l.color),
+    sortOrder: index,
   };
 }
 
-function txFromRow(r: Row): Transaction {
+function ledgerFromDto(d: LedgerDto): Ledger {
   return {
-    id: r.id as string,
-    amount: Number(r.amount),
-    type: r.type as Transaction['type'],
-    categoryId: (r.category_id as string) ?? '',
-    date: r.date as string,
-    note: (r.note as string) ?? '',
-    displayName: (r.display_name as string) ?? undefined,
-    createdAt: Number(r.created_at),
-    ledgerId: r.ledger_id as string,
-    assetId: (r.asset_id as string) ?? undefined,
-    receiptUri: (r.receipt_path as string) ?? undefined,
-    fromAssetId: (r.from_asset_id as string) ?? undefined,
-    toAssetId: (r.to_asset_id as string) ?? undefined,
-    exchangeRate: r.exchange_rate != null ? Number(r.exchange_rate) : undefined,
-    convertedAmount: r.converted_amount != null ? Number(r.converted_amount) : undefined,
-    fee: r.fee != null ? Number(r.fee) : undefined,
+    id: d.clientUid,
+    name: d.name,
+    icon: d.icon,
+    color: d.color ?? undefined,
+    createdAt: toMillis(d.createdAt) ?? Date.now(),
   };
 }
 
-function assetToRow(a: Asset, userId: string): Row {
+function assetToRow(a: Asset, index: number, fallbackLedgerId: string, fallbackCurrency: string): AssetRow {
   return {
-    id: a.id,
-    user_id: userId,
-    name: a.name,
-    icon: a.icon,
-    color: a.color,
+    clientUid: a.id,
+    ledgerUid: a.ledgerId || fallbackLedgerId,
+    name: clip(a.name, 100),
+    icon: clip(a.icon || 'wallet-outline', 64),
+    color: safeColor(a.color, '#4C9AFF') as string,
     type: a.type,
-    currency: a.currency,
-    initial_balance: a.initialBalance,
-    ledger_id: a.ledgerId,
-    credit_limit: a.creditLimit ?? null,
-    statement_day: a.statementDay ?? null,
-    due_day: a.dueDay ?? null,
-    interest_rate: a.interestRate ?? null,
-    is_default: a.isDefault ?? null,
-    created_at: a.createdAt,
-    // 仅归档时写入 archived_at：未执行 schema.sql 新增列的云端，普通账户同步不受影响。
-    // 取消归档由 pushSnapshot 显式补 null（见那里的注释）
-    ...(a.archivedAt ? { archived_at: a.archivedAt } : {}),
+    currency: safeCurrency(a.currency, fallbackCurrency),
+    initialBalance: amountKey(a.initialBalance ?? 0),
+    creditLimit: a.creditLimit != null ? amountKey(a.creditLimit) : null,
+    statementDay: a.statementDay ?? null,
+    dueDay: a.dueDay ?? null,
+    interestRate: a.interestRate != null ? rateKey(a.interestRate) : null,
+    defaultAsset: a.isDefault === true,
+    sortOrder: index,
+    archived: Boolean(a.archivedAt),
   };
 }
 
-function assetFromRow(r: Row): Asset {
+function assetFromDto(d: AssetDto): Asset {
   return {
-    id: r.id as string,
-    name: r.name as string,
-    icon: r.icon as string,
-    color: r.color as string,
-    type: r.type as Asset['type'],
-    currency: r.currency as string,
-    initialBalance: Number(r.initial_balance),
-    ledgerId: r.ledger_id as string,
-    creditLimit: r.credit_limit != null ? Number(r.credit_limit) : undefined,
-    statementDay: r.statement_day != null ? Number(r.statement_day) : undefined,
-    dueDay: r.due_day != null ? Number(r.due_day) : undefined,
-    interestRate: r.interest_rate != null ? Number(r.interest_rate) : undefined,
-    isDefault: r.is_default != null ? Boolean(r.is_default) : undefined,
-    // 老云端行没有该列（undefined）或为 null = 活跃账户
-    archivedAt: r.archived_at ? String(r.archived_at) : undefined,
-    createdAt: Number(r.created_at),
+    id: d.clientUid,
+    name: d.name,
+    icon: d.icon,
+    color: d.color,
+    type: d.type as Asset['type'],
+    currency: d.currency,
+    initialBalance: parseAmount(d.initialBalance) ?? 0,
+    ledgerId: d.ledgerUid,
+    createdAt: toMillis(d.createdAt) ?? Date.now(),
+    creditLimit: optionalAmount(d.creditLimit),
+    statementDay: d.statementDay ?? undefined,
+    dueDay: d.dueDay ?? undefined,
+    interestRate: optionalRate(d.interestRate),
+    isDefault: d.defaultAsset ? true : undefined,
+    // 归档时间只在"确实已归档"时保留；未归档 = 活跃账户（App 用 undefined 判断活跃）
+    archivedAt: d.archived ? d.archivedAt ?? new Date().toISOString() : undefined,
   };
 }
 
-function categoryToRow(c: Category, userId: string): Row {
+/** App 的大类没有 id：用大类名当 clientUid（docs/DB-SCHEMA §3.5），跨端稳定 */
+function groupToRow(g: CategoryGroup, index: number): GroupRow {
   return {
-    id: c.id,
-    user_id: userId,
-    name: c.name,
-    icon: c.icon,
-    color: c.color,
-    type: c.type,
-    group_name: c.group ?? null,
-  };
-}
-
-function categoryFromRow(r: Row): Category {
-  return {
-    id: r.id as string,
-    name: r.name as string,
-    icon: r.icon as string,
-    color: (r.color as string) ?? '',
-    type: r.type as Category['type'],
-    group: (r.group_name as string) ?? undefined,
-  };
-}
-
-// App 端大类以 name 为唯一键，云端 id 直接用 name
-function groupToRow(g: CategoryGroup, userId: string): Row {
-  return {
-    id: g.name,
-    user_id: userId,
-    name: g.name,
-    color: g.color ?? null,
-    icon: g.icon ?? null,
+    clientUid: clip(g.name, 64),
+    name: clip(g.name, 50),
+    color: safeColor(g.color),
+    icon: g.icon ? clip(g.icon, 64) : null,
     type: g.type,
+    sortOrder: index,
   };
 }
 
-function groupFromRow(r: Row): CategoryGroup {
+function groupFromDto(d: CategoryGroupDto): CategoryGroup {
   return {
-    name: r.name as string,
-    color: (r.color as string) ?? undefined,
-    icon: (r.icon as string) ?? undefined,
-    type: r.type as CategoryGroup['type'],
+    name: d.name,
+    color: d.color ?? undefined,
+    icon: d.icon ?? undefined,
+    type: d.type as CategoryGroup['type'],
   };
 }
 
-// App 端预算没有 id：用 分类id+币种 生成确定性 id，多端一致
-// （AppContext.setBudget 也用它去重历史重复条目，故导出）
+function categoryToRow(c: Category, index: number): CategoryRow {
+  return {
+    clientUid: c.id,
+    groupUid: c.group ? clip(c.group, 64) : null,
+    name: clip(c.name, 50),
+    icon: clip(c.icon || 'help-outline', 64),
+    color: safeColor(c.color),
+    type: c.type,
+    sortOrder: index,
+  };
+}
+
+function categoryFromDto(d: CategoryDto): Category {
+  return {
+    id: d.clientUid,
+    name: d.name,
+    icon: d.icon,
+    color: d.color ?? '',
+    type: d.type as Category['type'],
+    group: d.groupUid ?? undefined,
+  };
+}
+
+function txToRow(t: Transaction): TxRow {
+  return {
+    clientUid: t.id,
+    ledgerUid: t.ledgerId,
+    // App 的空串表示"无分类"，后端要 null（docs/API.md §4.1）
+    categoryUid: t.categoryId ? t.categoryId : null,
+    assetUid: t.assetId ?? null,
+    fromAssetUid: t.fromAssetId ?? null,
+    toAssetUid: t.toAssetId ?? null,
+    type: t.type,
+    amount: amountKey(t.amount),
+    // 汇率/到账金额/手续费只属于转账；expense/income 传上去后端也会清成 NULL
+    exchangeRate: t.exchangeRate != null ? rateKey(t.exchangeRate) : null,
+    convertedAmount: t.convertedAmount != null ? amountKey(t.convertedAmount) : null,
+    fee: t.fee != null ? amountKey(t.fee) : null,
+    occurredOn: t.date,
+    note: clip(t.note ?? '', 500),
+    displayName: t.displayName ? clip(t.displayName, 100) : null,
+    receiptPath: t.receiptUri ? clip(t.receiptUri, 512) : null,
+  };
+}
+
+function txFromDto(d: TransactionDto): Transaction {
+  return {
+    id: d.clientUid,
+    amount: parseAmount(d.amount) ?? 0,
+    type: d.type as Transaction['type'],
+    categoryId: d.categoryUid ?? '',
+    date: d.occurredOn,
+    note: d.note ?? '',
+    displayName: d.displayName ?? undefined,
+    createdAt: toMillis(d.createdAt) ?? Date.now(),
+    ledgerId: d.ledgerUid,
+    assetId: d.assetUid ?? undefined,
+    receiptUri: d.receiptPath ?? undefined,
+    fromAssetId: d.fromAssetUid ?? undefined,
+    toAssetId: d.toAssetUid ?? undefined,
+    exchangeRate: optionalRate(d.exchangeRate),
+    convertedAmount: optionalAmount(d.convertedAmount),
+    fee: optionalAmount(d.fee),
+  };
+}
+
+/**
+ * App 端预算没有 id：本地用 categoryId + 币种定位（'total' = 总预算）。
+ * 后端 clientUid 由 (categoryUid|currency) 派生，响应一定回传；
+ * 这里优先用响应里的 clientUid（跨端一致），缺失时才退回同样的派生规则。
+ */
 export function budgetId(b: Budget): string {
-  return `${b.categoryId}|${b.currency ?? ''}`;
+  return b.categoryId + '|' + (b.currency ?? '');
 }
 
-function budgetToRow(b: Budget, userId: string): Row {
+function budgetRowId(b: Budget, fallbackCurrency: string): string {
+  return b.clientUid ?? b.categoryId + '|' + (b.currency ?? fallbackCurrency);
+}
+
+function budgetToRow(b: Budget, fallbackCurrency: string): BudgetRow {
   return {
-    id: budgetId(b),
-    user_id: userId,
-    category_id: b.categoryId,
-    amount: b.amount,
-    currency: b.currency ?? null,
+    clientUid: budgetRowId(b, fallbackCurrency),
+    categoryUid: b.categoryId === 'total' ? null : b.categoryId,
+    currency: safeCurrency(b.currency, fallbackCurrency),
+    amount: amountKey(b.amount),
   };
 }
 
-function budgetFromRow(r: Row): Budget {
+function budgetFromDto(d: BudgetDto): Budget {
   return {
-    categoryId: r.category_id as string,
-    amount: Number(r.amount),
-    currency: (r.currency as string) ?? undefined,
+    // scope='total' 的行在 App 侧统一表示成 'total'
+    categoryId: d.scope === 'total' ? 'total' : d.categoryUid ?? 'total',
+    amount: parseAmount(d.amount) ?? 0,
+    currency: d.currency,
+    clientUid: d.clientUid,
   };
 }
 
-function ledgerToRow(l: Ledger, userId: string): Row {
+function profileToRow(s: LocalSnapshot): ProfileRow {
+  const ledgerIds = new Set(s.ledgers.map((l) => l.id));
   return {
-    id: l.id,
-    user_id: userId,
-    name: l.name,
-    icon: l.icon,
-    color: l.color ?? null,
-    created_at: l.createdAt,
+    currency: safeCurrency(s.currency, 'MYR'),
+    // 后端只接受 YYYY/MM/DD、DD/MM/YYYY、MM/DD/YYYY；'YYYY-MM-DD' 会被 400，
+    // 这里传 null = 不推送该字段（本地设置照常生效，见报告里的接口缺口）
+    dateFormat: s.dateFormat === 'YYYY-MM-DD' ? null : s.dateFormat,
+    weekStartsOn: s.weekStartsOn,
+    decimalPlaces: s.decimalPlaces,
+    periodPreference: s.periodPreference,
+    // 当前账本必须真实存在，否则后端 400（activeLedgerUid 做引用校验）
+    activeLedgerUid: ledgerIds.has(s.activeLedgerId) ? s.activeLedgerId : null,
   };
 }
 
-function ledgerFromRow(r: Row): Ledger {
-  return {
-    id: r.id as string,
-    name: r.name as string,
-    icon: r.icon as string,
-    color: (r.color as string) ?? undefined,
-    createdAt: Number(r.created_at),
-  };
-}
-
-function profileToRow(s: LocalSnapshot, userId: string): Row {
-  return {
-    user_id: userId,
-    currency: s.currency,
-    date_format: s.dateFormat,
-    week_starts_on: s.weekStartsOn,
-    decimal_places: s.decimalPlaces,
-    period_preference: s.periodPreference,
-    active_ledger_id: s.activeLedgerId,
-  };
-}
-
-/** 把云端 profiles 行套到本地快照的设置字段上（云端为 null 的字段保留本地值） */
-function applyProfileRow(s: LocalSnapshot, r: Row | null): LocalSnapshot {
-  if (!r) return s;
+/** 把云端 profile 套到本地快照的设置字段上（云端为 null 的字段保留本地值） */
+function applyProfileRow(s: LocalSnapshot, row: ProfileRow | null): LocalSnapshot {
+  if (!row) return s;
+  const period = row.periodPreference;
   return {
     ...s,
-    currency: (r.currency as string) ?? s.currency,
-    dateFormat: (r.date_format as DateFormat) ?? s.dateFormat,
-    weekStartsOn: (r.week_starts_on as WeekStartsOn) ?? s.weekStartsOn,
-    decimalPlaces: (r.decimal_places as DecimalPlaces) ?? s.decimalPlaces,
-    periodPreference: (r.period_preference as PeriodPreference) ?? s.periodPreference,
-    activeLedgerId: (r.active_ledger_id as string) ?? s.activeLedgerId,
+    currency: typeof row.currency === 'string' && row.currency ? row.currency : s.currency,
+    dateFormat:
+      typeof row.dateFormat === 'string' && row.dateFormat ? (row.dateFormat as DateFormat) : s.dateFormat,
+    weekStartsOn: typeof row.weekStartsOn === 'number' ? (row.weekStartsOn as WeekStartsOn) : s.weekStartsOn,
+    decimalPlaces:
+      typeof row.decimalPlaces === 'number' ? (row.decimalPlaces as DecimalPlaces) : s.decimalPlaces,
+    periodPreference:
+      period && typeof period === 'object' && 'type' in period
+        ? (period as PeriodPreference)
+        : s.periodPreference,
+    activeLedgerId: row.activeLedgerUid ?? s.activeLedgerId,
+  };
+}
+
+function profileFromDto(dto: {
+  currency?: string | null;
+  dateFormat?: string | null;
+  weekStartsOn?: number | null;
+  decimalPlaces?: number | null;
+  periodPreference?: unknown;
+  activeLedgerUid?: string | null;
+}): ProfileRow {
+  const period = dto.periodPreference;
+  return {
+    currency: typeof dto.currency === 'string' ? dto.currency : 'MYR',
+    dateFormat: typeof dto.dateFormat === 'string' ? dto.dateFormat : null,
+    weekStartsOn: typeof dto.weekStartsOn === 'number' ? dto.weekStartsOn : 1,
+    decimalPlaces: typeof dto.decimalPlaces === 'number' ? dto.decimalPlaces : 2,
+    periodPreference:
+      period && typeof period === 'object' && 'type' in period
+        ? (period as PeriodPreference)
+        : { type: 'month' },
+    activeLedgerUid: typeof dto.activeLedgerUid === 'string' ? dto.activeLedgerUid : null,
   };
 }
 
@@ -451,35 +593,77 @@ function applyProfileRow(s: LocalSnapshot, r: Row | null): LocalSnapshot {
 interface SyncMirror {
   ledgers: Row[];
   assets: Row[];
-  category_groups: Row[];
+  categoryGroups: Row[];
   categories: Row[];
   transactions: Row[];
   budgets: Row[];
-  profile: Row | null;
+  profile: ProfileRow | null;
+}
+
+function emptyMirror(): SyncMirror {
+  return {
+    ledgers: [],
+    assets: [],
+    categoryGroups: [],
+    categories: [],
+    transactions: [],
+    budgets: [],
+    profile: null,
+  };
 }
 
 async function loadMirror(): Promise<SyncMirror> {
   try {
     const raw = await AsyncStorage.getItem(MIRROR_KEY);
-    if (raw) return JSON.parse(raw) as SyncMirror;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<SyncMirror> & { category_groups?: Row[] };
+      // 兼容旧版本（旧键名 category_groups）的镜像：读不到就当空镜像，下一次推送全量重放
+      return {
+        ledgers: parsed.ledgers ?? [],
+        assets: parsed.assets ?? [],
+        categoryGroups: parsed.categoryGroups ?? parsed.category_groups ?? [],
+        categories: parsed.categories ?? [],
+        transactions: parsed.transactions ?? [],
+        budgets: parsed.budgets ?? [],
+        profile: (parsed.profile as ProfileRow | null) ?? null,
+      };
+    }
   } catch {}
-  return { ledgers: [], assets: [], category_groups: [], categories: [], transactions: [], budgets: [], profile: null };
+  return emptyMirror();
 }
 
 function saveMirror(m: SyncMirror): Promise<void> {
   return AsyncStorage.setItem(MIRROR_KEY, JSON.stringify(m)).catch(() => {});
 }
 
-/** 把当前快照按表转成数据库行（canonical 形状，diff 用） */
-function buildAllRows(s: LocalSnapshot, userId: string): SyncMirror {
+/**
+ * 本地分类用到的所有大类（含 defaultCategories 里写死的默认大组）：
+ * 分类的 group 是大类**名字**，后端要 clientUid（= 名字）且必须已存在，
+ * 所以推送前把「categoryGroups ∪ 分类里出现的 group 名」一起补上。
+ */
+function effectiveGroups(s: LocalSnapshot): CategoryGroup[] {
+  const out: CategoryGroup[] = [...s.categoryGroups];
+  const seen = new Set(out.map((g) => g.name));
+  s.categories.forEach((c) => {
+    if (!c.group || seen.has(c.group)) return;
+    seen.add(c.group);
+    out.push({ name: c.group, type: c.type });
+  });
+  return out;
+}
+
+/** 把当前快照按表转成云端行（canonical 形状，diff 用） */
+function buildAllRows(s: LocalSnapshot): SyncMirror {
+  const fallbackLedgerId = s.activeLedgerId || 'default';
+  const currency = s.currency || 'MYR';
   return {
-    ledgers: s.ledgers.map((l) => ledgerToRow(l, userId)),
-    assets: s.assets.map((a) => assetToRow(a, userId)),
-    category_groups: s.categoryGroups.map((g) => groupToRow(g, userId)),
-    categories: s.categories.map((c) => categoryToRow(c, userId)),
-    transactions: s.transactions.map((t) => txToRow(t, userId)),
-    budgets: s.budgets.map((b) => budgetToRow(b, userId)),
-    profile: profileToRow(s, userId),
+    ledgers: s.ledgers.map(ledgerToRow),
+    assets: s.assets.map((a, i) => assetToRow(a, i, fallbackLedgerId, currency)),
+    categoryGroups: effectiveGroups(s).map(groupToRow),
+    categories: s.categories.map(categoryToRow),
+    transactions: s.transactions.map(txToRow),
+    budgets: s.budgets.map((b) => budgetToRow(b, currency)),
+    profile: profileToRow(s),
   };
 }
 
@@ -569,22 +753,31 @@ async function readLocalSnapshot(): Promise<LocalSnapshot> {
   };
 }
 
-// ────────────────────────────── 老数据兜底（防止 NOT NULL 拒写卡死同步） ──────────────────────────────
+// ────────────────────────────── 老数据兜底（防止 400 拒写卡死同步） ──────────────────────────────
 
 const FALLBACK_COLOR = '#4C9AFF'; // 与 AppContext.DEFAULT_LEDGER 一致的主题蓝
 const FALLBACK_ICON = 'book-outline';
 
-function toFiniteNumber(v: unknown, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+function dedupeBudgets(list: Budget[]): Budget[] {
+  const seen = new Set<string>();
+  const out = list.filter((b) => {
+    const id = b.clientUid ?? budgetId(b);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return out.length === list.length ? list : out;
 }
 
 /**
- * 修复历史遗留的不完整数据，避免推云时被数据库 NOT NULL 约束整块拒绝：
+ * 修复历史遗留的不完整/悬空数据，避免推云时被后端字段校验整块拒绝：
  * - 资产缺 color/currency/icon/ledgerId/createdAt（每资产币种上线前的老设备数据）
- * - 交易缺 ledgerId/createdAt/date、金额非法（NaN 会变成 Postgres 拒绝的 NaN 字面量）
+ * - 交易缺 ledgerId/createdAt/date、金额非法（NaN 会被后端拒绝）
  * - 账本缺 icon/createdAt
- * - 预算同 (分类+币种) 的重复条目去重（历史版本 setBudget 留下的重复，会让云端 upsert 报 500）
+ * - 预算同 (分类+币种) 的重复条目去重；金额 <= 0 的条目清掉（后端不接受 0 预算，清预算 = 删除）
+ * - 预算/流水指向已被删除的分类：预算丢弃、流水的分类置空
+ *   —— 与后端「删分类时预算 CASCADE、流水 category_id SET NULL」的语义对齐
+ *   （分类列表为空时不处理：那可能是还没加载完，不能把全部分类引用抹掉）
  * 返回 (快照, 是否有修复)：有修复时调用方把结果写回本地自愈，下次不再触发。
  */
 function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed: boolean } {
@@ -604,12 +797,16 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
     return { ...a, ...patch } as Asset;
   });
 
+  const knownCategories = new Set(s.categories.map((c) => c.id));
+  const categoriesLoaded = s.categories.length > 0;
+
   const transactions = s.transactions.map((t) => {
     const patch: Partial<Transaction> = {};
     if (!t.ledgerId) patch.ledgerId = ledgerFallback;
     if (!Number.isFinite(Number(t.createdAt)) || !t.createdAt) patch.createdAt = Date.now();
     if (!t.date) patch.date = new Date().toISOString().slice(0, 10);
     if (!Number.isFinite(Number(t.amount))) patch.amount = 0;
+    if (categoriesLoaded && t.categoryId && !knownCategories.has(t.categoryId)) patch.categoryId = '';
     if (!Object.keys(patch).length) return t;
     changed = true;
     return { ...t, ...patch } as Transaction;
@@ -624,8 +821,14 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
     return { ...l, ...patch } as Ledger;
   });
 
-  const budgets = dedupeBudgets(s.budgets);
-  if (budgets !== s.budgets) changed = true;
+  const budgetsFiltered = s.budgets.filter((b) => {
+    if (!Number.isFinite(Number(b.amount)) || Number(b.amount) <= 0) return false;
+    if (categoriesLoaded && b.categoryId !== 'total' && !knownCategories.has(b.categoryId)) return false;
+    return true;
+  });
+  if (budgetsFiltered.length !== s.budgets.length) changed = true;
+  const budgets = dedupeBudgets(budgetsFiltered);
+  if (budgets !== budgetsFiltered) changed = true;
 
   return {
     snapshot: changed ? { ...s, assets, transactions, ledgers, budgets } : s,
@@ -651,60 +854,59 @@ async function writeLocalSnapshot(s: LocalSnapshot): Promise<void> {
   ]);
 }
 
-// ────────────────────────────── 云端读写 ──────────────────────────────
+// ────────────────────────────── 云端读取（拉全量） ──────────────────────────────
 
-const PULL_PAGE_SIZE = 1000; // Supabase 默认 max_rows=1000，超过会被静默截断，必须翻页拉全
-
-/** 翻页拉全一张表（按 id 排序保证翻页稳定；数据量小，两三页内拉完） */
-async function fetchAllRows(table: string): Promise<Row[]> {
-  const out: Row[] = [];
-  for (let from = 0; ; from += PULL_PAGE_SIZE) {
-    const { data, error } = await withRetry(() =>
-      supabase.from(table).select('*').order('id').range(from, from + PULL_PAGE_SIZE - 1)
-    );
-    if (error) throw error;
-    const rows = (data ?? []) as Row[];
-    out.push(...rows);
-    if (rows.length < PULL_PAGE_SIZE) return out;
-  }
+interface CloudPull {
+  /** canonical 形状的云端行（用于合并设置字段与镜像） */
+  cloud: SyncMirror;
+  /** DTO 转成的本地实体（合并时用） */
+  entities: {
+    ledgers: Ledger[];
+    assets: Asset[];
+    categoryGroups: CategoryGroup[];
+    categories: Category[];
+    transactions: Transaction[];
+    budgets: Budget[];
+  };
 }
 
-async function fetchAll(userId: string): Promise<{ cloud: SyncMirror; cloudRows: Record<string, Row[]> }> {
-  const [ledgers, assets, groups, cats, txs, buds, prof] = await Promise.all([
-    fetchAllRows('ledgers'),
-    fetchAllRows('assets'),
-    fetchAllRows('category_groups'),
-    fetchAllRows('categories'),
-    fetchAllRows('transactions'),
-    fetchAllRows('budgets'),
-    supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
-  ] as const);
-  const profError = prof.error;
-  if (profError) throw profError;
+async function fetchAll(): Promise<CloudPull> {
+  const [ledgerDtos, assetDtos, groupDtos, categoryDtos, txDtos, budgetDtos, profileDto] = await Promise.all([
+    withRetry(() => api.listLedgers(true)),
+    withRetry(() => api.listAssets(true)),
+    withRetry(() => api.listCategoryGroups(true)),
+    withRetry(() => api.listCategories(true)),
+    // 流水是唯一分页的列表（size 上限 100），必须翻页拉全
+    withRetry(() => listAllTransactions()),
+    withRetry(() => api.listBudgets()),
+    withRetry(() => api.getProfile()),
+  ]);
 
-  const cloudRows: Record<string, Row[]> = {
-    ledgers,
-    assets,
-    category_groups: groups,
-    categories: cats,
-    transactions: txs,
-    budgets: buds,
-  };
-  // 镜像统一转成 canonical 形状（toRow(fromRow(row))），这样推送 diff 时键序一致；
-  // profiles 行也走一次 applyProfileRow → profileToRow 归一化，避免带着数据库的
-  // created_at/updated_at 等额外列导致每次启动都误判"有变化"而多做一次 upsert
+  const ledgers = ledgerDtos.map(ledgerFromDto);
+  const assets = assetDtos.map(assetFromDto);
+  const categoryGroups = groupDtos.map(groupFromDto);
+  const categories = categoryDtos.map(categoryFromDto);
+  const transactions = txDtos.map(txFromDto);
+  const budgets = budgetDtos.map(budgetFromDto);
+  const profile = profileFromDto(profileDto);
+
+  // 镜像统一转成 canonical 形状（toRow(fromDto(dto))），这样推送 diff 时键序一致；
+  // profile 行也走一次归一化，避免带着 updatedAt 之类的服务端列导致每次启动都误判"有变化"
   const cloud: SyncMirror = {
-    ledgers: cloudRows.ledgers.map((r) => ledgerToRow(ledgerFromRow(r), userId)),
-    assets: cloudRows.assets.map((r) => assetToRow(assetFromRow(r), userId)),
-    category_groups: cloudRows.category_groups.map((r) => groupToRow(groupFromRow(r), userId)),
-    categories: cloudRows.categories.map((r) => categoryToRow(categoryFromRow(r), userId)),
-    transactions: cloudRows.transactions.map((r) => txToRow(txFromRow(r), userId)),
-    budgets: cloudRows.budgets.map((r) => budgetToRow(budgetFromRow(r), userId)),
-    profile: prof.data ? profileToRow(applyProfileRow(emptySnapshot(), prof.data as Row), userId) : null,
+    ledgers: ledgers.map(ledgerToRow),
+    assets: assets.map((a, i) => assetToRow(a, i, a.ledgerId || 'default', profile.currency)),
+    categoryGroups: categoryGroups.map(groupToRow),
+    categories: categories.map(categoryToRow),
+    transactions: transactions.map(txToRow),
+    budgets: budgets.map((b) => budgetToRow(b, profile.currency)),
+    profile,
   };
-  return { cloud, cloudRows };
+  return { cloud, entities: { ledgers, assets, categoryGroups, categories, transactions, budgets } };
 }
-/** 单行推送失败记录：constraint 类失败跳过坏行、其余照常上云，失败行不入镜像（下次同步重试） */
+
+// ────────────────────────────── 推送 ──────────────────────────────
+
+/** 单行推送失败记录：数据类失败跳过坏行、其余照常上云，失败行不入镜像（下次同步重试） */
 interface RowFailure {
   table: string;
   id: string;
@@ -713,16 +915,12 @@ interface RowFailure {
 }
 
 function errorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    const details = e.details?.length ? ' (' + e.details.join('; ') + ')' : '';
+    return '[' + e.code + '] ' + e.message + details;
+  }
   if (e instanceof Error) return e.message;
-  // postgrest-js 默认（非 throwOnError）把服务端错误解析成普通对象返回；此时 String(e)
-  // 只会得到 "[object Object]"，弹窗无法定位问题（2026-10-20 同步失败排查踩过）。
-  // 显式取字段拼成人话，并带上 PostgREST 错误码。
   if (e && typeof e === 'object') {
-    const anyE = e as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const text = [anyE.message, anyE.details, anyE.hint]
-      .filter((v): v is string => typeof v === 'string' && v.length > 0)
-      .join(' | ');
-    if (text) return typeof anyE.code === 'string' && anyE.code ? `[${anyE.code}] ${text}` : text;
     try {
       return JSON.stringify(e);
     } catch {
@@ -732,165 +930,291 @@ function errorMessage(e: unknown): string {
   return String(e);
 }
 
-/** 按 id 去重（保留第一条）；无重复时原样返回 */
-function dedupeRowsById(rows: Row[]): Row[] {
-  const seen = new Set<string>();
-  const out = rows.filter((r) => {
-    const id = String(r.id);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-  return out.length === rows.length ? rows : out;
-}
-
-/** 预算列表按确定性 id 去重（保留第一条 = 界面 budgets.find 读到的值） */
-function dedupeBudgets(list: Budget[]): Budget[] {
-  const seen = new Set<string>();
-  const out = list.filter((b) => {
-    const id = budgetId(b);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-  return out.length === list.length ? list : out;
-}
-
-async function upsertChunked(table: string, rows: Row[], failedRows: RowFailure[]): Promise<void> {
-  // 同一条 upsert 语句里出现两个相同 id → Postgres 报 21000（ON CONFLICT DO UPDATE cannot
-  // affect row a second time）→ PostgREST 500 → 整次同步失败（2026-10-20 预算重复条目事故）。
-  // 历史遗留重复在这里兜底去重，避免一条脏数据拖垮整张表（与坏行隔离同一理念）。
-  const unique = dedupeRowsById(rows);
-  for (let i = 0; i < unique.length; i += CHUNK_SIZE) {
-    const chunk = unique.slice(i, i + CHUNK_SIZE);
-    const { error } = await withRetry(() => supabase.from(table).upsert(chunk));
-    if (!error) continue;
-    // 数据类失败（NOT NULL/外键等 23xxx）：退到逐行推送隔离坏行，不让一条脏数据卡死全表
-    if (classifySyncError(error) !== 'constraint') throw error;
-    for (const row of chunk) {
-      const { error: rowError } = await supabase.from(table).upsert(row);
-      // 网络/服务器抖动不能标成坏行（会误报"数据不兼容"且中断其余行），直接上抛
-      if (rowError) {
-        if (classifySyncError(rowError) !== 'constraint') throw rowError;
-        failedRows.push({ table, id: String(row.id), op: 'upsert', reason: rowError.message });
-      }
-    }
+/** 一次 PUT/DELETE：瞬时错误重试；数据类错误按"单行失败"隔离，不拖垮整张表 */
+async function pushRow(
+  table: string,
+  id: string,
+  op: 'upsert' | 'delete',
+  action: () => Promise<unknown>,
+  failedRows: RowFailure[]
+): Promise<void> {
+  try {
+    await withRetry(action);
+  } catch (e) {
+    if (isTransientError(e)) throw e; // 网络/5xx：整次同步失败（下次重试，本地数据零丢失）
+    failedRows.push({ table, id, op, reason: errorMessage(e) });
   }
 }
 
-async function deleteByIds(table: string, ids: string[], failedRows: RowFailure[]): Promise<void> {
-  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-    const chunk = ids.slice(i, i + CHUNK_SIZE);
-    const { error } = await withRetry(() => supabase.from(table).delete().in('id', chunk));
-    if (!error) continue;
-    if (classifySyncError(error) !== 'constraint') throw error;
-    for (const id of chunk) {
-      const { error: rowError } = await supabase.from(table).delete().eq('id', id);
-      if (rowError) {
-        if (classifySyncError(rowError) !== 'constraint') throw rowError;
-        failedRows.push({ table, id, op: 'delete', reason: rowError.message });
-      }
+/** 父表在前（账本 → 大类 → 分类 → 资产 → 流水 → 预算）；删除反过来，账本永远最后 */
+const UPSERT_ORDER = ['ledgers', 'categoryGroups', 'categories', 'assets', 'transactions', 'budgets'] as const;
+const DELETE_ORDER = ['transactions', 'budgets', 'categories', 'categoryGroups', 'assets', 'ledgers'] as const;
+type TableName = (typeof UPSERT_ORDER)[number];
+
+/** 把 canonical 行还原成 PUT 请求体（金额字符串 → number） */
+function toApiBody(table: TableName, row: Row): unknown {
+  switch (table) {
+    case 'ledgers': {
+      const r = row as unknown as LedgerRow;
+      const body: LedgerUpsert = {
+        clientUid: r.clientUid,
+        name: r.name,
+        icon: r.icon,
+        color: r.color ?? undefined,
+        sortOrder: r.sortOrder,
+      };
+      return body;
     }
+    case 'assets': {
+      const r = row as unknown as AssetRow;
+      const body: AssetUpsert = {
+        clientUid: r.clientUid,
+        ledgerUid: r.ledgerUid,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        type: r.type,
+        currency: r.currency,
+        initialBalance: Number(r.initialBalance),
+        creditLimit: r.creditLimit != null ? Number(r.creditLimit) : null,
+        statementDay: r.statementDay,
+        dueDay: r.dueDay,
+        interestRate: r.interestRate != null ? Number(r.interestRate) : null,
+        defaultAsset: r.defaultAsset,
+        sortOrder: r.sortOrder,
+        archived: r.archived,
+      };
+      return body;
+    }
+    case 'categoryGroups': {
+      const r = row as unknown as GroupRow;
+      const body: CategoryGroupUpsert = {
+        clientUid: r.clientUid,
+        name: r.name,
+        color: r.color ?? undefined,
+        icon: r.icon ?? undefined,
+        type: r.type,
+        sortOrder: r.sortOrder,
+      };
+      return body;
+    }
+    case 'categories': {
+      const r = row as unknown as CategoryRow;
+      const body: CategoryUpsert = {
+        clientUid: r.clientUid,
+        groupUid: r.groupUid,
+        name: r.name,
+        icon: r.icon,
+        color: r.color ?? undefined,
+        type: r.type,
+        sortOrder: r.sortOrder,
+      };
+      return body;
+    }
+    case 'transactions': {
+      const r = row as unknown as TxRow;
+      const body: TransactionUpsert = {
+        clientUid: r.clientUid,
+        ledgerUid: r.ledgerUid,
+        categoryUid: r.categoryUid,
+        assetUid: r.assetUid,
+        fromAssetUid: r.fromAssetUid,
+        toAssetUid: r.toAssetUid,
+        type: r.type,
+        amount: Number(r.amount),
+        exchangeRate: r.exchangeRate != null ? Number(r.exchangeRate) : null,
+        convertedAmount: r.convertedAmount != null ? Number(r.convertedAmount) : null,
+        fee: r.fee != null ? Number(r.fee) : null,
+        occurredOn: r.occurredOn,
+        note: r.note,
+        displayName: r.displayName,
+        receiptPath: r.receiptPath,
+      };
+      return body;
+    }
+    case 'budgets': {
+      const r = row as unknown as BudgetRow;
+      const body: BudgetUpsert = {
+        clientUid: r.clientUid,
+        categoryUid: r.categoryUid,
+        amount: Number(r.amount),
+        currency: r.currency,
+      };
+      return body;
+    }
+    default:
+      throw new Error('未知表：' + String(table));
+  }
+}
+
+async function pushUpsert(table: TableName, row: Row, failedRows: RowFailure[]): Promise<void> {
+  const body = toApiBody(table, row);
+  const id = String((row as { clientUid: string }).clientUid);
+  await pushRow(
+    table,
+    id,
+    'upsert',
+    () => {
+      switch (table) {
+        case 'ledgers':
+          return api.putLedger(body as LedgerUpsert);
+        case 'assets':
+          return api.putAsset(body as AssetUpsert);
+        case 'categoryGroups':
+          return api.putCategoryGroup(body as CategoryGroupUpsert);
+        case 'categories':
+          return api.putCategory(body as CategoryUpsert);
+        case 'transactions':
+          return api.putTransaction(body as TransactionUpsert);
+        case 'budgets':
+          return api.putBudget(body as BudgetUpsert);
+        default:
+          throw new Error('未知表：' + String(table));
+      }
+    },
+    failedRows
+  );
+}
+
+async function pushDelete(table: TableName, id: string, failedRows: RowFailure[]): Promise<void> {
+  const action = () => {
+    switch (table) {
+      case 'ledgers':
+        // App 删账本 = 连数据一起删（用户定版），后端要求 force=true 才会级联
+        return api.deleteLedger(id, true);
+      case 'assets':
+        return api.deleteAsset(id);
+      case 'categoryGroups':
+        return api.deleteCategoryGroup(id);
+      case 'categories':
+        return api.deleteCategory(id);
+      case 'transactions':
+        return api.deleteTransaction(id);
+      case 'budgets':
+        return api.deleteBudget(id);
+      default:
+        throw new Error('未知表：' + String(table));
+    }
+  };
+  try {
+    await withRetry(action);
+  } catch (e) {
+    // 已经不存在 = 删除幂等达成（另一台设备先删了）
+    if (e instanceof ApiError && e.code === 'NOT_FOUND') return;
+    if (isTransientError(e)) throw e;
+    failedRows.push({ table, id, op: 'delete', reason: errorMessage(e) });
+  }
+}
+
+async function pushProfile(row: ProfileRow, failedRows: RowFailure[]): Promise<void> {
+  const patch: ProfilePatch = {
+    currency: row.currency,
+    weekStartsOn: row.weekStartsOn,
+    decimalPlaces: row.decimalPlaces,
+    periodPreference: row.periodPreference,
+  };
+  if (row.dateFormat) patch.dateFormat = row.dateFormat;
+  if (row.activeLedgerUid) patch.activeLedgerUid = row.activeLedgerUid;
+  try {
+    await withRetry(() => api.patchProfile(patch));
+  } catch (e) {
+    if (isTransientError(e)) throw e;
+    failedRows.push({ table: 'profile', id: 'me', op: 'upsert', reason: errorMessage(e) });
   }
 }
 
 function formatRowFailures(failedRows: RowFailure[]): string {
-  const shown = failedRows
-    .slice(0, 3)
-    .map((f) => `${f.table}/${f.id}: ${f.reason}`);
+  const shown = failedRows.slice(0, 3).map((f) => f.table + '/' + f.id + ': ' + f.reason);
   return failedRows.length > shown.length
-    ? `${shown.join('；')}（共 ${failedRows.length} 条失败）`
+    ? shown.join('；') + '（共 ' + failedRows.length + ' 条失败）'
     : shown.join('；');
 }
 
 /** 把快照 diff 后推送到云端：只上传有变化的行、删除云端多余行，最后更新镜像 */
-async function pushSnapshot(s: LocalSnapshot, userId: string): Promise<RowFailure[]> {
-  const current = buildAllRows(s, userId);
+async function pushSnapshot(s: LocalSnapshot): Promise<RowFailure[]> {
+  const current = buildAllRows(s);
   const mirror = await loadMirror();
   const failedRows: RowFailure[] = [];
 
-  const tablePairs: Array<[string, Row[]]> = [
-    ['ledgers', current.ledgers],
-    ['assets', current.assets],
-    ['category_groups', current.category_groups],
-    ['categories', current.categories],
-    ['transactions', current.transactions],
-    ['budgets', current.budgets],
-  ];
-  const mirrorMap: Record<string, Row[]> = {
+  const tableRows: Record<string, Row[]> = {
+    ledgers: current.ledgers,
+    categoryGroups: current.categoryGroups,
+    categories: current.categories,
+    assets: current.assets,
+    transactions: current.transactions,
+    budgets: current.budgets,
+  };
+  const mirrorRows: Record<string, Row[]> = {
     ledgers: mirror.ledgers,
-    assets: mirror.assets,
-    category_groups: mirror.category_groups,
+    categoryGroups: mirror.categoryGroups,
     categories: mirror.categories,
+    assets: mirror.assets,
     transactions: mirror.transactions,
     budgets: mirror.budgets,
   };
 
-  for (const [table, rows] of tablePairs) {
-    const prevRows = mirrorMap[table];
-    const prev = new Map(prevRows.map((r) => [r.id as string, r]));
-    const idsNow = new Set(rows.map((r) => r.id as string));
-    const upserts = rows
-      .filter((r) => {
-        const old = prev.get(r.id as string);
-        return !old || JSON.stringify(old) !== JSON.stringify(r);
-      })
-      .map((r) => {
-        // 取消归档：镜像里有 archived_at 说明云端已有该列，此时必须显式写 null，
-        // 否则 upsert 的列集合里没有它，云端仍保留旧的归档时间
-        const old = prev.get(r.id as string);
-        if (table === 'assets' && old && 'archived_at' in old && !('archived_at' in r)) {
-          return { ...r, archived_at: null };
-        }
-        return r;
-      });
-    const deletes = prevRows.filter((r) => !idsNow.has(r.id as string)).map((r) => r.id as string);
-    if (upserts.length) await upsertChunked(table, upserts, failedRows);
-    if (deletes.length) await deleteByIds(table, deletes, failedRows);
+  const upserts: Record<string, Row[]> = {};
+  const deletes: Record<string, string[]> = {};
+
+  UPSERT_ORDER.forEach((table) => {
+    const prevRows = mirrorRows[table] ?? [];
+    const prev = new Map(prevRows.map((r) => [String(r.clientUid), r]));
+    const rows = tableRows[table] ?? [];
+    const idsNow = new Set(rows.map((r) => String(r.clientUid)));
+    upserts[table] = rows.filter((r) => {
+      const old = prev.get(String(r.clientUid));
+      // 行已序列化成"金额定点字符串 + 固定键序"的对象：比 JSON 就是逐字段比较（无浮点）
+      return !old || JSON.stringify(old) !== JSON.stringify(r);
+    });
+    deletes[table] = prevRows.filter((r) => !idsNow.has(String(r.clientUid))).map((r) => String(r.clientUid));
+  });
+
+  // 先推父表再推子表；删除反过来（账本最后删，避开外键 RESTRICT）
+  for (const table of UPSERT_ORDER) {
+    const rows = upserts[table] ?? [];
+    if (rows.length) await runLimited(rows, PUSH_CONCURRENCY, (row) => pushUpsert(table, row, failedRows));
+  }
+  for (const table of DELETE_ORDER) {
+    const ids = deletes[table] ?? [];
+    if (ids.length) await runLimited(ids, PUSH_CONCURRENCY, (id) => pushDelete(table, id, failedRows));
   }
 
-  // profiles 行：整行 upsert（只写我们管理的列，不影响 display_name 等）
-  if (current.profile && (!mirror.profile || JSON.stringify(mirror.profile) !== JSON.stringify(current.profile))) {
-    const { error } = await supabase.from('profiles').upsert(current.profile);
-    if (error && classifySyncError(error) !== 'constraint') throw error;
-    if (error) failedRows.push({ table: 'profiles', id: userId, op: 'upsert', reason: error.message });
+  // profiles 行：局部 PATCH（只写我们管理的列，不影响 displayName 等）
+  const profileChanged =
+    !mirror.profile || JSON.stringify(mirror.profile) !== JSON.stringify(current.profile);
+  if (current.profile && profileChanged) {
+    await pushProfile(current.profile, failedRows);
   }
 
   // 镜像 = 本次成功上云的状态：失败的 upsert 行不入镜像（下次同步重试），
   // 失败的 delete 保留旧行（下次同步再删）。网络/服务器中断则整次不落镜像。
-  const failedUpsertKeys = new Set(
-    failedRows.filter((f) => f.op === 'upsert').map((f) => `${f.table}:${f.id}`)
-  );
-  const failedDeleteIds = new Set(
-    failedRows.filter((f) => f.op === 'delete').map((f) => `${f.table}:${f.id}`)
-  );
+  const failedUpsertKeys = new Set(failedRows.filter((f) => f.op === 'upsert').map((f) => f.table + ':' + f.id));
+  const failedDeleteKeys = new Set(failedRows.filter((f) => f.op === 'delete').map((f) => f.table + ':' + f.id));
+
   const nextMirror: SyncMirror = {
-    ledgers: [],
-    assets: [],
-    category_groups: [],
-    categories: [],
-    transactions: [],
-    budgets: [],
-    profile: failedUpsertKeys.has(`profiles:${userId}`) ? mirror.profile : current.profile,
+    ...emptyMirror(),
+    profile: failedUpsertKeys.has('profile:me') ? mirror.profile : current.profile,
   };
-  for (const [table, rows] of tablePairs) {
-    const prevMap = new Map(mirrorMap[table].map((r) => [r.id as string, r]));
+  UPSERT_ORDER.forEach((table) => {
+    const prevRows = mirrorRows[table] ?? [];
+    const prevMap = new Map(prevRows.map((r) => [String(r.clientUid), r]));
     const kept: Row[] = [];
     // 当前本地行：推送成功才入镜像；失败的 upsert 保留旧镜像行
     // （若之后本地把该行删了，旧镜像行才能触发下次的 delete，否则云端坏行会复活循环）
-    for (const r of rows as Row[]) {
-      if (!failedUpsertKeys.has(`${table}:${r.id as string}`)) {
+    for (const r of tableRows[table] ?? []) {
+      const id = String(r.clientUid);
+      if (!failedUpsertKeys.has(table + ':' + id)) {
         kept.push(r);
-      } else if (prevMap.has(r.id as string)) {
-        kept.push(prevMap.get(r.id as string) as Row);
+      } else if (prevMap.has(id)) {
+        kept.push(prevMap.get(id) as Row);
       }
     }
     // 失败的 delete 保留旧行，下次同步再删
-    for (const r of mirrorMap[table]) {
-      if (failedDeleteIds.has(`${table}:${r.id as string}`)) kept.push(r);
+    for (const r of prevRows) {
+      if (failedDeleteKeys.has(table + ':' + String(r.clientUid))) kept.push(r);
     }
     (nextMirror as unknown as Record<string, Row[]>)[table] = kept;
-  }
+  });
 
   await saveMirror(nextMirror);
   setLastSyncAt(Date.now());
@@ -913,22 +1237,33 @@ function mergeById<T extends { id: string }>(localRows: T[], cloudRows: T[]): T[
   return [...out, ...cloudOnly];
 }
 
+/** 预算合并：以 clientUid（服务端回传）优先，否则用 (分类|币种) 派生 id 对齐 */
+function mergeBudgets(localBudgets: Budget[], cloudBudgets: Budget[]): Budget[] {
+  const keyOf = (b: Budget) => b.clientUid ?? budgetId(b);
+  const cloudMap = new Map(cloudBudgets.map((b) => [keyOf(b), b]));
+  const out = localBudgets.map((b) => cloudMap.get(keyOf(b)) ?? b);
+  const localKeys = new Set(localBudgets.map(keyOf));
+  const cloudOnly = cloudBudgets.filter((b) => !localKeys.has(keyOf(b)));
+  return dedupeBudgets([...out, ...cloudOnly]);
+}
+
 /**
  * 云端数据与本地合并：
  * - cloudWinsAll = true（切换到另一个账号登录）：本机遗留数据丢弃，以云端为准
  * - 否则（首次绑定账号 / 同账号重登 / 换新手机）：按行合并，绝不静默丢数据
  */
-function mergeSnapshots(local: LocalSnapshot, cloud: SyncMirror, cloudRows: Record<string, Row[]>, cloudWinsAll: boolean): LocalSnapshot {
+function mergeSnapshots(local: LocalSnapshot, pull: CloudPull, cloudWinsAll: boolean): LocalSnapshot {
   if (cloudWinsAll) {
     const base = emptySnapshot();
-    const withSettings = applyProfileRow(base, cloud.profile);
+    const withSettings = applyProfileRow(base, pull.cloud.profile);
     return {
-      transactions: cloudRows.transactions.map(txFromRow),
-      categories: cloudRows.categories.map(categoryFromRow),
-      categoryGroups: cloudRows.category_groups.map(groupFromRow),
-      budgets: cloudRows.budgets.map(budgetFromRow),
-      ledgers: cloudRows.ledgers.map(ledgerFromRow),
-      assets: cloudRows.assets.map(assetFromRow),
+      transactions: pull.entities.transactions,
+      categories: pull.entities.categories,
+      // 内置大组由 defaultCategories 渲染，不进 categoryGroups（否则管理页会出现重复分组）
+      categoryGroups: pull.entities.categoryGroups.filter((g) => !DEFAULT_GROUP_NAMES.has(g.name)),
+      budgets: pull.entities.budgets,
+      ledgers: pull.entities.ledgers,
+      assets: pull.entities.assets,
       activeLedgerId: withSettings.activeLedgerId,
       currency: withSettings.currency,
       periodPreference: withSettings.periodPreference,
@@ -939,20 +1274,19 @@ function mergeSnapshots(local: LocalSnapshot, cloud: SyncMirror, cloudRows: Reco
   }
 
   const merged: LocalSnapshot = {
-    transactions: mergeById(local.transactions, cloudRows.transactions.map(txFromRow)).sort(
+    transactions: mergeById(local.transactions, pull.entities.transactions).sort(
       (a, b) => b.createdAt - a.createdAt
     ),
-    categories: mergeById(local.categories, cloudRows.categories.map(categoryFromRow)),
+    categories: mergeById(local.categories, pull.entities.categories),
     categoryGroups: mergeById(
       local.categoryGroups.map((g) => ({ ...g, id: g.name })),
-      cloudRows.category_groups.map((r) => ({ ...groupFromRow(r), id: r.name as string }))
+      pull.entities.categoryGroups
+        .filter((g) => !DEFAULT_GROUP_NAMES.has(g.name))
+        .map((g) => ({ ...g, id: g.name }))
     ).map((g) => ({ name: g.name, color: g.color, icon: g.icon, type: g.type })),
-    budgets: mergeById(
-      local.budgets.map((b) => ({ ...b, id: budgetId(b) })),
-      cloudRows.budgets.map((r) => ({ ...budgetFromRow(r), id: r.id as string }))
-    ).map((b) => ({ categoryId: b.categoryId, amount: b.amount, currency: b.currency })),
-    ledgers: mergeById(local.ledgers, cloudRows.ledgers.map(ledgerFromRow)),
-    assets: mergeById(local.assets, cloudRows.assets.map(assetFromRow)),
+    budgets: mergeBudgets(local.budgets, pull.entities.budgets),
+    ledgers: mergeById(local.ledgers, pull.entities.ledgers),
+    assets: mergeById(local.assets, pull.entities.assets),
     activeLedgerId: local.activeLedgerId,
     currency: local.currency,
     periodPreference: local.periodPreference,
@@ -960,34 +1294,24 @@ function mergeSnapshots(local: LocalSnapshot, cloud: SyncMirror, cloudRows: Reco
     weekStartsOn: local.weekStartsOn,
     decimalPlaces: local.decimalPlaces,
   };
-  return applyProfileRow(merged, cloud.profile);
+  return applyProfileRow(merged, pull.cloud.profile);
 }
 
 // ────────────────────────────── 对外 API ──────────────────────────────
 
 let syncing = false;
 
+/** 当前登录账号 id；未登录返回 null（未登录时同步是空操作，本地功能完全不受影响） */
 async function currentUserId(): Promise<string | null> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.user?.id ?? null;
+  await hydrateSession();
+  const user = getCurrentUser();
+  return user && user.id ? String(user.id) : null;
 }
 
 /** 统一出口：把异常归类成稳定错误码 + 原始信息 */
 function toSyncResult(e: unknown): SyncResult {
   if (e instanceof LocalDataCorruptError) {
     return { ok: false, error: 'local_data_corrupt', detail: e.message };
-  }
-  // TASK-026：时钟偏差彻底失败（6 次重试约 63 秒仍未自愈 = 平台级偏差）——
-  // 数据已在本地零丢失，App 已自动排队 60 秒后补推；文案按用户定版用「同步记录」表述
-  if (isClockSkewError(e)) {
-    scheduleClockSkewRetryPush();
-    return {
-      ok: false,
-      error: 'clock_skew',
-      detail: '已保存在同步记录，服务器暂时未响应；稍后会自动同步上云，无需任何操作',
-    };
   }
   return { ok: false, error: classifySyncError(e), detail: errorMessage(e) };
 }
@@ -1004,42 +1328,37 @@ export async function fullSync(): Promise<SyncResult> {
   syncing = true;
   setStatus('syncing');
   try {
-    // TASK-026：同步主体整体套时钟偏差自愈（pull+push 幂等，重试安全）——
-    // PGRST303/401 类错误自动换票+等待重试，手机快/慢/跨时区与 Supabase 内部秒级偏差均无感通过
-    const run = async () => {
-      // 先把防抖期间尚未上云的本地修改推上去（否则下面的拉取会用云端旧版本覆盖掉这些编辑，如刚归档的账户被恢复）。
-      // 切换账号（cloudWinsAll）时本地数据本就被云端替换，绝不能把旧账号的数据推给新账号，只丢弃挂起的推送。
-      const preLastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
-      const preCloudWinsAll = preLastUserId != null && preLastUserId !== userId;
-      const hadPending = pushTimer != null || pushDeferred;
-      if (pushTimer) {
-        clearTimeout(pushTimer);
-        pushTimer = null;
-      }
-      pushDeferred = false;
-      if (hadPending && !preCloudWinsAll) await pushLocalSnapshot(userId);
-      // 网络拉取不占锁（可能很慢）；本地「读快照 → 合并 → 写回」在锁内用拉取后的最新本地数据完成，
-      // 与 AppContext 的持久化写入串行，避免读写之间的编辑被合并结果覆盖
-      const { cloud, cloudRows } = await fetchAll(userId);
-      const normalized = await runStorageExclusive(async () => {
-        const local = await readLocalSnapshot();
-        const lastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
-        const cloudWinsAll = lastUserId != null && lastUserId !== userId;
-        const merged = mergeSnapshots(local, cloud, cloudRows, cloudWinsAll);
-        // 推送前兜底修复老数据（缺币种/颜色/时间戳等），并写回本地自愈
-        const { snapshot: fixed } = normalizeSnapshot(merged);
-        await writeLocalSnapshot(fixed);
-        return fixed;
-      });
-      // 必须无条件通知重载：合并可能只追加了云端行（normalize 无改动），
-      // 若跳过通知，React 状态停在旧数据，下次本地写回会把合并结果覆盖掉，
-      // 再下一次推送就会把"消失"的行当成删除发上云 —— 云端数据被误删
-      notifyDataReplaced();
-      const failedRows = await pushSnapshot(normalized, userId);
-      await AsyncStorage.setItem(LAST_USER_KEY, userId);
-      return failedRows;
-    };
-    const failedRows = await withClockSkewRetry(run);
+    // 先把防抖期间尚未上云的本地修改推上去（否则下面的拉取会用云端旧版本覆盖掉这些编辑，如刚归档的账户被恢复）。
+    // 切换账号（cloudWinsAll）时本地数据本就被云端替换，绝不能把旧账号的数据推给新账号，只丢弃挂起的推送。
+    const preLastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
+    const preCloudWinsAll = preLastUserId != null && preLastUserId !== userId;
+    const hadPending = pushTimer != null || pushDeferred;
+    if (pushTimer) {
+      clearTimeout(pushTimer);
+      pushTimer = null;
+    }
+    pushDeferred = false;
+    if (hadPending && !preCloudWinsAll) await pushLocalSnapshot();
+
+    // 网络拉取不占锁（可能很慢）；本地「读快照 → 合并 → 写回」在锁内用拉取后的最新本地数据完成，
+    // 与 AppContext 的持久化写入串行，避免读写之间的编辑被合并结果覆盖
+    const pull = await fetchAll();
+    const normalized = await runStorageExclusive(async () => {
+      const local = await readLocalSnapshot();
+      const lastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
+      const cloudWinsAll = lastUserId != null && lastUserId !== userId;
+      const merged = mergeSnapshots(local, pull, cloudWinsAll);
+      // 推送前兜底修复老数据（缺币种/颜色/时间戳等），并写回本地自愈
+      const { snapshot: fixed } = normalizeSnapshot(merged);
+      await writeLocalSnapshot(fixed);
+      return fixed;
+    });
+    // 必须无条件通知重载：合并可能只追加了云端行（normalize 无改动），
+    // 若跳过通知，React 状态停在旧数据，下次本地写回会把合并结果覆盖掉，
+    // 再下一次推送就会把"消失"的行当成删除发上云 —— 云端数据被误删
+    notifyDataReplaced();
+    const failedRows = await pushSnapshot(normalized);
+    await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
     if (failedRows.length) {
       return { ok: false, error: 'constraint', detail: formatRowFailures(failedRows) };
@@ -1078,14 +1397,14 @@ export function schedulePush(delayMs = 2000): void {
 }
 
 /** 读取本地快照（先规范化并自愈写回）后推上云。调用方须已持有 syncing 锁 */
-async function pushLocalSnapshot(userId: string): Promise<RowFailure[]> {
+async function pushLocalSnapshot(): Promise<RowFailure[]> {
   const { snapshot: fixed, changed } = await runStorageExclusive(async () => {
     const result = normalizeSnapshot(await readLocalSnapshot());
     if (result.changed) await writeLocalSnapshot(result.snapshot);
     return result;
   });
   if (changed) notifyDataReplaced();
-  return pushSnapshot(fixed, userId);
+  return pushSnapshot(fixed);
 }
 
 /** 立即推送当前本地数据（设置页"立即同步"按钮用：拉+推走 fullSync 更稳妥） */
@@ -1100,8 +1419,7 @@ export async function pushNow(): Promise<SyncResult> {
   syncing = true;
   setStatus('syncing');
   try {
-    // TASK-026：与时钟偏差自愈同款包装（push 幂等，重试安全）
-    const failedRows = await withClockSkewRetry(() => pushLocalSnapshot(userId));
+    const failedRows = await pushLocalSnapshot();
     await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
     if (failedRows.length) {

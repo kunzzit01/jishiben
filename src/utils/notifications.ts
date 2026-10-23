@@ -1,8 +1,8 @@
 import * as Device from 'expo-device';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
-import { BACKEND_URL } from '../config/supabaseConfig';
-import { supabase } from '../services/supabaseClient';
+import { api } from '../services/apiClient';
+import { getAccessToken } from '../services/sessionStore';
 
 // 是否在 Expo Go 里跑（不是 development build / 正式安装包）。
 // 注意：Expo Go（Android, SDK 53+）在 import expo-notifications 的模块加载阶段
@@ -88,36 +88,19 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 }
 
 /**
- * 把拿到的 token 发给后端保存起来,后端之后就能用这个 token 推消息给这个用户/设备。
- * 身份用当前登录会话的 access_token 证明：后端验签后按 auth.uid() 归档，
- * 不信任客户端自报的 userId。BACKEND_URL 未配置（还没部署后端）时整体跳过。
+ * 把拿到的 token 发给自研后端保存起来（POST /api/push-tokens），后端之后就能用这个 token 推消息。
+ * 身份用当前会话的访问令牌证明：服务端按令牌解析账户，不信任客户端自报的 userId。
+ * 未登录时整体跳过（推送是可选能力，不影响记账）。
  */
 export async function sendTokenToBackend(token: string) {
-  if (!BACKEND_URL) {
-    console.warn('后端地址未配置(BACKEND_URL)，跳过推送token注册');
+  if (!getAccessToken()) {
+    console.warn('未登录，跳过推送token注册');
     return;
   }
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      console.warn('未登录，跳过推送token注册');
-      return;
-    }
-    const res = await fetch(`${BACKEND_URL.replace(/\/+$/, '')}/api/register-push-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ token, platform: Platform.OS }),
-    });
-    if (!res.ok) {
-      console.warn('推送token注册失败', await res.text());
-    }
+    await api.registerPushToken(token, Platform.OS);
   } catch (err) {
-    console.error('推送token注册请求出错', err);
+    console.warn('推送token注册失败', err);
   }
 }
 
