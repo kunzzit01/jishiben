@@ -19,6 +19,8 @@ import { getCurrencySymbol } from '../utils/currencies';
 import { computePlanOccurrences } from '../utils/paymentPlans';
 import { budgetId, onLocalDataReplaced, schedulePush } from '../services/syncService';
 import { runStorageExclusive } from '../services/storageQueue';
+import { api } from '../services/apiClient';
+import { t as translate } from '../i18n';
 
 const STORAGE_KEYS = {
   transactions: '@jizhang/transactions',
@@ -27,6 +29,7 @@ const STORAGE_KEYS = {
   budgets: '@jizhang/budgets',
   ledgers: '@jizhang/ledgers',
   activeLedgerId: '@jizhang/activeLedgerId',
+  defaultLedgerId: '@jizhang/defaultLedgerId',
   currency: '@jizhang/currency',
   periodPreference: '@jizhang/periodPreference',
   assets: '@jizhang/assets',
@@ -36,7 +39,20 @@ const STORAGE_KEYS = {
   paymentPlans: '@jizhang/paymentPlans',
 };
 
-const DEFAULT_LEDGER: Ledger = { id: 'default', name: '默认账本', icon: 'book-outline', color: '#4C9AFF', createdAt: Date.now() };
+// 账本默认色与默认图标（新建账本都从这里取，不再散落 hex / 图标字符串）
+const LEDGER_DEFAULT_COLOR = '#4C9AFF';
+const LEDGER_DEFAULT_ICON = 'book-outline';
+
+/** 真正落一条账本记录（不是运行时兜底对象）：首启建账本 / 新建账本 / 删空后重建都走它 */
+function makeLedger(name: string, createdAt = Date.now()): Ledger {
+  return {
+    id: genId(),
+    name,
+    icon: LEDGER_DEFAULT_ICON,
+    color: LEDGER_DEFAULT_COLOR,
+    createdAt,
+  };
+}
 const DEFAULT_PERIOD: PeriodPreference = { type: 'month' };
 const DEFAULT_DATE_FORMAT: DateFormat = 'YYYY/MM/DD';
 const DEFAULT_WEEK_STARTS_ON: WeekStartsOn = 1;
@@ -126,7 +142,7 @@ function migrateLedgerIcons(stored: Ledger[]): { result: Ledger[]; changed: bool
   const result = stored.map((l) => {
     if (isLegacyIconValue(l.icon)) {
       changed = true;
-      return { ...l, icon: l.id === DEFAULT_LEDGER.id ? DEFAULT_LEDGER.icon : 'book-outline' };
+      return { ...l, icon: LEDGER_DEFAULT_ICON };
     }
     return l;
   });
@@ -149,6 +165,8 @@ interface AppContextValue {
   budgets: Budget[];
   ledgers: Ledger[];
   activeLedgerId: string;
+  /** 默认账本 id（永远恰好一本，且一定在 ledgers 里：不再是运行时兜底对象） */
+  defaultLedgerId: string;
   currency: string;
   currencySymbol: string;
   periodPreference: PeriodPreference;
@@ -183,6 +201,8 @@ interface AppContextValue {
   renameLedger: (id: string, name: string) => Promise<void>;
   deleteLedger: (id: string) => Promise<void>;
   setActiveLedgerId: (id: string) => Promise<void>;
+  /** 把某本账本设为默认（同一时间只有一本，设置新的会自动清掉旧的） */
+  setDefaultLedger: (id: string) => Promise<void>;
   setCurrency: (code: string) => Promise<void>;
   setPeriodPreference: (p: PeriodPreference) => Promise<void>;
   setDateFormat: (f: DateFormat) => Promise<void>;
@@ -249,13 +269,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [ledgers, setLedgers] = useState<Ledger[]>([DEFAULT_LEDGER]);
-  // 同步 ledgers 最新值的 ref：deleteLedger 在同一帧内做「删除+回落」时读最新列表
-  const ledgersRef = useRef<Ledger[]>([DEFAULT_LEDGER]);
+  // 账本列表由存档驱动：读取前是空的，loadFromStorage 会保证至少落一条真实账本记录
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  // 同步 ledgers 最新值的 ref：deleteLedger 在同一帧内做「删除+回落/重建」时读最新列表
+  const ledgersRef = useRef<Ledger[]>([]);
   useEffect(() => {
     ledgersRef.current = ledgers;
   }, [ledgers]);
-  const [activeLedgerId, setActiveLedgerIdState] = useState<string>(DEFAULT_LEDGER.id);
+  const [activeLedgerId, setActiveLedgerIdState] = useState<string>('');
+  // 默认账本 = 某条真实账本身上的身份标记（不再是运行时兜底对象）。
+  // 永远恰好一本：删掉默认那本由剩余第一本接管，删空则新建的空账本接管。
+  const [defaultLedgerId, setDefaultLedgerIdState] = useState<string>('');
   const [currency, setCurrencyState] = useState<string>('MYR'); // 默认货币：RM（马来西亚林吉特）
   const [periodPreference, setPeriodPreferenceState] = useState<PeriodPreference>(DEFAULT_PERIOD);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -279,6 +303,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           budRaw,
           ledRaw,
           activeLedRaw,
+          defaultLedRaw,
           currRaw,
           periodRaw,
           assetRaw,
@@ -294,6 +319,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             AsyncStorage.getItem(STORAGE_KEYS.budgets),
             AsyncStorage.getItem(STORAGE_KEYS.ledgers),
             AsyncStorage.getItem(STORAGE_KEYS.activeLedgerId),
+            AsyncStorage.getItem(STORAGE_KEYS.defaultLedgerId),
             AsyncStorage.getItem(STORAGE_KEYS.currency),
             AsyncStorage.getItem(STORAGE_KEYS.periodPreference),
             AsyncStorage.getItem(STORAGE_KEYS.assets),
@@ -303,9 +329,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
             AsyncStorage.getItem(STORAGE_KEYS.paymentPlans),
           ])
         );
+        // 账本先落地：老流水缺 ledgerId 时要用「真实存在的那本账本」兜底，不能再指向幽灵 id
+        const storedLedgers: Ledger[] = ledRaw ? JSON.parse(ledRaw) : [];
+        const { result: migratedLed, changed: ledChanged } = migrateLedgerIcons(
+          Array.isArray(storedLedgers) ? storedLedgers : []
+        );
+        // 账本表为空（首次启动 / 老存档被删空）→ 真的写入一条账本记录
+        const resolvedLedgers =
+          migratedLed.length > 0 ? migratedLed : [makeLedger(translate('home.defaultLedgerName'))];
+        // 存档记的当前账本已不存在（含旧的幽灵 'default'）→ 回落到第一本
+        const primaryLedgerId = resolvedLedgers.some((l) => l.id === activeLedRaw)
+          ? (activeLedRaw as string)
+          : resolvedLedgers[0].id;
+        // 默认账本同理：存档里的默认还在就沿用，否则由当前账本接管 —— 永远恰好一本
+        const resolvedDefaultId = resolvedLedgers.some((l) => l.id === defaultLedRaw)
+          ? (defaultLedRaw as string)
+          : primaryLedgerId;
+        setLedgers(resolvedLedgers);
+        setActiveLedgerIdState(primaryLedgerId);
+        setDefaultLedgerIdState(resolvedDefaultId);
+        if (
+          ledChanged ||
+          resolvedLedgers !== migratedLed ||
+          !ledRaw ||
+          activeLedRaw !== primaryLedgerId ||
+          defaultLedRaw !== resolvedDefaultId
+        ) {
+          persistItem(STORAGE_KEYS.ledgers, JSON.stringify(resolvedLedgers));
+        }
         if (txRaw) {
           const parsedTx: Transaction[] = JSON.parse(txRaw);
-          setTransactions(parsedTx.map((t) => (t.ledgerId ? t : { ...t, ledgerId: DEFAULT_LEDGER.id })));
+          setTransactions(parsedTx.map((t) => (t.ledgerId ? t : { ...t, ledgerId: primaryLedgerId })));
         }
         if (catRaw) {
           const parsedCat: Category[] = JSON.parse(catRaw);
@@ -324,15 +378,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(parsedGroups)) setCategoryGroups(parsedGroups);
         }
         if (budRaw) setBudgets(JSON.parse(budRaw));
-        if (ledRaw) {
-          const parsedLed: Ledger[] = JSON.parse(ledRaw);
-          const { result: migratedLed, changed: ledChanged } = migrateLedgerIcons(parsedLed);
-          setLedgers(migratedLed);
-          if (ledChanged) {
-            persistItem(STORAGE_KEYS.ledgers, JSON.stringify(migratedLed));
-          }
-        }
-        if (activeLedRaw) setActiveLedgerIdState(activeLedRaw);
         if (currRaw) setCurrencyState(currRaw);
         if (periodRaw) setPeriodPreferenceState(JSON.parse(periodRaw));
         if (assetRaw) {
@@ -405,6 +450,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!loading) persistItem(STORAGE_KEYS.activeLedgerId, activeLedgerId);
   }, [activeLedgerId, loading]);
+  useEffect(() => {
+    if (!loading) persistItem(STORAGE_KEYS.defaultLedgerId, defaultLedgerId);
+  }, [defaultLedgerId, loading]);
   useEffect(() => {
     if (!loading) persistItem(STORAGE_KEYS.currency, currency);
   }, [currency, loading]);
@@ -488,7 +536,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 同 id 两行被 Postgres 拒绝（21000）→ 整次同步失败（2026-10-20 事故）。
       const seen = new Set<string>();
       return next.filter((b) => {
-        const id = budgetId(b);
+        // 有后端回传的 clientUid 就用它（跨端一致），否则退回 (分类|币种) 派生键
+        const id = b.clientUid ?? budgetId(b);
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
@@ -499,7 +548,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getCategoryById = (id: string) => categories.find((c) => c.id === id);
 
   const addLedger: AppContextValue['addLedger'] = async (name, icon, color) => {
-    setLedgers((prev) => [...prev, { id: genId(), name, icon, color: color ?? '#4C9AFF', createdAt: Date.now() }]);
+    setLedgers((prev) => [...prev, { id: genId(), name, icon, color: color ?? LEDGER_DEFAULT_COLOR, createdAt: Date.now() }]);
   };
 
   const renameLedger: AppContextValue['renameLedger'] = async (id, name) => {
@@ -509,19 +558,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteLedger: AppContextValue['deleteLedger'] = async (id) => {
-    // 用户定版：默认账本也可删除（其数据一并清除），但至少要留一个账本。
-    // 删的是当前账本时回落：优先回落到剩下的第一个账本，一个都没有则回落 'default'
-    // （'default' 是运行时兜底账本，不在 ledgers 数组里也会正常显示/工作）。
+    // 用户定版：任何账本都能删（含原名「默认账本」那条），删到一本不剩也允许。
+    // 删空时不复活任何兜底账本，而是当场落一本**全新的空账本**让界面有落点 ——
+    // 「旧的全没了、只剩一个空壳」在操作上成立。
     const remaining = ledgersRef.current.filter((l) => l.id !== id);
-    setActiveLedgerIdState((prevActive) =>
-      prevActive === id ? (remaining[0]?.id ?? DEFAULT_LEDGER.id) : prevActive
-    );
+    const next = remaining.length > 0 ? remaining : [makeLedger(translate('home.emptyLedgerName'))];
+    const fallbackId = next[0].id;
+    // 删的是当前账本 / 默认账本 → 回落到剩下的第一本；删空时新账本同时接管两个身份
+    setActiveLedgerIdState((prevActive) => (prevActive === id ? fallbackId : prevActive));
+    setDefaultLedgerIdState((prevDefault) => (prevDefault === id ? fallbackId : prevDefault));
     // 级联删除：账本名下的交易/资产/缴费计划一并清除（用户定版：删除即连同数据删除，
     // 不留孤儿数据）。云同步按快照 diff 自动删除对应云端行。
     setTransactions((prev) => prev.filter((t) => t.ledgerId !== id));
     setAssets((prev) => prev.filter((a) => a.ledgerId !== id));
     setPaymentPlans((prev) => prev.filter((p) => p.ledgerId !== id));
-    setLedgers((prev) => prev.filter((l) => l.id !== id));
+    setLedgers(next);
+  };
+
+  // 设为默认账本（与「设为默认账户」同规格）：本地立即生效并持久化，离线也成立；
+  // 云端尽力而为地写一次 defaultLedger=true（服务端会自动取消其它账本的默认）。
+  const setDefaultLedger: AppContextValue['setDefaultLedger'] = async (id) => {
+    const list = ledgersRef.current;
+    const target = list.find((l) => l.id === id);
+    if (!target) return;
+    setDefaultLedgerIdState(id);
+    try {
+      await api.putLedger({
+        clientUid: target.id,
+        name: target.name,
+        icon: target.icon || LEDGER_DEFAULT_ICON,
+        color: target.color ?? null,
+        sortOrder: list.findIndex((l) => l.id === id),
+        defaultLedger: true,
+      });
+    } catch (e) {
+      console.warn('同步默认账本失败（本地已生效）', e);
+    }
   };
 
   const setActiveLedgerId: AppContextValue['setActiveLedgerId'] = async (id) => {
@@ -741,6 +813,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         budgets,
         ledgers,
         activeLedgerId,
+        defaultLedgerId,
         currency,
         currencySymbol: getCurrencySymbol(currency),
         periodPreference,
@@ -769,6 +842,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         renameLedger,
         deleteLedger,
         setActiveLedgerId,
+        setDefaultLedger,
         setCurrency,
         setPeriodPreference,
         setDateFormat,

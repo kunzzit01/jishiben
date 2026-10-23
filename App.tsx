@@ -44,6 +44,7 @@ import {
   useTabBarAutoHide,
 } from './src/context/TabBarAutoHideContext';
 import { useTheme } from './src/theme/useTheme';
+import { TabSceneDisplayGate } from './src/navigation/TabSceneDisplayGate';
 import { useSystemColorScheme } from './src/theme/useSystemColorScheme';
 // 浮空 Tab 栏的几何常量（全项目唯一来源）：外壳 / 底部留白 / 收起距离共用同一组数
 import {
@@ -512,6 +513,11 @@ function AppContent() {
           // 注意：tabBar 必须挂在 Navigator 本身（v7 经 ...rest 传进 BottomTabView），
           // 放在 screenOptions 里只会进 descriptors、不会被消费
           tabBar={SlidingTabBar}
+          // 非活跃 Tab 的内容容器挂 display:none（不卸载 → 状态 / 滚动都留着）：
+          // 整棵子树退出布局与合成树，首页日历玻璃卡不会再在别的 Tab 背后当隐形图层
+          screenLayout={({ route, children }) => (
+            <TabSceneDisplayGate sceneName={route.name}>{children}</TabSceneDisplayGate>
+          )}
           screenOptions={({ route }) => ({
             headerShown: false,
             // 选中 = 实心图标 + tabActive（夜白 / 日紫）；未选中 = 线框图标 + tabInactive（UI V2 §1）
