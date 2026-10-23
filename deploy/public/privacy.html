@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>隐私政策 · 记账本</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px;
+         font: 16px/1.75 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: #1c1c1e; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e5e5e7; background: #141414; } }
+  h1 { font-size: 26px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+  .meta { color: #8e8e93; font-size: 14px; margin-bottom: 24px; }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code { background: rgba(127,127,127,.15); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  .box { border: 1px solid rgba(127,127,127,.3); border-radius: 12px; padding: 14px 16px; margin: 16px 0; }
+</style>
+</head>
+<body>
+<h1>隐私政策</h1>
+<div class="meta">应用名称：记账本（jizhang-app）　·　最后更新：2026-10-23</div>
+
+<p>本隐私政策说明「记账本」应用（下称"本应用"）如何收集、使用和保存你的信息。本应用是自建服务，
+数据存储在自己控制的服务器上，不向第三方广告或数据平台出售、共享你的账目信息。</p>
+
+<h2>一、我们收集什么</h2>
+<ul>
+  <li><strong>账号信息</strong>：邮箱地址、密码（以 bcrypt 单向哈希保存，我们无法还原你的明文密码）。</li>
+  <li><strong>记账数据</strong>：你主动录入的账本名称、账户、分类、交易金额、日期、备注。</li>
+  <li><strong>可选的小票与语音</strong>：仅在你点击「扫票」或「语音记账」时，把你选择的图片或录音内容发送到服务端做字段识别；识别完成后不在服务端长期保存原始文件。</li>
+  <li><strong>推送令牌</strong>：仅在你授权通知时保存设备推送标识，用于发送你开启的提醒。</li>
+</ul>
+
+<h2>二、我们不收集什么</h2>
+<ul>
+  <li>不读取你的通讯录、短信、通话记录。</li>
+  <li>不采集设备广告标识（IDFA / OAID），不投放广告，不做用户画像。</li>
+  <li>不采集精确地理位置。</li>
+</ul>
+
+<h2>三、数据如何保存</h2>
+<div class="box">
+  账目数据同时保存在<strong>你的设备本地</strong>与<strong>你使用的服务器</strong>。
+  设备本地数据用于离线使用；服务器数据用于换设备或重装后恢复。
+  传输过程在生产环境中应启用 HTTPS。
+</div>
+
+<h2>四、数据保留与删除</h2>
+<ul>
+  <li>你可以随时在应用内删除账本、账户、分类与流水。</li>
+  <li>如需彻底删除账号及其全部数据，请通过下方联系方式提出，我们会在 7 个工作日内处理。</li>
+</ul>
+
+<h2>五、第三方服务</h2>
+<p>若服务器端开启了小票识别或语音解析能力，识别请求会转发给大模型服务商（OpenRouter 及其上游模型提供方）
+处理，仅发送你当次提交的图片/文本。不开启该能力时，应用会提示不可用并降级为手动记账。</p>
+
+<h2>六、儿童</h2>
+<p>本应用不面向 13 岁以下儿童，也不会主动收集其信息。</p>
+
+<h2>七、你的权利</h2>
+<ul>
+  <li>查询、导出你的账目数据（应用内可查看，服务端数据库由你自己掌控）。</li>
+  <li>更正账号信息、修改密码。</li>
+  <li>删除数据与注销账号。</li>
+</ul>
+
+<h2>八、联系方式</h2>
+<p>邮箱：<code>kkyylim663@gmail.com</code></p>
+
+<h2>九、政策变更</h2>
+<p>如本政策发生实质变更，我们会更新本页顶部的「最后更新」日期。</p>
+</body>
+</html>

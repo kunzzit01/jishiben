@@ -95,6 +95,8 @@ services:
       #   http://<你的地址>:<HTTP_PORT>/downloads/xxx.apk
       # 对外提供（只读挂载，容器不能改宿主机文件）
       - ./downloads:/usr/share/nginx/html/downloads:ro
+      # Play 上架要求的隐私政策页：http://<地址>:<HTTP_PORT>/privacy
+      - ./public/privacy.html:/usr/share/nginx/html/privacy.html:ro
     networks:
       - jishiben-net
     logging:
