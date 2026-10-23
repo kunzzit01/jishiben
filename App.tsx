@@ -79,6 +79,7 @@ import HelpFeedbackScreen from './src/screens/HelpFeedbackScreen';
 import CalculatorHubScreen from './src/screens/CalculatorHubScreen';
 import LoanCalculatorScreen from './src/screens/LoanCalculatorScreen';
 import CompoundInterestScreen from './src/screens/CompoundInterestScreen';
+import OverviewScreen from './src/screens/OverviewScreen';
 
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -118,6 +119,9 @@ function HomeStack() {
       {/* AI专区双注册（与 ProfileStack 同一组件）：从首页侧进 AI专区（如 AI专区→记一笔 的往返）
           时 push 的是 HomeStack 自己的实例，goBack 天然回记一笔/首页，不会串到设置项 Tab */}
       <HomeStackNav.Screen name="AI专区" component={AIScreen} options={{ headerShown: false }} />
+      {/* 概览模式双注册（与 ProfileStack 同一组件）：从设置项进来 push 的是 ProfileStack 实例，
+          goBack 天然回设置；从首页侧导航过来时走本栈实例，goBack 天然回首页 */}
+      <HomeStackNav.Screen name="概览模式" component={OverviewScreen} options={{ headerShown: false }} />
       {/* 添加资产账户双注册（与 AssetStack 同一组件）：首页编辑记一笔时选择账户弹窗的
           "添加新账户" push 本栈实例，goBack 天然回记一笔，不会切去资产 Tab */}
       <HomeStackNav.Screen name="添加资产账户" component={AddAssetScreen} options={{ headerShown: false }} />
@@ -143,6 +147,8 @@ function ProfileStack() {
       <ProfileStackNav.Screen name="开设账本" component={LedgerScreen} options={{ headerShown: false }} />
       {/* AI专区改用与其他二级页一致的自绘头部（圆框返回键），原生头部关闭 */}
       <ProfileStackNav.Screen name="AI专区" component={AIScreen} options={{ headerShown: false }} />
+      {/* 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入 */}
+      <ProfileStackNav.Screen name="概览模式" component={OverviewScreen} options={{ headerShown: false }} />
       {/* 登录 / 注册独立页面（未登录时从"账号与同步"进入；已登录显示个人中心内容+退出登录。
           "我的账户"入口也指向这里——一个页面两种状态 */}
       <ProfileStackNav.Screen name="登录注册" component={AuthScreen} options={{ headerShown: false }} />

@@ -27,6 +27,8 @@ export const ROUTES = {
   PROFILE: '我的主页',
   SETTINGS: '设置',
   AI: 'AI专区',
+  // 「概览模式」一屏汇总（设计稿第 11 屏）：HomeStack / ProfileStack 各自注册一个实例
+  OVERVIEW: '概览模式',
   AUTH: '登录注册',
   FINANCE_PLAN: '财务规划',
   FINANCE_PLAN_EDIT: '财务规划编辑',
@@ -71,6 +73,8 @@ export type HomeStackParamList = {
   贷款计算器: undefined;
   复利计算器: undefined;
   AI专区: undefined;
+  // 概览模式（设计稿第 11 屏）
+  概览模式: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
   添加资产账户: { assetId?: string } | undefined;
 };
@@ -82,6 +86,8 @@ export type ProfileStackParamList = {
   类别分类: undefined;
   开设账本: undefined;
   AI专区: undefined;
+  // 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入
+  概览模式: undefined;
   // 登录 / 注册独立页面（从设置项"账号与同步"进入）
   登录注册: undefined;
   // 财务规划（计划付款：固定支出自动扣账）

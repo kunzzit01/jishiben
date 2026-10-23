@@ -335,6 +335,18 @@ export default function ProfileScreen({ navigation }: any) {
             onPress={() => navigation.navigate(ROUTES.AI)}
             testID="profile-ai-row"
           />
+          {/* 概览模式（设计稿第 11 屏）：OverviewScreen 双注册在 HomeStack / ProfileStack
+              （App.tsx 的 ROUTES.OVERVIEW）。设计稿第 11 屏自身没有入口提示、首页不在本任务可改
+              范围内（Boundary），所以入口落在设置项「功能」分组，与 AI 专区同组同规格。 */}
+          <ListRow
+            leading={
+              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="grid-outline" />
+            }
+            title={tr('profile.overview')}
+            chevron
+            onPress={() => navigation.navigate(ROUTES.OVERVIEW)}
+            testID="profile-overview-row"
+          />
         </ListSection>
 
         {/* 支持：帮助与反馈 / 关于应用 */}

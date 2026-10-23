@@ -633,6 +633,7 @@ export const zh = {
     myAccountSub: '查看与编辑个人资料',
     aiZone: 'AI 专区',
     aiZoneSub: '管理 AI 相关功能与服务',
+    overview: '概览模式',
     calculator: '计算器',
     calculatorSub: '贷款、复利等理财计算工具',
     subscribe: '订阅',
@@ -819,6 +820,24 @@ export const zh = {
     incomeLabel: '收入',
     expenseLabel: '支出',
     weekShort: ['一', '二', '三', '四', '五', '六', '日'],
+  },
+  // 概览模式（设计稿第 11 屏）：一屏汇总
+  overview: {
+    title: '概览模式',
+    more: '更多',
+    guestName: '我的账本',
+    netWorthLabel: '净资产 (%{cur})',
+    monthDelta: '本月变化',
+    monthExpense: '本月支出',
+    monthIncome: '本月收入',
+    monthBalance: '本月结余',
+    // 稿里是「10月整体预算」：%{m} = date.months[n]（中文自带「月」）
+    budgetLabel: '%{m}整体预算',
+    hideAmount: '隐藏金额',
+    showAmount: '显示金额',
+    emptyTitle: '还没有可汇总的数据',
+    emptyHint: '添加资产账户或记下第一笔，这里就会汇总你的净资产与本月收支',
+    emptyAction: '记一笔',
   },
 };
 
