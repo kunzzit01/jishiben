@@ -63,8 +63,7 @@
           "style": "dark"
         }
       ],
-      "expo-splash-screen",
-      "expo-build-properties"
+      "expo-splash-screen"
     ],
     "extra": {
       "eas": {
