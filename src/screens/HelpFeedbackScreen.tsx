@@ -113,7 +113,7 @@ export default function HelpFeedbackScreen({ navigation }: any) {
                 end={gradients.accent.end}
                 style={styles.buttonFill}
               >
-                <AppText variant="headline" weight="700" color="#FFFFFF" numberOfLines={1}>
+                <AppText variant="headline" weight="700" color={semantic.onAccent} numberOfLines={1}>
                   {t('addTx.submitFeedback')}
                 </AppText>
               </LinearGradient>

@@ -49,6 +49,7 @@ import {
   MoneyText,
   StatusBarGlass,
 } from '../components/ui';
+import { withAlpha } from '../components/ui/color';
 import { TransactionType, Transaction } from '../types';
 import { UNCATEGORIZED_ICON, UNCATEGORIZED_NAME, UNCATEGORIZED_COLOR } from '../constants/uncategorized';
 import { useT, useLanguage } from '../i18n/LanguageContext';
@@ -477,6 +478,38 @@ export default function ReportScreen() {
   // R5：这段时间没有可统计的分类（或总额为 0）→ 空状态，不再画灰圈 + 0.00
   const isEmpty = categoryBreakdown.length === 0 || periodTotal <= 0;
 
+  // R4 环比（设计稿 04 屏）：上一周期的同口径合计（周/月/年前移一段；自定义区间不外推）
+  const prevRange = useMemo(() => {
+    if (rangeType === 'custom') return null;
+    const prevAnchor =
+      rangeType === 'month'
+        ? new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)
+        : rangeType === 'year'
+          ? new Date(anchor.getFullYear() - 1, 0, 1)
+          : new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - 7);
+    return buildRange(rangeType, prevAnchor, tr);
+  }, [rangeType, anchor, tr]);
+
+  // 上一周期合计：口径与 periodTotal 完全一致（同类型 + 同币种 + 只算收入/支出），不跨币种相加
+  const prevPeriodTotal = useMemo(() => {
+    if (!prevRange) return null;
+    let sum = 0;
+    ledgerTransactions.forEach((t) => {
+      if (t.date < prevRange.start || t.date > prevRange.end) return;
+      if (t.type !== type) return;
+      if (getTransactionCurrency(t) !== selectedReportCurrency) return;
+      sum += t.amount;
+    });
+    return sum;
+  }, [ledgerTransactions, prevRange, type, selectedReportCurrency, currency, getAssetById]);
+
+  const momDelta = prevPeriodTotal == null ? null : periodTotal - prevPeriodTotal;
+  const momPct =
+    prevPeriodTotal != null && prevPeriodTotal > 0 ? (periodTotal / prevPeriodTotal - 1) * 100 : null;
+  // 颜色：支出涨 = 变差（红）/ 支出跌 = 变好（绿）；收入反过来。
+  // ⚠ 与「涨绿跌红」的字面说法在支出侧相反 —— 依据是设计稿 04 屏：下降徽章取薄荷底（token bg.tileMint）。
+  const momGood = momDelta == null ? true : (type === 'expense' ? momDelta <= 0 : momDelta >= 0);
+
   // R2 高亮：点扇区 / 点列表行选中的分类（null = 默认态，环心显示总支出/总收入）
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   // 环上高亮的下标（与 DonutChart 的 data 顺序一致 —— 环上渲染全部分类，不做「其他」合并）
@@ -642,6 +675,8 @@ export default function ReportScreen() {
                     // 不用 12.3k 紧凑格式（看不出具体钱数）；读屏仍读完整金额
                     shrinkLadder={[donutCenterSize(formatMoney(selectedCategory.value))]}
                     compactFallback={false}
+                    // 金额语义色（tokens: amount.expense / amount.income）：支出红、收入绿
+                    color={type === 'expense' ? semantic.amountExpense : semantic.amountIncome}
                     style={styles.donutCenterValue}
                   />
                 </View>
@@ -670,6 +705,7 @@ export default function ReportScreen() {
                     variant="display"
                     shrinkLadder={[donutCenterSize(formatMoney(periodTotal))]}
                     compactFallback={false}
+                    color={type === 'expense' ? semantic.amountExpense : semantic.amountIncome}
                     style={styles.donutCenterValue}
                   />
                 </View>
@@ -738,17 +774,9 @@ export default function ReportScreen() {
           </View>
         </View>
 
-        {/* R1 + R6 两个分段控件同一行（验收退回第 3 条）：左边周期（周/月/年）、右边类型（支出/收入）；
-            V2 换成玻璃槽（落在渐变上）；窄屏一行放不下时右侧整块掉到第二行（UI_RULES 第 6 节 ②） */}
+        {/* 设计稿 04 屏顺序：先「支出 / 收入」，再周期（周/月/年）—— 两个分段控件同一行，
+            V2 玻璃槽（落在渐变上）；窄屏一行放不下时右侧整块掉到第二行（UI_RULES 第 6 节 ②） */}
         <View style={[styles.segRow, { paddingHorizontal: pagePadding }]}>
-          <View style={styles.segTray}>
-            <SegmentedControl
-              appearance="glass"
-              options={rangeOptions}
-              selected={rangeType}
-              onSelect={handleRangeSelect}
-            />
-          </View>
           <View style={styles.segTray}>
             <SegmentedControl
               appearance="glass"
@@ -758,6 +786,14 @@ export default function ReportScreen() {
               ]}
               selected={type}
               onSelect={(v) => setType(v as TransactionType)}
+            />
+          </View>
+          <View style={styles.segTray}>
+            <SegmentedControl
+              appearance="glass"
+              options={rangeOptions}
+              selected={rangeType}
+              onSelect={handleRangeSelect}
             />
           </View>
         </View>
@@ -774,6 +810,48 @@ export default function ReportScreen() {
                 accessibilityLabel={code}
               />
             ))}
+          </View>
+        )}
+
+        {/* 总支出 / 总收入 + 环比（设计稿 04 屏）：左大数字，右环比徽章 + 差额金额；
+            上一周期没有数据（或自定义区间）时不显示徽章，只留总额 */}
+        {!isEmpty && (
+          <View style={[styles.summaryRow, { paddingHorizontal: pagePadding }]} testID="report-summary">
+            <View style={styles.summaryLeft}>
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {tr(type === 'expense' ? 'report.totalExpense' : 'report.totalIncome')}
+              </AppText>
+              <MoneyText
+                value={periodTotal}
+                kind="plain"
+                currency={selectedReportCurrency}
+                showCurrency
+                variant="title2"
+                color={semantic.textPrimary}
+              />
+            </View>
+            {momPct != null && momDelta != null && (
+              <View style={styles.summaryRight}>
+                <View
+                  style={[
+                    styles.momBadge,
+                    { backgroundColor: momGood ? semantic.tileMint : withAlpha(semantic.danger, 0.14) },
+                  ]}
+                >
+                  <Ionicons
+                    name={momDelta >= 0 ? 'trending-up' : 'trending-down'}
+                    size={12}
+                    color={momGood ? semantic.success : semantic.danger}
+                  />
+                  <AppText variant="caption2" weight="600" color={momGood ? semantic.success : semantic.danger}>
+                    {`${Math.abs(momPct).toFixed(1)}%`}
+                  </AppText>
+                </View>
+                <AppText variant="caption2" color={semantic.textTertiary} style={{ marginTop: 2 }}>
+                  {`${momDelta >= 0 ? '+' : '−'}${formatMoney(Math.abs(momDelta))}`}
+                </AppText>
+              </View>
+            )}
           </View>
         )}
 
@@ -915,6 +993,24 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
     // 两个分段控件同一行：周期在左、类型在右。行间距取 spacing.sm —— 实测英文最宽组合
     // （Year/Month/Week 173 + Expense/Income 145 + 8 = 326）在 360 宽的内容区（328）里正好放得下；
     // 系统大字 / 更窄的屏幕放不下时，右侧那块整行掉到第二行（UI_RULES 第 6 节 ②）
+    // 总支出汇总行（稿 04 屏）：左标签 + 22/600 总额，右环比徽章（薄荷绿底圆角 10）+ 差额
+    summaryRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      columnGap: spacing.md,
+      marginTop: spacing.lg,
+    },
+    summaryLeft: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+    summaryRight: { flexShrink: 0, alignItems: 'flex-end' },
+    momBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      columnGap: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+    },
     segRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',

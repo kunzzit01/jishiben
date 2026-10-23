@@ -22,8 +22,7 @@ import { AppText, GlassView, HeroGradient, IconCircle, ScreenHeader } from '../c
 
 // 版本号统一从 app.json 读取，避免页面里硬编码后跟配置脱节
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
-/** 品牌球基色（§5 立体光泽球：App 图标位） */
-const BRAND = '#6C4DF6';
+
 
 /** UI V2.1 玻璃二级页头：ScreenHeader 的返回键是透明 44 触控区，这里在它底下垫一枚 44 玻璃圆钮（稿） */
 function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -56,7 +55,7 @@ export default function AboutAppScreen({ navigation }: any) {
         contentContainerStyle={[styles.content, { paddingBottom: tabClearance, paddingHorizontal: spacing.xl }]}
       >
         {/* App 图标位：§5 立体光泽球（品牌色） */}
-        <IconCircle size={64} color={BRAND} icon="wallet-outline" />
+        <IconCircle size={64} color={semantic.accent} icon="wallet-outline" />
         <AppText variant="title2" style={styles.appName}>
           Personal Finance
         </AppText>

@@ -35,6 +35,7 @@ import {
   transcribeAudioFile,
   VoiceAccountingResult,
 } from '../utils/voiceAccounting';
+import { isAiConfigured } from '../config/aiConfig';
 
 export default function AIScreen({ navigation }: any) {
   const { colors } = useTheme();
@@ -171,6 +172,11 @@ export default function AIScreen({ navigation }: any) {
   // ---------------------------------------------------------
 
   const startRecording = async () => {
+    // 未配置 AI 密钥（环境变量缺失）→ 优雅降级：不录音、不请求，只提示不可用
+    if (!isAiConfigured) {
+      dialog.alert({ title: t('ai.voiceUnavailableTitle'), message: t('ai.voiceUnavailableMsg') });
+      return;
+    }
     const startedAt = Date.now();
 
     const debug = (message: string) => {

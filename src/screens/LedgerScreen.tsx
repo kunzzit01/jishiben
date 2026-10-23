@@ -165,8 +165,8 @@ export default function LedgerScreen() {
               end={gradients.accent.end}
               style={styles.saveBtnFill}
             >
-              <Ionicons name="add" size={20} color="#FFFFFF" />
-              <AppText variant="headline" weight="700" color="#FFFFFF">
+              <Ionicons name="add" size={20} color={semantic.onAccent} />
+              <AppText variant="headline" weight="700" color={semantic.onAccent}>
                 {t('ledger.create')}
               </AppText>
             </LinearGradient>

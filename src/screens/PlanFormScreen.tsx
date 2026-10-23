@@ -27,7 +27,7 @@ import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../theme/useTheme';
-import type { SemanticColors, ThemeColors } from '../theme/theme';
+import type { Elevation, SemanticColors, ThemeColors } from '../theme/theme';
 import { useT } from '../i18n/LanguageContext';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
@@ -50,7 +50,7 @@ function fmt(d: Date): string {
 
 export default function PlanFormScreen({ route, navigation }: any) {
   const { addPaymentPlan, updatePaymentPlan, deletePaymentPlan, assets, activeAssets, paymentPlans, activeLedgerId, categories, currency, getAssetBalance, decimalPlaces } = useApp();
-  const { colors, semantic } = useTheme();
+  const { colors, semantic, elevation } = useTheme();
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const insets = useSafeAreaInsets();
@@ -58,7 +58,7 @@ export default function PlanFormScreen({ route, navigation }: any) {
   const heroHeight = Math.round(HERO_HEIGHT * (Dimensions.get('window').height - insets.top < 700 ? 0.9 : 1));
   const isFocused = useIsFocused();
   const setTabBarForceHidden = useTabBarForceHide();
-  const styles = useMemo(() => makeStyles(colors, semantic), [colors, semantic]);
+  const styles = useMemo(() => makeStyles(colors, semantic, elevation), [colors, semantic, elevation]);
 
   const editPlan = route?.params?.planId ? paymentPlans.find((p) => p.id === route.params.planId) : undefined;
   const isEdit = !!editPlan;
@@ -775,7 +775,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   );
 }
 
-function makeStyles(colors: ThemeColors, semantic: SemanticColors) {
+function makeStyles(colors: ThemeColors, semantic: SemanticColors, elevation: Elevation) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.bg },
     header: {
@@ -927,13 +927,10 @@ function makeStyles(colors: ThemeColors, semantic: SemanticColors) {
     sheetCurrencyItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10 },
     sheetCurrencyItemText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
     // —— 账户弹层分组卡（资产页 currencyGroup* 同款）：一币一大卡、卡内小账户框 ——
+    // 阴影走令牌（elevation.level2 的 boxShadow，夜/日各一套），不再写死 shadowColor
     sheetGroupShadow: {
       borderRadius: 20,
-      shadowColor: '#1B1040',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.16,
-      shadowRadius: 20,
-      elevation: 5,
+      ...elevation.level2,
       marginBottom: 5,
     },
     sheetGroupCard: {

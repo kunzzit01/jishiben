@@ -38,7 +38,7 @@ type Mode = 'signin' | 'signup';
 const AVATAR_STORAGE_KEY = '@jizhang/avatar';
 const FIRST_USE_STORAGE_KEY = '@jizhang/firstUseDate';
 
-// Supabase 错误码 → 当前语言提示（错误码来自 AuthContext.mapAuthError）
+// 认证错误码 → 当前语言提示（错误码来自 AuthContext.mapAuthError）
 function authErrorText(code: string | undefined, tr: (k: string) => string): string {
   switch (code) {
     case 'invalid_credentials':
@@ -209,8 +209,8 @@ export default function AuthScreen({ navigation }: any) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Supabase 密码最低 6 位；登录时同样要求（真密码不可能短于 6 位）
-  const canSubmit = !!email.trim() && password.length >= 6 && !busy;
+  // 后端密码最低 8 位；登录时同样要求（真密码不可能短于 8 位）
+  const canSubmit = !!email.trim() && password.length >= 8 && !busy;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -222,7 +222,7 @@ export default function AuthScreen({ navigation }: any) {
       return;
     }
     if (r.needsConfirm) {
-      // 兜底：以后若在 Supabase 重新开启邮箱验证，注册后会走到这里
+      // 兜底：后端若改成「注册需邮箱验证」，注册后会走到这里
       dialog.alert({ title: tr('auth.signedUpNeedsConfirm') });
       return;
     }
@@ -425,7 +425,7 @@ export default function AuthScreen({ navigation }: any) {
                   end={gradients.accent.end}
                   style={styles.primaryBtnFill}
                 >
-                  <AppText variant="headline" weight="700" color="#FFFFFF" numberOfLines={1}>
+                  <AppText variant="headline" weight="700" color={semantic.onAccent} numberOfLines={1}>
                     {busy ? tr('auth.busy') : mode === 'signin' ? tr('auth.signIn') : tr('auth.signUp')}
                   </AppText>
                 </LinearGradient>
