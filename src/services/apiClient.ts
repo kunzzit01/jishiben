@@ -466,6 +466,53 @@ export interface BudgetUpsert {
   currency?: string;
 }
 
+/** 计划付款（docs/API.md §3.10；后端 PaymentPlanDtos.Response，无 note/currency 字段） */
+export interface PaymentPlanDto {
+  clientUid: string;
+  ledgerUid: string;
+  categoryUid: string | null;
+  assetUid: string | null;
+  name: string;
+  amount: number | string;
+  type: string;
+  cycle: string;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
+  monthOfYear: number | null;
+  day: number | null;
+  startDate: string;
+  endDate: string | null;
+  autoDeduct: boolean;
+  /** 补账游标（已处理到的最后一期）；PUT 是整行替换，漏传会被服务端清成 NULL */
+  lastProcessedDate: string | null;
+  active: boolean;
+  sortOrder: number;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentPlanUpsert {
+  clientUid: string;
+  ledgerUid: string;
+  categoryUid?: string | null;
+  assetUid?: string | null;
+  name: string;
+  amount: number;
+  type: string;
+  cycle: string;
+  dayOfWeek?: number | null;
+  dayOfMonth?: number | null;
+  monthOfYear?: number | null;
+  day?: number | null;
+  startDate: string;
+  endDate?: string | null;
+  autoDeduct?: boolean;
+  lastProcessedDate?: string | null;
+  active?: boolean;
+  sortOrder?: number;
+}
+
 export interface PageResponse<T> {
   content: T[];
   page: number;
@@ -605,6 +652,14 @@ export const api = {
   putBudget: (body: BudgetUpsert) => authorizedRequest<BudgetDto>('PUT', '/api/budgets', { body }),
   deleteBudget: (clientUid: string) =>
     authorizedRequest<unknown>('DELETE', '/api/budgets/' + encodeURIComponent(clientUid)),
+
+  // payment-plans（计划付款；PATCH 里 lastProcessedDate 是补账游标）
+  listPaymentPlans: (includeArchived = true) =>
+    authorizedRequest<PaymentPlanDto[]>('GET', '/api/payment-plans', { query: { includeArchived } }),
+  putPaymentPlan: (body: PaymentPlanUpsert) =>
+    authorizedRequest<PaymentPlanDto>('PUT', '/api/payment-plans', { body }),
+  deletePaymentPlan: (clientUid: string) =>
+    authorizedRequest<unknown>('DELETE', '/api/payment-plans/' + encodeURIComponent(clientUid)),
 
   // reports（按币种分块，绝不跨币种相加）
   getReportSummary: (params: { from?: string; to?: string; currency?: string } = {}) =>

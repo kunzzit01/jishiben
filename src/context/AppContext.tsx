@@ -59,6 +59,17 @@ const DEFAULT_WEEK_STARTS_ON: WeekStartsOn = 1;
 const DEFAULT_DECIMAL_PLACES: DecimalPlaces = 2;
 const FEE_CATEGORY_ID = 'transfer_fee';
 
+/**
+ * 补账游标取较晚的那个（YYYY-MM-DD 字符串比较即日期比较）。
+ * 游标只进不退：云同步可能带回比本机更晚的 lastProcessedDate，反之亦然，
+ * 任何一次回退都会让已经补过的期数被再补一遍（重复流水）。
+ */
+function laterCursor(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a >= b ? a : b;
+}
+
 function isLegacyIconValue(icon: string | undefined | null): boolean {
   if (!icon) return true;
   if (!/^[a-z0-9-]+$/.test(icon)) return true;
@@ -435,7 +446,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (dateFormatRaw) setDateFormatState(dateFormatRaw as DateFormat);
         if (weekStartsOnRaw) setWeekStartsOnState(Number(weekStartsOnRaw) as WeekStartsOn);
         if (decimalPlacesRaw) setDecimalPlacesState(Number(decimalPlacesRaw) as DecimalPlaces);
-        if (planRaw) setPaymentPlans(JSON.parse(planRaw));
+        if (planRaw) {
+          const parsedPlans: PaymentPlan[] = JSON.parse(planRaw);
+          const storedPlans = Array.isArray(parsedPlans) ? parsedPlans : [];
+          setPaymentPlans((prev) => {
+            const prevById = new Map(prev.map((p) => [p.id, p]));
+            return storedPlans.map((p) => {
+              // 占位账本期间建的计划（离线冷启动）同样改挂到真正的当前账本，与流水/账户一致
+              const plan =
+                primaryLedgerId && (!p.ledgerId || p.ledgerId === PENDING_LEDGER_ID)
+                  ? { ...p, ledgerId: primaryLedgerId }
+                  : p;
+              // 云同步写回的存档可能是"补账已推进"之前的快照：游标只进不退，否则会重复补账
+              const cursor = laterCursor(prevById.get(plan.id)?.lastProcessedDate, plan.lastProcessedDate);
+              return cursor === plan.lastProcessedDate ? plan : { ...plan, lastProcessedDate: cursor };
+            });
+          });
+        }
       } catch (e) {
         console.warn('读取本地数据失败', e);
       }
@@ -824,8 +851,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       dueDates.forEach((d) => {
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // ⚠ id 必须是「计划 + 期次」派生的确定性值，不能用 genId()。
+        // 补账可能在多设备 / 多次冷启动里重复触发（本地游标为空、云同步晚到都会导致），
+        // 随机 id 每次都算作一笔新流水，于是服务端堆出一模一样的历史（实测重复生成 7 次、441 笔）。
+        // 派生 id 让"同一计划的同一期"永远只有一笔：本地按 id 去重，服务端按
+        // uk_transactions_user_client_uid 幂等 upsert。
         newTxs.push({
-          id: genId(),
+          id: `plan_${plan.id}_${dateStr}`,
           amount: plan.amount,
           categoryId: plan.categoryId ?? '',
           type: plan.type,
@@ -840,12 +872,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     });
 
-    if (newTxs.length > 0) setTransactions((prev) => [...newTxs, ...prev]);
+    if (newTxs.length > 0) {
+      setTransactions((prev) => {
+        const seen = new Set(prev.map((t) => t.id));
+        const fresh = newTxs.filter((t) => !seen.has(t.id));
+        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+      });
+    }
     if (planUpdates.length > 0) {
       setPaymentPlans((prev) =>
         prev.map((p) => {
           const u = planUpdates.find((x) => x.id === p.id);
-          return u ? { ...p, lastProcessedDate: u.lastProcessedDate } : p;
+          if (!u) return p;
+          // 游标只进不退：云同步可能在这批补账之后写回服务端更晚的游标(lastProcessedDate)，
+          // 若用本次算出的旧游标覆盖它，下次启动会把已补的期数再补一遍(重复流水)。
+          // YYYY-MM-DD 字符串比较即日期比较。
+          const cur = p.lastProcessedDate;
+          if (cur && cur >= u.lastProcessedDate) return p;
+          return { ...p, lastProcessedDate: u.lastProcessedDate };
         })
       );
     }

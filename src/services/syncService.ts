@@ -11,6 +11,8 @@ import {
   CategoryUpsert,
   LedgerDto,
   LedgerUpsert,
+  PaymentPlanDto,
+  PaymentPlanUpsert,
   ProfilePatch,
   TransactionDto,
   TransactionUpsert,
@@ -28,6 +30,7 @@ import {
   DateFormat,
   DecimalPlaces,
   Ledger,
+  PaymentPlan,
   PeriodPreference,
   Transaction,
   WeekStartsOn,
@@ -69,6 +72,8 @@ export interface LocalSnapshot {
   dateFormat: DateFormat;
   weekStartsOn: WeekStartsOn;
   decimalPlaces: DecimalPlaces;
+  /** 计划付款：挂账本（ledgerUid），带补账游标 lastProcessedDate */
+  paymentPlans: PaymentPlan[];
 }
 
 /** 云端行（canonical 形状：只包含本 App 负责的字段，金额是 4 位定点字符串） */
@@ -351,6 +356,34 @@ interface BudgetRow extends Row {
   amount: string;
 }
 
+/**
+ * 计划付款行（docs/API.md §3.10 与后端 PaymentPlanDtos.Response 对齐）：
+ * 没有 note/currency 字段——后端表里就没有这两列，App 的 note 不属于计划付款契约。
+ * archived 不进本行：App 没有"归档计划"概念（只删），拉取时带 includeArchived=true
+ * 只为不把服务端已归档的计划当成"本地已删除"而误删，行里保留它只会让每次同步误判有变化。
+ */
+interface PlanRow extends Row {
+  clientUid: string;
+  ledgerUid: string;
+  categoryUid: string | null;
+  assetUid: string | null;
+  name: string;
+  amount: string;
+  type: string;
+  cycle: string;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
+  monthOfYear: number | null;
+  day: number | null;
+  startDate: string;
+  endDate: string | null;
+  autoDeduct: boolean;
+  /** 补账游标：多设备用它避免重复补账，必须参与合并与推送 */
+  lastProcessedDate: string | null;
+  active: boolean;
+  sortOrder: number;
+}
+
 /** 全局设置行（PATCH /api/profile 的字段子集） */
 interface ProfileRow extends Row {
   currency: string;
@@ -541,6 +574,66 @@ function budgetFromDto(d: BudgetDto): Budget {
   };
 }
 
+/** App 的 dayOfWeek 约定 0=周日；后端列校验 1..7，周日必须映射成 7（拉取时反向映射回去） */
+function planDayOfWeekToServer(value: number | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return value === 0 ? 7 : value;
+}
+
+function planDayOfWeekFromServer(value: number | null): number | undefined {
+  if (value == null) return undefined;
+  return value === 7 ? 0 : value;
+}
+
+function planToRow(p: PaymentPlan, index: number, fallbackLedgerId: string): PlanRow {
+  return {
+    clientUid: p.id,
+    ledgerUid: p.ledgerId || fallbackLedgerId,
+    categoryUid: p.categoryId ? p.categoryId : null,
+    assetUid: p.assetId ?? null,
+    name: clip(p.name, 100),
+    amount: amountKey(p.amount),
+    type: p.type,
+    cycle: p.cycle,
+    dayOfWeek: planDayOfWeekToServer(p.dayOfWeek),
+    dayOfMonth: p.dayOfMonth ?? null,
+    monthOfYear: p.month ?? null,
+    day: p.day ?? null,
+    startDate: p.startDate,
+    endDate: p.endDate ?? null,
+    autoDeduct: p.autoDeduct === true,
+    lastProcessedDate: p.lastProcessedDate ?? null,
+    active: p.active !== false,
+    sortOrder: index,
+  };
+}
+
+function planFromDto(d: PaymentPlanDto): PaymentPlan {
+  const type: PaymentPlan['type'] = d.type === 'income' ? 'income' : 'expense';
+  const cycle: PaymentPlan['cycle'] =
+    d.cycle === 'weekly' || d.cycle === 'yearly' ? d.cycle : 'monthly';
+  return {
+    id: d.clientUid,
+    ledgerId: d.ledgerUid,
+    name: d.name,
+    amount: parseAmount(d.amount) ?? 0,
+    type,
+    cycle,
+    dayOfWeek: planDayOfWeekFromServer(d.dayOfWeek),
+    dayOfMonth: d.dayOfMonth ?? undefined,
+    month: d.monthOfYear ?? undefined,
+    day: d.day ?? undefined,
+    startDate: d.startDate,
+    endDate: d.endDate ?? undefined,
+    autoDeduct: d.autoDeduct === true,
+    categoryId: d.categoryUid ?? null,
+    assetId: d.assetUid ?? undefined,
+    active: d.active !== false,
+    lastProcessedDate: d.lastProcessedDate ?? undefined,
+    createdAt: toMillis(d.createdAt) ?? Date.now(),
+  };
+}
+
 function profileToRow(s: LocalSnapshot): ProfileRow {
   const ledgerIds = new Set(s.ledgers.map((l) => l.id));
   return {
@@ -605,6 +698,7 @@ interface SyncMirror {
   categories: Row[];
   transactions: Row[];
   budgets: Row[];
+  paymentPlans: Row[];
   profile: ProfileRow | null;
 }
 
@@ -616,6 +710,7 @@ function emptyMirror(): SyncMirror {
     categories: [],
     transactions: [],
     budgets: [],
+    paymentPlans: [],
     profile: null,
   };
 }
@@ -633,6 +728,7 @@ async function loadMirror(): Promise<SyncMirror> {
         categories: parsed.categories ?? [],
         transactions: parsed.transactions ?? [],
         budgets: parsed.budgets ?? [],
+        paymentPlans: parsed.paymentPlans ?? [],
         profile: (parsed.profile as ProfileRow | null) ?? null,
       };
     }
@@ -671,6 +767,7 @@ function buildAllRows(s: LocalSnapshot): SyncMirror {
     categories: s.categories.map(categoryToRow),
     transactions: s.transactions.map(txToRow),
     budgets: s.budgets.map((b) => budgetToRow(b, currency)),
+    paymentPlans: s.paymentPlans.map((p, i) => planToRow(p, i, fallbackLedgerId)),
     profile: profileToRow(s),
   };
 }
@@ -690,6 +787,7 @@ const KEYS = {
   dateFormat: '@jizhang/dateFormat',
   weekStartsOn: '@jizhang/weekStartsOn',
   decimalPlaces: '@jizhang/decimalPlaces',
+  paymentPlans: '@jizhang/paymentPlans',
 };
 
 function emptySnapshot(): LocalSnapshot {
@@ -706,11 +804,12 @@ function emptySnapshot(): LocalSnapshot {
     dateFormat: 'YYYY/MM/DD',
     weekStartsOn: 1,
     decimalPlaces: 2,
+    paymentPlans: [],
   };
 }
 
 async function readLocalSnapshot(): Promise<LocalSnapshot> {
-  const [tx, cat, grp, bud, led, activeLed, curr, per, ast, df, wk, dp] = await Promise.all([
+  const [tx, cat, grp, bud, led, activeLed, curr, per, ast, df, wk, dp, plan] = await Promise.all([
     AsyncStorage.getItem(KEYS.transactions),
     AsyncStorage.getItem(KEYS.categories),
     AsyncStorage.getItem(KEYS.categoryGroups),
@@ -723,6 +822,7 @@ async function readLocalSnapshot(): Promise<LocalSnapshot> {
     AsyncStorage.getItem(KEYS.dateFormat),
     AsyncStorage.getItem(KEYS.weekStartsOn),
     AsyncStorage.getItem(KEYS.decimalPlaces),
+    AsyncStorage.getItem(KEYS.paymentPlans),
   ]);
   // key 存在但解析失败 = 本地数据损坏。静默回退空数组会把坏表当"空表"推上云
   // （diff 出全量 delete，误删云端），所以这里直接中止同步保护数据。
@@ -743,6 +843,7 @@ async function readLocalSnapshot(): Promise<LocalSnapshot> {
   const ledgers = parseStrict<Ledger[]>(led, KEYS.ledgers, []);
   const periodPreference = parseStrict<PeriodPreference>(per, KEYS.periodPreference, { type: 'month' });
   const assets = parseStrict<Asset[]>(ast, KEYS.assets, []);
+  const paymentPlans = parseStrict<PaymentPlan[]>(plan, KEYS.paymentPlans, []);
   if (corrupt.length) throw new LocalDataCorruptError(corrupt);
   return {
     transactions,
@@ -758,6 +859,7 @@ async function readLocalSnapshot(): Promise<LocalSnapshot> {
     // 注意不能用 || 兜底：weekStartsOn 合法值包含 0（周日），会被 falsy 判断吞掉
     weekStartsOn: wk != null ? (Number(wk) as WeekStartsOn) : 1,
     decimalPlaces: dp != null ? (Number(dp) as DecimalPlaces) : 2,
+    paymentPlans,
   };
 }
 
@@ -838,8 +940,19 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
   const budgets = dedupeBudgets(budgetsFiltered);
   if (budgets !== budgetsFiltered) changed = true;
 
+  const paymentPlans = s.paymentPlans.map((p) => {
+    const patch: Partial<PaymentPlan> = {};
+    if (!p.ledgerId) patch.ledgerId = ledgerFallback;
+    // 后端 startDate 必填（LocalDate），缺失会被 400 拒写
+    if (!p.startDate) patch.startDate = new Date().toISOString().slice(0, 10);
+    if (!Number.isFinite(Number(p.amount)) || Number(p.amount) < 0) patch.amount = 0;
+    if (!Object.keys(patch).length) return p;
+    changed = true;
+    return { ...p, ...patch } as PaymentPlan;
+  });
+
   return {
-    snapshot: changed ? { ...s, assets, transactions, ledgers, budgets } : s,
+    snapshot: changed ? { ...s, assets, transactions, ledgers, budgets, paymentPlans } : s,
     changed,
   };
 }
@@ -859,6 +972,7 @@ async function writeLocalSnapshot(s: LocalSnapshot): Promise<void> {
     AsyncStorage.setItem(KEYS.dateFormat, s.dateFormat),
     AsyncStorage.setItem(KEYS.weekStartsOn, String(s.weekStartsOn)),
     AsyncStorage.setItem(KEYS.decimalPlaces, String(s.decimalPlaces)),
+    AsyncStorage.setItem(KEYS.paymentPlans, JSON.stringify(s.paymentPlans)),
   ]);
 }
 
@@ -877,11 +991,21 @@ interface CloudPull {
     categories: Category[];
     transactions: Transaction[];
     budgets: Budget[];
+    paymentPlans: PaymentPlan[];
   };
 }
 
 async function fetchAll(): Promise<CloudPull> {
-  const [ledgerDtos, assetDtos, groupDtos, categoryDtos, txDtos, budgetDtos, profileDto] = await Promise.all([
+  const [
+    ledgerDtos,
+    assetDtos,
+    groupDtos,
+    categoryDtos,
+    txDtos,
+    budgetDtos,
+    planDtos,
+    profileDto,
+  ] = await Promise.all([
     withRetry(() => api.listLedgers(true)),
     withRetry(() => api.listAssets(true)),
     withRetry(() => api.listCategoryGroups(true)),
@@ -889,6 +1013,8 @@ async function fetchAll(): Promise<CloudPull> {
     // 流水是唯一分页的列表（size 上限 100），必须翻页拉全
     withRetry(() => listAllTransactions()),
     withRetry(() => api.listBudgets()),
+    // 计划付款：带归档一起拉（App 没有归档概念，但要避免把服务端归档行当成本地已删除）
+    withRetry(() => api.listPaymentPlans(true)),
     withRetry(() => api.getProfile()),
   ]);
 
@@ -898,6 +1024,7 @@ async function fetchAll(): Promise<CloudPull> {
   const categories = categoryDtos.map(categoryFromDto);
   const transactions = txDtos.map(txFromDto);
   const budgets = budgetDtos.map(budgetFromDto);
+  const paymentPlans = planDtos.map(planFromDto);
   const profile = profileFromDto(profileDto);
 
   // 镜像统一转成 canonical 形状（toRow(fromDto(dto))），这样推送 diff 时键序一致；
@@ -909,12 +1036,13 @@ async function fetchAll(): Promise<CloudPull> {
     categories: categories.map(categoryToRow),
     transactions: transactions.map(txToRow),
     budgets: budgets.map((b) => budgetToRow(b, profile.currency)),
+    paymentPlans: paymentPlans.map((p, i) => planToRow(p, i, p.ledgerId || 'default')),
     profile,
   };
   return {
     cloud,
     defaultLedgerUid: ledgerDtos.find((d) => d.defaultLedger)?.clientUid ?? null,
-    entities: { ledgers, assets, categoryGroups, categories, transactions, budgets },
+    entities: { ledgers, assets, categoryGroups, categories, transactions, budgets, paymentPlans },
   };
 }
 
@@ -961,8 +1089,24 @@ async function pushRow(
 }
 
 /** 父表在前（账本 → 大类 → 分类 → 资产 → 流水 → 预算）；删除反过来，账本永远最后 */
-const UPSERT_ORDER = ['ledgers', 'categoryGroups', 'categories', 'assets', 'transactions', 'budgets'] as const;
-const DELETE_ORDER = ['transactions', 'budgets', 'categories', 'categoryGroups', 'assets', 'ledgers'] as const;
+const UPSERT_ORDER = [
+  'ledgers',
+  'categoryGroups',
+  'categories',
+  'assets',
+  'paymentPlans',
+  'transactions',
+  'budgets',
+] as const;
+const DELETE_ORDER = [
+  'transactions',
+  'budgets',
+  'paymentPlans',
+  'categories',
+  'categoryGroups',
+  'assets',
+  'ledgers',
+] as const;
 type TableName = (typeof UPSERT_ORDER)[number];
 
 /** 把 canonical 行还原成 PUT 请求体（金额字符串 → number） */
@@ -1046,6 +1190,32 @@ function toApiBody(table: TableName, row: Row): unknown {
       };
       return body;
     }
+    case 'paymentPlans': {
+      const r = row as unknown as PlanRow;
+      // 整行替换（后端 upsert 会把缺省字段写成 null）：lastProcessedDate 必须一起传，
+      // 漏传就等于把补账游标清空 —— 多设备会因此重复补账
+      const body: PaymentPlanUpsert = {
+        clientUid: r.clientUid,
+        ledgerUid: r.ledgerUid,
+        categoryUid: r.categoryUid,
+        assetUid: r.assetUid,
+        name: r.name,
+        amount: Number(r.amount),
+        type: r.type,
+        cycle: r.cycle,
+        dayOfWeek: r.dayOfWeek,
+        dayOfMonth: r.dayOfMonth,
+        monthOfYear: r.monthOfYear,
+        day: r.day,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        autoDeduct: r.autoDeduct,
+        lastProcessedDate: r.lastProcessedDate,
+        active: r.active,
+        sortOrder: r.sortOrder,
+      };
+      return body;
+    }
     case 'budgets': {
       const r = row as unknown as BudgetRow;
       const body: BudgetUpsert = {
@@ -1080,6 +1250,8 @@ async function pushUpsert(table: TableName, row: Row, failedRows: RowFailure[]):
           return api.putCategory(body as CategoryUpsert);
         case 'transactions':
           return api.putTransaction(body as TransactionUpsert);
+        case 'paymentPlans':
+          return api.putPaymentPlan(body as PaymentPlanUpsert);
         case 'budgets':
           return api.putBudget(body as BudgetUpsert);
         default:
@@ -1104,6 +1276,8 @@ async function pushDelete(table: TableName, id: string, failedRows: RowFailure[]
         return api.deleteCategory(id);
       case 'transactions':
         return api.deleteTransaction(id);
+      case 'paymentPlans':
+        return api.deletePaymentPlan(id);
       case 'budgets':
         return api.deleteBudget(id);
       default:
@@ -1175,6 +1349,7 @@ async function pushSnapshot(
     categoryGroups: current.categoryGroups,
     categories: current.categories,
     assets: current.assets,
+    paymentPlans: current.paymentPlans,
     transactions: current.transactions,
     budgets: current.budgets,
   };
@@ -1183,6 +1358,7 @@ async function pushSnapshot(
     categoryGroups: mirror.categoryGroups,
     categories: mirror.categories,
     assets: mirror.assets,
+    paymentPlans: mirror.paymentPlans,
     transactions: mirror.transactions,
     budgets: mirror.budgets,
   };
@@ -1281,6 +1457,31 @@ function mergeBudgets(localBudgets: Budget[], cloudBudgets: Budget[]): Budget[] 
   return dedupeBudgets([...out, ...cloudOnly]);
 }
 
+/** 补账游标取较新者（YYYY-MM-DD 字符串比较即日期比较）：绝不让较旧的游标回退，否则会重复补账 */
+function laterCursor(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a >= b ? a : b;
+}
+
+/**
+ * 计划付款合并（按 clientUid）：
+ * - 同 clientUid：内容以云端为准（本机未上云的编辑已在 fullSync 的预推送里先上云），
+ *   但补账游标单独取较新值——两台设备各自补过账时，谁补得晚谁的游标不能被另一台的旧值覆盖
+ * - 仅本机有：保留（稍后推上去）
+ * - 仅云端有：追加（换设备恢复计划的路径）
+ */
+function mergePlans(localPlans: PaymentPlan[], cloudPlans: PaymentPlan[]): PaymentPlan[] {
+  const cloudMap = new Map(cloudPlans.map((p) => [p.id, p]));
+  const out = localPlans.map((p) => {
+    const cloud = cloudMap.get(p.id);
+    if (!cloud) return p;
+    return { ...cloud, lastProcessedDate: laterCursor(p.lastProcessedDate, cloud.lastProcessedDate) };
+  });
+  const localIds = new Set(localPlans.map((p) => p.id));
+  return [...out, ...cloudPlans.filter((p) => !localIds.has(p.id))];
+}
+
 /**
  * 云端数据与本地合并：
  * - cloudWinsAll = true（切换到另一个账号登录）：本机遗留数据丢弃，以云端为准
@@ -1299,6 +1500,7 @@ function mergeSnapshots(local: LocalSnapshot, pull: CloudPull, cloudWinsAll: boo
         budgets: pull.entities.budgets,
         ledgers: pull.entities.ledgers,
         assets: pull.entities.assets,
+        paymentPlans: pull.entities.paymentPlans,
         activeLedgerId: withSettings.activeLedgerId,
         currency: withSettings.currency,
         periodPreference: withSettings.periodPreference,
@@ -1326,6 +1528,7 @@ function mergeSnapshots(local: LocalSnapshot, pull: CloudPull, cloudWinsAll: boo
     budgets: mergeBudgets(local.budgets, pull.entities.budgets),
     ledgers: mergeById(local.ledgers, pull.entities.ledgers),
     assets: mergeById(local.assets, pull.entities.assets),
+    paymentPlans: mergePlans(local.paymentPlans, pull.entities.paymentPlans),
     activeLedgerId: local.activeLedgerId,
     currency: local.currency,
     periodPreference: local.periodPreference,
@@ -1417,6 +1620,9 @@ function reconcileLedgers(merged: LocalSnapshot, pull: CloudPull, localActiveId:
     activeLedgerId,
     transactions: merged.transactions.map(remap),
     assets: merged.assets.map(remap),
+    // 计划在同一批账本对账之后收口：占位账本下的计划改挂当前账本；
+    // 账本被回收/已删的计划跟着丢弃 —— 与 AppContext.removeLedger 删掉其下计划的行为一致
+    paymentPlans: merged.paymentPlans.map(remap).filter((p) => ids.has(p.ledgerId)),
   };
 }
 
