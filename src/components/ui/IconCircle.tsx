@@ -20,7 +20,6 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withRepeat,
   withSequence,
   withSpring,
   withTiming,
@@ -166,37 +165,27 @@ export function IconCircle({
 }: IconCircleProps) {
   const { isDark, semantic } = useTheme();
   const { base, light, dark } = useMemo(() => ballColors(color), [color]);
-  // 选中态的「动」：进选中时弹一下（1.0 → 1.12 → 1.06 弹簧），随后外圈光晕缓慢呼吸。
-  // reduceMotion 下两者都停：只留静态描边 + 静态光晕（无障碍要求，抖动/呼吸对前庭敏感者不适）。
+  // 选中态的「动」只有一处：进选中时弹一下（1.0 → 1.12 → 1.06 弹簧）。
+  // 曾试过持续呼吸光晕，但彩色外发光在浅色底上会糊成一片粉雾、整屏像在发晕（用户反馈），已移除。
+  // reduceMotion 下不弹，只留静态白环（无障碍要求）。
   const reduceMotion = useReducedMotion();
-  const glowP = useSharedValue(0.45);
   const popP = useSharedValue(1);
   useEffect(() => {
     if (!selected) {
-      glowP.value = 0.45;
       popP.value = withTiming(1, { duration: 140 });
       return;
     }
     if (reduceMotion) {
-      glowP.value = 0.7;
       popP.value = 1.06;
       return;
     }
+    // 只保留「选中瞬间弹一下」这一处动效：持续的呼吸光晕会让整屏看起来在发晕（用户反馈）。
     popP.value = withSequence(
       withTiming(1.12, { duration: 130, easing: Easing.out(Easing.quad) }),
       withSpring(1.06, { damping: 12, stiffness: 180 })
     );
-    glowP.value = withRepeat(
-      withSequence(
-        withTiming(0.9, { duration: 900, easing: Easing.inOut(Easing.quad) }),
-        withTiming(0.4, { duration: 900, easing: Easing.inOut(Easing.quad) })
-      ),
-      -1,
-      false
-    );
-  }, [selected, reduceMotion, glowP, popP]);
+  }, [selected, reduceMotion, popP]);
   const animatedRoot = useAnimatedStyle(() => ({ transform: [{ scale: popP.value }] }));
-  const animatedGlow = useAnimatedStyle(() => ({ opacity: selected ? glowP.value : 0 }));
   const radius = size / 2;
   // 渐变定义 id 带基色指纹：同色实例共用一份定义（web 的 url(#id) 按文档解析），异色不会串
   const ballId = `ic3d${base.replace(/[^0-9a-zA-Z]/g, '')}`;
@@ -238,22 +227,17 @@ export function IconCircle({
       ? withAlpha(color, categoryRing.darkAlpha)
       : categoryRing.light
     : semantic.textTertiary;
-  // 选中态（用户第三轮定版）：**环必须紧贴球体外沿，中间不能隔一道空气**。
-  // 之前 2px 环 + 2px 间隙看起来像"戴了个项圈"，脱离了球体本身。
-  // 现在：0 间隙 + 2.5px 描边直接咬住球边，再叠三层特效把选中的球"顶"起来：
-  //   1) 贴边描边（accent 语义色，与标签同一身份）
-  //   2) 近距同色光晕（8px 扩散）—— 让环有光感，不是一条死线
-  //   3) 更远的地面投影（18px，暗色）—— 层次拉开，不糊成一片
-  // 不再依赖"把其它格子压暗"来制造对比（用户明确不要其它图标发蒙）。
-  // 选中环改「白色贴边 + 球色光晕」：
-  // 之前的 accent 紫环压在红球上是一对互补色（蓝紫 vs 红橙），看着像贴纸；
-  // 白环是中性色，任何球色下都清晰，且它描的是球体自己的边 —— 不引入第二种颜色身份。
-  // 光晕交给下面那层会呼吸的 Animated.View（用球体基色，同色系不刺眼）。
-  // ⚠ 白环不能挂在根节点的 boxShadow 上：子层的呼吸光晕（后绘制）会把它盖掉。
+  // 选中环（多轮定版后的最终形态）：**中性白、紧贴球边、零间隙、无光晕**。
+  // 演进过程记在这里，避免以后有人又加回去：
+  //   v1 5px accent 环 + 3px 间隙 → 像"戴项圈"，脱离球体
+  //   v2 2px accent 环 → 紫环压在红球上是对互补色，像贴纸
+  //   v3 球色呼吸光晕 → 浅色底上糊成粉雾，用户反馈"发晕"
+  // 现在只留白色贴边环（画在球面之上的独立描边层，2px、半径=球半径），
+  // 识别不靠颜色、不靠光、不靠把邻居压暗，全靠"球自己多了一圈边"。
   // 所以根节点只留地面投影，白环改由顶层那个绝对定位的描边层画（见 JSX 末尾）。
-  const selectedShadow = selected
-    ? `0px 10px 20px -8px ${withAlpha(base, 0.5)}, 0px 6px 10px -4px rgba(0,0,0,0.22)`
-    : outerShadow;
+  // 用户定版：不要「晕」。彩色外发光在浅色底上会糊成一团粉色雾（看起来像失焦），
+  // 所以选中态只保留中性地面投影；识别交给贴边白环 + 一点弹入动效。
+  const selectedShadow = selected ? '0px 6px 10px -4px rgba(0,0,0,0.22)' : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
   // 画在背景与内容之间，挂在根节点会被球面 SVG 盖住）
@@ -273,18 +257,6 @@ export function IconCircle({
         style,
       ]}
     >
-      {/* 选中光晕（用球体基色、会呼吸）：画在球面下面，靠 box-shadow 向外扩散。
-          放在子节点最底层，所以不吃触摸、也不遮住球面与图标。 */}
-      {selected ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            { borderRadius: radius, boxShadow: `0px 0px 18px 4px ${withAlpha(base, 0.75)}` },
-            animatedGlow,
-          ]}
-        />
-      ) : null}
       {/* 球面：radial-gradient(circle at 32% 26%, 亮 → 基色 48% → 暗) + V2.2 弧形高光 */}
       <Svg width={size} height={size} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
