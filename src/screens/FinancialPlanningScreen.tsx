@@ -7,6 +7,8 @@
 //   F3 左滑删除（iOS 方向：往左滑，删除底在右侧）、删除底 danger 色、高度与行一致；
 //      删除确认仍走原来的 AppDialog 流程
 //   F4 空状态改 EmptyState +「添加规划」按钮；页头改二级页 ScreenHeader（返回 + 右侧动作）
+//   F5 版式统一（本批）：删掉自绘页头 + 品牌紫渐变横带，改 <ScreenHeader variant="compact">
+//      + semantic.bg 页底 + ui/Button 右侧动作；汇总卡 / 列表卡圆角一律走 radius 令牌
 //
 // ⚠ 计算逻辑一字未动：两张汇总卡（月度支出 / 月度收入）仍按原来的
 //   plans.filter(type).reduce(amount) 求和 —— 暂停的计划也计入合计，这是已知的功能问题
@@ -14,7 +16,7 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -35,13 +37,13 @@ import {
   AppText,
   Badge,
   type BadgeTone,
+  Button,
   Card,
   EmptyState,
-  GlassView,
-  HeroGradient,
   IconCircle,
   ListSection,
   MoneyText,
+  ScreenHeader,
 } from '../components/ui';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -50,8 +52,6 @@ type IconName = keyof typeof Ionicons.glyphMap;
 const ICON_BOX_SIZE = 42;
 /** 圆内图标尺寸（图标只有 20 / 24 两档，行内取小档）—— 纯图形常量 */
 const ICON_SIZE = 20;
-/** 页面顶部品牌渐变高度（本页没有定稿图，按 V2 同一套元素取 360，矮屏 ×0.9） */
-const HERO_HEIGHT = 360;
 /** 类别色淡底透明度（UI_RULES 第 1 节：类别色 12% 底 + 100% 图标） */
 const CATEGORY_TINT_ALPHA = 0.12;
 /** 左滑露出的删除底宽度（iOS 习惯：一个方块宽）—— 纯几何常量 */
@@ -66,10 +66,7 @@ const SWIPE_PRESS_GUARD_MS = 400;
 export default function FinancialPlanningScreen({ navigation }: any) {
   const { paymentPlans, deletePaymentPlan, activeLedgerId, categories } = useApp();
   const { semantic, spacing, layout, radius } = useTheme();
-  const { pagePadding, contentMaxWidth, rowMinHeight, isShort } = useLayout();
-  // 渐变高度（本页没有定稿图，按 V2 同一套元素）：844 高屏 360，矮屏 ×0.9
-  const heroHeight = Math.round(HERO_HEIGHT * (isShort ? 0.9 : 1));
-  const insets = useSafeAreaInsets();
+  const { pagePadding, contentMaxWidth, rowMinHeight } = useLayout();
   const tr = useT();
   const { langMode } = useLanguage();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
@@ -144,41 +141,26 @@ export default function FinancialPlanningScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={[]}>
-      {/* 顶部品牌渐变（无定稿图：按同一套 V2 元素 360 / 矮屏 ×0.9），绝对定位压在内容下面 */}
-      <HeroGradient height={heroHeight} />
-      {/* 页头（V2）：玻璃圆返回键 + 白色标题 + 玻璃胶囊「添加规划」；入口与跳转一字未动 */}
-      <View style={[styles.headerRow, { paddingHorizontal: pagePadding, paddingTop: insets.top + 14 }]}>
-        <PressableScale
-          onPress={() => navigation.goBack()}
-          activeScale={0.94}
-          hitSlop={0}
-          accessibilityRole="button"
-          accessibilityLabel={tr('common.back')}
-        >
-          <GlassView radius={radius.full} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={18} color={semantic.onAccent} />
-          </GlassView>
-        </PressableScale>
-        <AppText variant="title3" weight="600" color={semantic.onAccent} style={styles.heroTitle}>
-          {tr('finance.title')}
-        </AppText>
-        <PressableScale
-          onPress={() => navigation.navigate(ROUTES.FINANCE_PLAN_EDIT)}
-          activeScale={0.97}
-          hitSlop={0}
-          accessibilityRole="button"
-          accessibilityLabel={tr('finance.addPlan')}
-          testID="finance-add-button"
-        >
-          <GlassView radius={radius.full} style={styles.addPill}>
-            <Ionicons name="add" size={16} color={semantic.onAccent} />
-            <AppText variant="subhead" weight="500" color={semantic.onAccent}>
-              {tr('finance.addPlan')}
-            </AppText>
-          </GlassView>
-        </PressableScale>
-      </View>
+    // 版式：与资产页 / 类别管理页同一代 —— 页底 semantic.bg，无渐变带；
+    // 页头统一 ScreenHeader（返回键 + 居中标题 + 右侧动作），安全区由 SafeAreaView 的 top 边负责
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* 页头：ui/ScreenHeader（compact）+ ui/Button 右侧动作；入口与跳转一字未动 */}
+      <ScreenHeader
+        variant="compact"
+        title={tr('finance.title')}
+        onBack={() => navigation.goBack()}
+        right={
+          <Button
+            title={tr('finance.addPlan')}
+            variant="secondary"
+            size="sm"
+            fullWidth={false}
+            onPress={() => navigation.navigate(ROUTES.FINANCE_PLAN_EDIT)}
+            accessibilityLabel={tr('finance.addPlan')}
+            testID="finance-add-button"
+          />
+        }
+      />
 
       <ScrollView
         style={[
@@ -211,9 +193,10 @@ export default function FinancialPlanningScreen({ navigation }: any) {
 
           {plans.length === 0 ? (
             // 空状态（计划 10.1 / F4）：统一 EmptyState（大图标 + 一句话 + 一个按钮）
-            // V2：空状态也给一张 surface 卡（与资产 / 统计页空状态同一套呈现）
-            <Card padded={false} style={{ borderRadius: 26 }}>
+            // 版式：空状态只用一张 Card（semantic.surface + radius.lg），不再包紫底
+            <Card padded={false}>
               <EmptyState
+                style={styles.emptyState}
                 icon="calendar-outline"
                 title={tr('finance.noPlans')}
                 description={tr('finance.noPlansHint')}
@@ -363,38 +346,17 @@ function makeStyles(
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: semantic.bg },
 
-    // 页头（V2）：玻璃圆返回键 + 白色标题 + 玻璃胶囊动作；一行放不下时动作整块换行
-    headerRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      columnGap: spacing.md,
-      rowGap: spacing.sm,
-      marginBottom: 14,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroTitle: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-    addPill: {
-      height: 40,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 14,
-    },
-
     // 两张汇总卡并排各半（间距用 spacing.md，窄屏英文也不换行）
+    // 卡面规格与资产页 / 首页一致：Card 自带 semantic.surface + radius.lg + elevation.level1
     summaryRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
-    // 卡圆角按 V2 稿 26（Card 默认 radius.lg 20）
-    summaryCard: { flex: 1, minWidth: 0, borderRadius: 26 },
+    summaryCard: { flex: 1, minWidth: 0 },
     summaryAmount: { marginTop: spacing.xs },
 
-    // 计划列表卡：裁掉左滑时滑出的内容（圆角不外漏）+ V2 圆角 26
-    plansCard: { overflow: 'hidden', borderRadius: 26 },
+    // 空状态：卡片内左右留白走令牌（320 窄屏下说明文字不贴边）
+    emptyState: { paddingHorizontal: spacing.xl },
+
+    // 计划列表卡：裁掉左滑时滑出的内容（圆角不外漏）
+    plansCard: { overflow: 'hidden' },
 
     // 左滑删除底：danger 实底 + 白图标白字；alignSelf stretch = 高度与行完全一致
     swipeDelete: {

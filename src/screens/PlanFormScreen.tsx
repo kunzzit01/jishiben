@@ -27,7 +27,7 @@ import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../theme/useTheme';
-import type { Elevation, SemanticColors, ThemeColors } from '../theme/theme';
+import type { Elevation, Radius, SemanticColors, Spacing, ThemeColors, Typography } from '../theme/theme';
 import { useT } from '../i18n/LanguageContext';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
@@ -39,10 +39,9 @@ import { formatMoney } from '../utils/formatMoney';
 import { getCategoryLabel } from '../i18n/categories';
 import { hapticSuccess, hapticWarning } from '../utils/haptics';
 import { ROUTES } from '../navigation/routes';
-import { GlassView, HeroGradient } from '../components/ui';
-
-/** 页面顶部品牌渐变高度（本页没有定稿图，按 V2 同一套元素取 360，矮屏 ×0.9） */
-const HERO_HEIGHT = 360;
+import SegmentedControl from '../components/SegmentedControl';
+import { useLayout } from '../theme/useLayout';
+import { AppText, Button, Card, IconButton, ScreenHeader, Switch, withAlpha } from '../components/ui';
 
 function fmt(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -50,15 +49,17 @@ function fmt(d: Date): string {
 
 export default function PlanFormScreen({ route, navigation }: any) {
   const { addPaymentPlan, updatePaymentPlan, deletePaymentPlan, assets, activeAssets, paymentPlans, activeLedgerId, categories, currency, getAssetBalance, decimalPlaces } = useApp();
-  const { colors, semantic, elevation } = useTheme();
+  const { colors, semantic, elevation, spacing, radius, typography } = useTheme();
+  const { pagePadding } = useLayout();
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const insets = useSafeAreaInsets();
-  // 渐变高度：844 高屏 360，矮屏 ×0.9（UI V2 第 1 节）
-  const heroHeight = Math.round(HERO_HEIGHT * (Dimensions.get('window').height - insets.top < 700 ? 0.9 : 1));
   const isFocused = useIsFocused();
   const setTabBarForceHidden = useTabBarForceHide();
-  const styles = useMemo(() => makeStyles(colors, semantic, elevation), [colors, semantic, elevation]);
+  const styles = useMemo(
+    () => makeStyles(colors, semantic, elevation, spacing, radius, typography),
+    [colors, semantic, elevation, spacing, radius, typography]
+  );
 
   const editPlan = route?.params?.planId ? paymentPlans.find((p) => p.id === route.params.planId) : undefined;
   const isEdit = !!editPlan;
@@ -332,70 +333,74 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   // 金额币种只认所选账户：跟随关联账户；没关联账户时跟随 App 全局货币设置（不再硬编码 MYR）
   const amountCurrency = selectedAsset?.currency ?? currency;
 
+  // 换类型：已选分类若与新类型不匹配则清空（支出/收入分类各自独立）——原逻辑一字未动
+  const handleTypeChange = (tp: 'expense' | 'income') => {
+    setType(tp);
+    setCategoryId((prev) => (prev && categories.find((c) => c.id === prev)?.type !== tp ? null : prev));
+  };
+
   return (
-    // UI V2：整页通顶 —— 顶部品牌渐变（360 / 矮屏 ×0.9）压在内容下面，页头落在渐变上
-    <SafeAreaView style={styles.container} edges={[]}>
-      <HeroGradient height={heroHeight} />
-      {/* 头部（V2）：玻璃圆返回键 + 白色标题 + (编辑模式)玻璃圆删除；入口与行为一字未动 */}
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <PressableScale onPress={() => navigation.goBack()} activeScale={0.94} hitSlop={0}>
-          <GlassView radius={999} style={styles.glassHeaderBtn}>
-            <Ionicons name="chevron-back" size={18} color={semantic.onAccent} />
-          </GlassView>
-        </PressableScale>
-        <Text style={styles.headerTitle}>{isEdit ? tr('finance.editPlan') : tr('finance.addPlan')}</Text>
-        {isEdit ? (
-          <PressableScale onPress={handleDelete} activeScale={0.94} hitSlop={0}>
-            <GlassView radius={999} style={styles.glassHeaderBtn}>
-              <Ionicons name="trash-outline" size={18} color={semantic.onAccent} />
-            </GlassView>
-          </PressableScale>
-        ) : (
-          <View style={{ width: 36 }} />
-        )}
-      </View>
+    // 版式：与资产页 / 类别管理页同一代 —— 页底 semantic.bg、无渐变带；
+    // 页头统一 ScreenHeader（返回 + 居中标题 + 右侧动作），安全区由 SafeAreaView 的 top 边负责
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScreenHeader
+        variant="compact"
+        title={isEdit ? tr('finance.editPlan') : tr('finance.addPlan')}
+        onBack={() => navigation.goBack()}
+        right={
+          isEdit ? (
+            <IconButton
+              icon="trash-outline"
+              accessibilityLabel={tr('finance.deletePlan')}
+              onPress={handleDelete}
+              testID="plan-delete-button"
+            />
+          ) : undefined
+        }
+      />
 
       <ScrollView
         ref={scrollViewRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
+        contentContainerStyle={{ paddingHorizontal: pagePadding, paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 第1层：固定支出 / 固定收入（不加大标题，直接分段选择，贴住顶栏） */}
-        <View style={styles.segRow}>
-          {(['expense', 'income'] as const).map((tp) => (
-            <PressableScale
-              key={tp}
-              style={[styles.segBtn, type === tp && styles.segBtnActive]}
-              activeScale={0.95}
-              onPress={() => {
-                setType(tp);
-                // 切换类型时，已选分类若与新类型不匹配则清空（支出/收入分类各自独立）
-                setCategoryId((prev) => (prev && categories.find((c) => c.id === prev)?.type !== tp ? null : prev));
-              }}
-            >
-              <Text style={[styles.segText, type === tp && styles.segTextActive]}>
-                {tp === 'expense' ? tr('finance.typeExpense') : tr('finance.typeIncome')}
-              </Text>
-            </PressableScale>
-          ))}
+        {/* 第1层：固定支出 / 固定收入 —— 统一分段控件（与类别管理页 / 记一笔同一套） */}
+        <View style={styles.segWrap}>
+          <SegmentedControl
+            stretch
+            options={[
+              { label: tr('finance.typeExpense'), value: 'expense' },
+              { label: tr('finance.typeIncome'), value: 'income' },
+            ]}
+            selected={type}
+            onSelect={(v) => handleTypeChange(v as 'expense' | 'income')}
+          />
         </View>
 
-        {/* 第2层：金额（点按调出计算器并滚到屏幕中心） */}
+        {/* 第2层：金额（点按调出计算器并滚到屏幕中心）—— surface 卡 + radius/spacing 令牌 */}
         <View onLayout={(e) => registerAmountFieldY(e.nativeEvent.layout.y)}>
-          <Text style={styles.formLabel}>{tr('finance.planAmount')}</Text>
-          <PressableScale style={styles.amountBox} activeScale={0.98} onPress={openAmountKeypad}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.amountBoxLabel}>{tr('finance.planAmount')}</Text>
-              <View style={styles.amountBoxRow}>
-                <Text style={styles.amountBoxCurrency}>{amountCurrency}</Text>
+          <PressableScale
+            style={styles.amountCard}
+            activeScale={0.98}
+            onPress={openAmountKeypad}
+            testID="plan-amount-field"
+          >
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <AppText variant="footnote" color={semantic.textSecondary} weight="600">
+                {tr('finance.planAmount')}
+              </AppText>
+              <View style={styles.amountRow}>
+                <AppText variant="title2" weight="600" color={semantic.textSecondary}>
+                  {amountCurrency}
+                </AppText>
                 {/* 金额可定位光标（字号按位数渐缩）：键盘开着时点按/长按拖动移动光标，
                     按键在光标处插入/删除；键盘收起时只显示已确认金额、点按回落 openAmountKeypad */}
                 <CursorAmountText
-                  containerStyle={styles.amountBoxValueWrap}
-                  style={[styles.amountBoxValue, { fontSize: planAmountFontSize }]}
-                  cursorStyle={styles.amountBoxCursor}
+                  containerStyle={styles.amountValueWrap}
+                  style={[styles.amountValue, { fontSize: planAmountFontSize, color: semantic.textPrimary }]}
+                  cursorStyle={[styles.amountCursor, { color: semantic.accentText }]}
                   display={amountDisplay}
                   enabled={keypadOpen}
                   cursorFromEnd={amountCursor}
@@ -404,114 +409,164 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
                 />
               </View>
             </View>
-            <Ionicons name="pencil" size={15} color={colors.link} />
+            <Ionicons name="pencil" size={16} color={semantic.accentText} />
           </PressableScale>
         </View>
 
-        {/* 第3层：计划名称（右）+ 类别选择按钮（名称旁，底部弹层选择） */}
-        <Text style={styles.formLabelTight}>{tr('finance.planName')}</Text>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <TextInput
-            style={[styles.formInput, { flex: 1, color: colors.textPrimary }]}
-            value={name}
-            onChangeText={setName}
-            placeholder={tr('finance.planNamePlaceholder')}
-            placeholderTextColor={colors.textTertiary}
-            selectionColor={colors.link}
-            returnKeyType="done"
-          />
-          {/* 类别选择框：与名称输入框 50%/50% 等分，文字标注显示已选分类名（未选显示"选择分类"）；
-              点击进入"类别分类"选择模式，点分类后经 onPickCategory 回调带回结果并自动退出选择页 */}
+        {/* 第3层：名称 / 类别 / 账户 / 开始日期 / 状态 —— 一张 surface 卡内的行，行间发丝线分组
+            （标签左、控件右，与设置页 / 添加资产账户同一套表单语言） */}
+        <Card padded={false} style={styles.sectionCard}>
+          <View style={styles.fieldRow}>
+            <AppText variant="subhead" color={semantic.textSecondary}>
+              {tr('finance.planName')}
+            </AppText>
+            <TextInput
+              style={[styles.fieldInput, { color: semantic.textPrimary }]}
+              value={name}
+              onChangeText={setName}
+              placeholder={tr('finance.planNamePlaceholder')}
+              placeholderTextColor={semantic.textTertiary}
+              selectionColor={semantic.accent}
+              returnKeyType="done"
+              testID="plan-name-input"
+            />
+          </View>
+
+          <View style={styles.rowDivider} />
+
+          {/* 类别：点击进入"类别分类"选择模式，点分类后经 onPickCategory 回调带回结果并自动退出选择页 */}
           <PressableScale
-            style={[styles.categoryBtn, selectedCategory && { borderColor: selectedCategory.color + '66' }]}
+            style={styles.fieldRow}
             activeScale={0.98}
-            onPress={() => navigation.navigate(ROUTES.CATEGORY_MGMT, {
-              selectMode: true,
-              // TASK-020 纠偏：带上表单当前类型——之前没传，固定收入计划进选择页只会看到支出分类
-              initialType: type,
-              onPickCategory: (id: string) => setCategoryId(id),
-            })}
+            onPress={() =>
+              navigation.navigate(ROUTES.CATEGORY_MGMT, {
+                selectMode: true,
+                // TASK-020 纠偏：带上表单当前类型——之前没传，固定收入计划进选择页只会看到支出分类
+                initialType: type,
+                onPickCategory: (id: string) => setCategoryId(id),
+              })
+            }
+            testID="plan-category-row"
           >
-            <View
-              style={[styles.categoryBtnDot, { backgroundColor: (selectedCategory?.color ?? colors.textTertiary) + '33' }]}
-            >
-              <Ionicons
-                name={(selectedCategory?.icon as any) ?? 'apps-outline'}
-                size={14}
-                color={selectedCategory?.color ?? colors.textTertiary}
-              />
+            <AppText variant="subhead" color={semantic.textSecondary}>
+              {tr('finance.category')}
+            </AppText>
+            <View style={styles.fieldValueRight}>
+              <View
+                style={[
+                  styles.categoryDot,
+                  { backgroundColor: withAlpha(selectedCategory?.color ?? semantic.textTertiary, 0.12) },
+                ]}
+              >
+                <Ionicons
+                  name={(selectedCategory?.icon as any) ?? 'apps-outline'}
+                  size={14}
+                  color={selectedCategory?.color ?? semantic.textTertiary}
+                />
+              </View>
+              <AppText
+                variant="subhead"
+                color={selectedCategory ? semantic.textPrimary : semantic.textTertiary}
+                numberOfLines={1}
+                style={styles.fieldValueText}
+              >
+                {selectedCategory ? getCategoryLabel(selectedCategory, tr) : tr('finance.selectCategory')}
+              </AppText>
+              <Ionicons name="chevron-forward" size={16} color={semantic.textTertiary} />
             </View>
-            <Text
-              style={[styles.categoryBtnText, { color: selectedCategory ? colors.textPrimary : colors.textTertiary }]}
-              numberOfLines={1}
-            >
-              {selectedCategory ? getCategoryLabel(selectedCategory, tr) : tr('finance.selectCategory')}
-            </Text>
           </PressableScale>
-        </View>
 
-        {/* 第4层：关联账户（左）+ 开始日期（右，single 模式只选一个日期）左右各 50%；
-            月结扣账日 = 开始日期的"日"；与上方留白收紧 */}
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.formLabel}>{tr('finance.linkAsset')}</Text>
-            <PressableScale
-              style={[styles.formInput, styles.formReadonlyField]}
-              activeScale={0.98}
-              onPress={() => setAssetSheetOpen(true)}
-            >
+          <View style={styles.rowDivider} />
+
+          {/* 关联账户：底部弹层选择（弹层交互一字未动） */}
+          <PressableScale
+            style={styles.fieldRow}
+            activeScale={0.98}
+            onPress={() => setAssetSheetOpen(true)}
+            testID="plan-asset-row"
+          >
+            <AppText variant="subhead" color={semantic.textSecondary}>
+              {tr('finance.linkAsset')}
+            </AppText>
+            <View style={styles.fieldValueRight}>
               {/* 币种用代码小芯片（不用国旗 emoji：部分安卓机型只渲染成两个字母） */}
               {selectedAsset && (
                 <View style={styles.currencyChip}>
-                  <Text style={styles.currencyChipText}>{selectedAsset.currency}</Text>
+                  <AppText variant="caption2" weight="600" color={semantic.accentText}>
+                    {selectedAsset.currency}
+                  </AppText>
                 </View>
               )}
-              <Text
-                style={{ flex: 1, color: selectedAsset ? colors.textPrimary : colors.textTertiary, fontSize: 14, marginLeft: selectedAsset ? 6 : 0 }}
+              <AppText
+                variant="subhead"
+                color={selectedAsset ? semantic.textPrimary : semantic.textTertiary}
                 numberOfLines={1}
+                style={styles.fieldValueText}
               >
                 {selectedAsset?.name ?? tr('addTx.notSelectedShort')}
-              </Text>
-              <Ionicons name="chevron-down" size={14} color={colors.textTertiary} />
-            </PressableScale>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.formLabel}>{tr('finance.startDate')}</Text>
-            <PressableScale
-              style={[styles.formInput, styles.formReadonlyField]}
-              activeScale={0.98}
-              onPress={() => setDatePickerOpen(true)}
-            >
-              <Text style={{ color: colors.textPrimary, fontSize: 14 }} numberOfLines={1}>{rangeStart}</Text>
-              <Ionicons name="calendar-outline" size={16} color={colors.textTertiary} />
-            </PressableScale>
-          </View>
-        </View>
-
-        {/* 计划状态开关(编辑模式)：开=生效中、关=已暂停——标签描述状态而不是矛盾的反义 */}
-        {isEdit && (
-          <PressableScale style={[styles.autoDeductRow, { marginTop: 8 }]} activeScale={0.98} onPress={() => setActive((v) => !v)}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '600', color: colors.textPrimary }}>
-                {tr('finance.planStatusLabel')}
-              </Text>
-              <Text style={{ fontSize: 11, color: active ? colors.link : colors.textTertiary, marginTop: 1 }}>
-                {active ? tr('finance.planStatusOn') : tr('finance.planStatusOff')}
-              </Text>
-            </View>
-            <View style={[styles.switchTrack, active && { backgroundColor: colors.link }]}>
-              <View style={[styles.autoKnob, active && styles.autoKnobOn]} />
+              </AppText>
+              <Ionicons name="chevron-forward" size={16} color={semantic.textTertiary} />
             </View>
           </PressableScale>
-        )}
+
+          <View style={styles.rowDivider} />
+
+          {/* 开始日期：single 模式只选一个日期；月结扣账日 = 开始日期的"日" */}
+          <PressableScale
+            style={styles.fieldRow}
+            activeScale={0.98}
+            onPress={() => setDatePickerOpen(true)}
+            testID="plan-date-row"
+          >
+            <AppText variant="subhead" color={semantic.textSecondary}>
+              {tr('finance.startDate')}
+            </AppText>
+            <View style={styles.fieldValueRight}>
+              <AppText variant="subhead" color={semantic.textPrimary} numberOfLines={1} style={styles.fieldValueText}>
+                {rangeStart}
+              </AppText>
+              <Ionicons name="calendar-outline" size={16} color={semantic.textTertiary} />
+            </View>
+          </PressableScale>
+
+          {/* 计划状态开关(编辑模式)：开=生效中、关=已暂停——标签描述状态而不是矛盾的反义 */}
+          {isEdit && (
+            <>
+              <View style={styles.rowDivider} />
+              <View style={styles.fieldRow}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <AppText variant="subhead" color={semantic.textPrimary} weight="600">
+                    {tr('finance.planStatusLabel')}
+                  </AppText>
+                  <AppText
+                    variant="caption2"
+                    color={active ? semantic.accentText : semantic.textTertiary}
+                    style={styles.fieldHint}
+                  >
+                    {active ? tr('finance.planStatusOn') : tr('finance.planStatusOff')}
+                  </AppText>
+                </View>
+                <Switch
+                  value={active}
+                  onValueChange={setActive}
+                  accessibilityLabel={tr('finance.planStatusLabel')}
+                  testID="plan-status-switch"
+                />
+              </View>
+            </>
+          )}
+        </Card>
       </ScrollView>
 
-      {/* 保存按钮：计算器键盘开着时让位给键盘面板（同一底部位置），关了再回来 */}
+      {/* 保存按钮：ui/Button gradient 档（与「记一笔」完成键同规格）；计算器键盘开着时让位给键盘面板 */}
       {!keypadOpen && (
-        <View style={[styles.saveFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <PressableScale style={styles.saveBtn} onPress={() => handleSave()} activeScale={0.97}>
-            <Text style={styles.saveBtnText}>{tr('finance.save')}</Text>
-          </PressableScale>
+        <View style={[styles.saveFooter, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+          <Button
+            title={tr('finance.save')}
+            variant="gradient"
+            onPress={() => handleSave()}
+            testID="plan-save-button"
+          />
         </View>
       )}
 
@@ -523,9 +578,9 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
           style={[
             styles.keypadFooter,
             {
-              paddingBottom: Math.max(insets.bottom - 40, 8),
-              backgroundColor: colors.card,
-              borderTopColor: colors.dividerHair,
+              paddingBottom: Math.max(insets.bottom - 40, spacing.sm),
+              backgroundColor: semantic.surface,
+              borderTopColor: semantic.hairline,
             },
           ]}
         >
@@ -775,93 +830,76 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   );
 }
 
-function makeStyles(colors: ThemeColors, semantic: SemanticColors, elevation: Elevation) {
+function makeStyles(
+  colors: ThemeColors,
+  semantic: SemanticColors,
+  elevation: Elevation,
+  spacing: Spacing,
+  radius: Radius,
+  typography: Typography
+) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
-    header: {
+    container: { flex: 1, backgroundColor: semantic.bg },
+
+    // —— 表单（本页主体）：semantic.surface 卡 + radius / spacing 令牌 ——
+    segWrap: { marginBottom: spacing.lg },
+    // 一卡多行：行间发丝线，行高 ≥ 52（触控 + 留白）
+    sectionCard: { borderRadius: radius.lg, overflow: 'hidden' },
+    fieldRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 20,
-      paddingBottom: 6,
+      columnGap: spacing.md,
+      minHeight: 52,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      backgroundColor: semantic.surface,
     },
-    // 页头上的玻璃圆钮（V2）：36 圆，与资产 / 统计页的玻璃圆钮同一规格
-    glassHeaderBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-    backBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      borderWidth: 1.5,
-      borderColor: colors.link,
-      backgroundColor: colors.card,
+    rowDivider: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline, marginLeft: spacing.lg },
+    fieldInput: {
+      flex: 1,
+      minWidth: 0,
+      paddingVertical: 0,
+      fontSize: typography.subhead.fontSize,
+      textAlign: 'right',
+    },
+    fieldValueRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      columnGap: spacing.sm,
+      flexShrink: 1,
+      marginLeft: 'auto',
+    },
+    fieldValueText: { flexShrink: 1 },
+    fieldHint: { marginTop: 1 },
+    // 类别色小圆点（类别色 12% 底 + 100% 图标，与类别管理页同一套推导）
+    categoryDot: { width: 22, height: 22, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
+    // 币种代码小芯片（不用国旗 emoji）
+    currencyChip: {
+      minWidth: 40,
+      height: 20,
+      paddingHorizontal: 6,
+      borderRadius: radius.xs,
+      backgroundColor: semantic.accentSoft,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    headerTitle: { fontSize: 18, fontWeight: '700', color: semantic.onAccent },
-    headerDeleteBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-    // 框到框之间的上下纯留白统一 4px（标签的上下外边距）；表单标签统一 12px/500
-    formLabel: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4, marginTop: 4 },
-    // 金额标签：紧跟计划名称，上边距收紧
-    formLabelTight: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4, marginTop: 4 },
-    formInput: {
-      borderWidth: 1,
-      borderColor: colors.dividerHair, // 边框色调统一：规划名称/类别/账户/开始日期四框同色
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      height: 40, // 与类别选择按钮同高，纠正两页/两框的大小偏差
-      fontSize: 15,
-      backgroundColor: colors.card,
-    },
-    formReadonlyField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    segRow: { flexDirection: 'row', gap: 8 },
-    segBtn: {
-      flex: 1,
-      paddingVertical: 10,
-      alignItems: 'center',
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      backgroundColor: colors.card,
-    },
-    segBtnActive: { borderColor: colors.link, backgroundColor: colors.link + '14' },
-    segText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-    segTextActive: { color: colors.link, fontWeight: '700' },
-    // 金额框（第3层）：浅底框格 + 居中大数字 + 右侧紫色笔（可编辑标识，与资产页同款）
-    amountBox: {
+
+    // 金额卡（第2层）：surface 底 + 大数字 + 右侧紫色笔（可编辑标识）
+    amountCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      backgroundColor: colors.card,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      paddingVertical: 14,
-      paddingHorizontal: 16,
+      columnGap: spacing.md,
+      backgroundColor: semantic.surface,
+      borderRadius: radius.lg,
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      marginBottom: spacing.lg,
     },
-    // 计划名称旁的类别选择框：与名称输入框 50%/50% 等分、同高；内部"小图标 + 文字标注"横排居中
-    categoryBtn: {
-      flex: 1,
-      height: 40,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      backgroundColor: colors.card,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingHorizontal: 8,
-    },
-    categoryBtnDot: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-    categoryBtnText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-    amountBoxLabel: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
-    amountBoxRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
-    // 金额行：货币代号与金额同字号；两端对齐——货币贴左、金额贴右
-    amountBoxCurrency: { fontSize: 34, fontWeight: '800', color: colors.textSecondary },
-    amountBoxValue: { fontWeight: '800', color: colors.textPrimary, fontVariant: ['tabular-nums'], textAlign: 'right', flexShrink: 1, marginLeft: 'auto' },
+    amountRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', columnGap: spacing.sm },
+    amountValue: { fontWeight: '800', fontVariant: ['tabular-nums'], textAlign: 'right', flexShrink: 1, marginLeft: 'auto' },
     // 金额文字容器（CursorAmountText 外壳）与光标样式
-    amountBoxValueWrap: { flexShrink: 1, marginLeft: 'auto' },
-    amountBoxCursor: { fontWeight: '300', color: colors.link },
+    amountValueWrap: { flexShrink: 1, marginLeft: 'auto' },
+    amountCursor: { fontWeight: '300' },
     // 账户底部上拉面板：与记一笔 accountPickerSheet 同参数（树内覆盖层、贴底 82% 高、圆角 26、描边）
     sheetCard: {
       position: 'absolute',
@@ -956,16 +994,6 @@ function makeStyles(colors: ThemeColors, semantic: SemanticColors, elevation: El
       justifyContent: 'center',
     },
     sheetGroupFlagText: { fontSize: 12, fontWeight: '700', color: colors.netWorthValue, letterSpacing: 0.5 },
-    currencyChip: {
-      minWidth: 40,
-      height: 20,
-      paddingHorizontal: 6,
-      borderRadius: 6,
-      backgroundColor: colors.link + '1F',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    currencyChipText: { fontSize: 11, fontWeight: '700', color: colors.link, letterSpacing: 0.3 },
     sheetGroupTotal: { fontSize: 20, fontWeight: '800', color: colors.netWorthValue, marginLeft: 6, fontVariant: ['tabular-nums'] },
     sheetGroupBody: {
       paddingHorizontal: 10,
@@ -1042,36 +1070,15 @@ function makeStyles(colors: ThemeColors, semantic: SemanticColors, elevation: El
     },
     sheetAddBtnText: { fontSize: 14, fontWeight: '700', color: colors.link, marginLeft: 7 },
     // 计算器键盘底座（与记一笔/添加账户页同规格）
-    keypadFooter: { paddingTop: 6, borderTopWidth: 1 },
-    autoDeductRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      borderRadius: 12,
-      padding: 12,
-      marginTop: 14,
-    },
-    autoKnob: { width: 22, height: 22, borderRadius: 11, backgroundColor: semantic.onAccent, margin: 2 },
-    autoKnobOn: { alignSelf: 'flex-end' },
-    switchTrack: { width: 46, height: 26, borderRadius: 13, backgroundColor: colors.dividerHair },
+    keypadFooter: { paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth },
+    // 底部主按钮容器：页底铺色 + 发丝线，按钮本身走 ui/Button（gradient 档）
     saveFooter: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      borderTopWidth: 1,
-      borderTopColor: colors.dividerHair,
-      backgroundColor: colors.card,
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: semantic.hairline,
+      backgroundColor: semantic.surface,
     },
-    saveBtn: {
-      height: 48,
-      borderRadius: 14,
-      // 与"添加规划"入口按钮同色(colors.fabBg)
-      backgroundColor: colors.fabBg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // 与"添加规划"入口按钮文字同色(colors.bg)
-    saveBtnText: { color: colors.bg, fontSize: 15, fontWeight: '700' },
+
   });
 }
