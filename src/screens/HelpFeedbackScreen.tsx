@@ -96,7 +96,18 @@ export default function HelpFeedbackScreen({ navigation }: any) {
               placeholderTextColor={semantic.textSecondary}
               multiline
               textAlignVertical="top"
-              style={[styles.input, { color: semantic.textPrimary, backgroundColor: semantic.accentSoft }]}
+              // 原来是「玻璃卡 + 半透明 accentSoft」两层叠加，文字被洗淡（用户说的「蒙」）；
+              // 同时显式关掉浏览器默认聚焦描边（那圈橙色 outline 不属于设计）。
+              style={[
+                styles.input,
+                {
+                  color: semantic.textPrimary,
+                  backgroundColor: semantic.surface,
+                  borderWidth: 1,
+                  borderColor: semantic.hairline,
+                  outlineWidth: 0,
+                },
+              ]}
             />
             {/* 主按钮 = accent 渐变胶囊（§3：渐变实心按钮保持白字）；17pt 粗体走大字档 3:1 */}
             <PressableScale
