@@ -719,9 +719,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 网格区是可滚动的 flex:1 区域：实测到多少高度就铺多少格（至少 2 行 —— 计划 8.2 第 7 条
   // 「金额 + 至少 2 行类别 + 键盘」一屏可见）；历史用过的类别超出可见容量时靠网格滚动查看，不再裁剪
   const [gridH, setGridH] = useState<number | null>(null);
-  /** 一格高度 = 36 方块（稿） + 4 标签间距 + 16 单行标签预留 + 4 顶距 + 12 行距 = 72
-   *  （与 catCell / catCellLabel / catGridContent 样式同步；两行标签的格子自然变高，网格可滚动） */
-  const CAT_CELL_ROW_HEIGHT = 72;
+  /** 类别格图标直径：与设置页 / 资产页同一套立体球的默认尺寸（42），4 列在 320 / 390 下都留得下 */
+  const CAT_ICON_SIZE = 42;
+  /** 一格行距 = 8 顶距 + 42 球 + 4 标签间距 + 16 单行标签预留 + 4 行距 = 74
+   *  （顶距 8 = 选中两层外圈向外溢出的 8，外圈不占布局但必须有地方露出来；
+   *   与 catCell / catCellLabel / catGridContent 样式同步；两行标签的格子自然变高，网格可滚动） */
+  const CAT_CELL_ROW_HEIGHT = 74;
   const gridVisibleRows = gridH == null ? null : Math.max(2, Math.floor(gridH / CAT_CELL_ROW_HEIGHT));
   const gridMaxCount = gridVisibleRows == null ? null : gridVisibleRows * gridColumns - 1;
   // ---------- 网格顺序冻结（T15 修正）----------
@@ -2347,7 +2350,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           )}
         </View>
 
-        {/* 类别（T15 / V2）：列数取版型；格 = 48 圆图标 + 12pt 标签；网格区可滚动，「全部」永远殿后。
+        {/* 类别（T15 / V2）：列数取版型；格 = 42 立体球图标 + 12pt 标签；网格区可滚动，「全部」永远殿后。
             定稿里没有「类别：xxx」提示行（选中态由外圈表达）→ 整行删掉，高度让给网格：
             390×844 露出 3 行（15 格，与稿一致），360×640 至少 2 行 */}
         <ScrollView
@@ -2375,20 +2378,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   accessibilityLabel={getCategoryLabel(c, t)}
                   accessibilityState={{ selected: active }}
                 >
-                  {/* 设计稿 03 屏：36 圆角方块 + 线条图标（IconCircle shape="tile"）；
-                      选中 = accentSoft 实底 + accent 1px 描边 + 标签提成 accentText/600
-                      —— 不再用 V2 的 48 圆 + 58 外圈 */}
+                  {/* 用户定版（取代设计稿 03 屏的 36 圆角方块）：与设置页 / 资产页 / 类别管理页
+                      同一套立体光泽球 = IconCircle 默认 shape="circle"；
+                      选中 = 球面不变色，只叠两层外圈（selected，颜色走 categoryRing 令牌）
+                      + 标签提成 accentText/600 */}
                   <IconCircle
-                    size={36}
-                    shape="tile"
+                    size={CAT_ICON_SIZE}
                     color={c.color}
                     icon={c.icon as IconName}
-                    style={{
-                      borderRadius: radius.sm,
-                      ...(active
-                        ? { backgroundColor: semantic.accentSoft, borderWidth: 1, borderColor: semantic.accent }
-                        : null),
-                    }}
+                    selected={active}
                   />
                   <AppText
                     variant="caption2"
@@ -2406,7 +2404,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           })}
 
           {/* 「全部」殿后格：与类别格同尺寸，打开完整列表抽屉（组内新增 / 排序 / 删除都在「管理类别」页）；
-              稿里是中性圆（夜 surfaceSunken / 日白底轻投影）+ 九宫格图标 */}
+              中性立体球（IconCircle 不传 color = ICON_BALL_NEUTRAL 灰球 + 白九宫格），不抢类别色 */}
           <View style={[styles.catCellWrap, { width: `${100 / gridColumns}%` as unknown as `${number}%` }]}>
             <PressableScale
               style={[styles.catCell, isShort && styles.catCellShort]}
@@ -2415,7 +2413,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               accessibilityRole="button"
               accessibilityLabel={t('common.all')}
             >
-              <IconCircle size={36} shape="tile" icon="grid-outline" style={{ borderRadius: radius.sm }} />
+              <IconCircle size={CAT_ICON_SIZE} icon="grid-outline" />
               <AppText variant="caption2" align="center" color={semantic.textSecondary} style={styles.catCellLabel}>
                 {t('common.all')}
               </AppText>
@@ -2754,7 +2752,7 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   // 矮屏：与金额区的间距 4→0、Chip 间距 8→6（三个 Chip 保持一行）
   heroChipsRowShort: { marginTop: 0, columnGap: 6 },
 
-  // ---------- T15/V2：类别网格（列数按版型；格 = 48 圆图标 + 12pt 标签，标签预留 2 行高度） ----------
+  // ---------- T15/V2：类别网格（列数按版型；格 = 42 立体球 + 12pt 标签，标签预留 2 行高度） ----------
   // 网格区可滚动：吃掉剩余高度（flex:1），历史类别超出可见容量时滚下去看，「全部」永远殿后
   catGridScroll: { flex: 1 },
   catGridContent: {
@@ -2766,23 +2764,13 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   },
   // 矮屏：底部留白 4→0（「至少 2 行完整可见」的最后 4px）
   catGridContentShort: { paddingBottom: 0 },
-  // 一格：48 圆 + 标签间距 4 + 单行标签 16 + 顶距 4 = 72（+4 行距 = 76，与 CAT_CELL_ROW_HEIGHT 同步）
+  // 一格：顶距 8 + 42 球 + 标签间距 4 + 单行标签 16 = 70（+4 行距 = 74，与 CAT_CELL_ROW_HEIGHT 同步）
+  // 顶距 8 = 选中态两层外圈（categoryRing：3 打底 + 5 外环）向外溢出的量，外圈不占布局但要有地方露出来
   catCellWrap: {},
-  catCell: { alignItems: 'center', paddingTop: spacing.xs },
-  // 矮屏：去掉格顶留白（让「至少 2 行」稳落在一屏内）
-  catCellShort: { paddingTop: 0 },
-  // （V2：图标底 / 选中圆与「全部」中性圆交给共享 IconCircle + 本页 catIconBox/catRing）
-  // 选中外圈：58 圆 + 2 描边，绝对定位在 48 盒子上（不占布局），与 48 圆之间留 3 的页面底间隙
-  catIconBox: { width: 48, height: 48 },
-  catRing: {
-    position: 'absolute',
-    top: -5,
-    left: -5,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-  },
+  catCell: { alignItems: 'center', paddingTop: spacing.sm },
+  // 矮屏：顶距收到 4（让「至少 2 行」稳落在一屏内；外圈正好吃掉行距，不与上一行标签重叠）
+  catCellShort: { paddingTop: spacing.xs },
+  // （图标与选中外圈全部交给共享 IconCircle：默认立体球 + selected 两层外圈，本页不再自己画框）
   // 标签：12pt 居中、最多 2 行；minHeight 16（单行）+ alignSelf stretch 让整格宽度对齐
   // （stretch 而不是 width:'100%'：百分比在 RN Web 的嵌套 flex 里解析不到父级实测宽）
   catCellLabel: { marginTop: spacing.xs, minHeight: 16, alignSelf: 'stretch' },

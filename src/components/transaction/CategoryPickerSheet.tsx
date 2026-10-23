@@ -18,8 +18,8 @@ import type { Category } from '../../types';
 import BottomSheet from '../ui/BottomSheet';
 import Button from '../ui/Button';
 import ListRow from '../ui/ListRow';
+import IconCircle from '../ui/IconCircle';
 import ListSection from '../ui/ListSection';
-import { withAlpha } from '../ui/color';
 import type { Layout, Radius, SemanticColors, Spacing } from '../../theme/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -41,9 +41,6 @@ interface Props {
   onManage: () => void;
   onClose: () => void;
 }
-
-/** 图标方块边长（UI_RULES 第 7 节：全 App 同一种 40 方块）—— 纯图形常量 */
-const ICON_SQUARE = 40;
 
 export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onManage, onClose }: Props) {
   const { semantic, spacing, radius, layout } = useTheme();
@@ -69,11 +66,9 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
             {items.map((c) => (
               <ListRow
                 key={c.id}
-                leading={
-                  <View style={[styles.iconSquare, { backgroundColor: withAlpha(c.color, 0.12) }]}>
-                    <Ionicons name={(c.icon as IconName) ?? 'pricetag-outline'} size={20} color={c.color} />
-                  </View>
-                }
+                // 与记一笔类别格 / 设置页 / 类别管理页同一套立体球（IconCircle 默认形态）。
+                // 原来是 20dp 扁平图标压在 12% 淡色方底上 —— 上一代写法，与球体不是一套语言。
+                leading={<IconCircle size={36} color={c.color} icon={(c.icon as IconName) ?? 'pricetag-outline'} />}
                 title={getCategoryLabel(c, t)}
                 onPress={() => onPickCategory(c.id)}
                 trailing={
@@ -106,13 +101,6 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, radius: Radius, 
     list: { flexShrink: 1 },
     listContent: { paddingHorizontal: layout.page, paddingTop: spacing.sm, paddingBottom: spacing.xs },
     group: { marginBottom: spacing.md },
-    iconSquare: {
-      width: ICON_SQUARE,
-      height: ICON_SQUARE,
-      borderRadius: radius.md,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     footer: { paddingHorizontal: layout.page, paddingTop: spacing.sm },
   });
 }

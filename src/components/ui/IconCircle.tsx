@@ -197,10 +197,11 @@ export function IconCircle({
       ? withAlpha(color, categoryRing.darkAlpha)
       : categoryRing.light
     : semantic.textTertiary;
+  // 选中态（用户定版，取代原先的「两层外圈」）：硬描边套在立体球上像「戴了个圈」，
+  // 而且环色与球色天然冲突（紫球配紫环勉强，绿球配紫环就脏）。改成「球体浮起」：
+  // 放大 8%（transform 不参与布局，不挤邻格）+ 同色柔光晕（取球体自身的 ringColor）+ 更实的地面投影。
   const selectedShadow = selected
-    ? `0px 0px 0px ${categoryRing.gapWidth}px ${semantic.bg}, 0px 0px 0px ${
-        categoryRing.gapWidth + categoryRing.ringWidth
-      }px ${ringColor}, ${outerShadow}`
+    ? `0px 12px 22px -6px ${withAlpha(ringColor, 0.6)}, 0px 4px 8px -2px rgba(0,0,0,0.22)`
     : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
@@ -211,7 +212,13 @@ export function IconCircle({
     <View
       style={[
         styles.root,
-        { width: size, height: size, borderRadius: radius, boxShadow: selectedShadow },
+        {
+          width: size,
+          height: size,
+          borderRadius: radius,
+          boxShadow: selectedShadow,
+          transform: selected ? [{ scale: 1.08 }] : undefined,
+        },
         style,
       ]}
     >
