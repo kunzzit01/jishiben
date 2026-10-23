@@ -1,0 +1,108 @@
+# 单机 Docker Compose 部署（api + mysql + nginx）
+# 用法（在仓库根目录）：
+#   cp deploy/.env.example deploy/.env   # 填写真实口令，deploy/.env 不提交
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# 仓库布局：前端在根目录（Expo app），后端在 server/，编排在本目录 deploy/。
+# 端口暴露：只有 web（前端 + nginx）发布 HTTP_PORT（默认 80）；mysql 与 api 仅在内部网络可达。
+name: jishiben
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: jishiben-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --max-connections=${MYSQL_MAX_CONNECTIONS:-200}
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME is required}
+      MYSQL_USER: ${DB_USER:?DB_USER is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/conf.d:/etc/mysql/conf.d:ro
+    networks:
+      - jishiben-net
+    # 不发布端口：宿主机无法直连数据库
+    healthcheck:
+      # 用真实业务账号 + 真实库做探活：库没建好或账号未生效都算不健康
+      test:
+        - CMD-SHELL
+        - mysql --protocol=TCP -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -D "$$MYSQL_DATABASE" -e 'SELECT 1' >/dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    image: jishiben/api:0.1.0
+    container_name: jishiben-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # 全部走环境变量；代码里不落任何密钥
+      DB_URL: "jdbc:mysql://mysql:3306/${DB_NAME}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&rewriteBatchedStatements=true"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-10}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-jishiben-api}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-PT24H}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      TZ: UTC
+    networks:
+      - jishiben-net
+    # 不发布端口：外部只能经 nginx 进入
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 前端（Expo Web 静态导出）+ nginx：单容器同时提供页面与 /api 反代
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    image: jishiben/web:0.1.0
+    container_name: jishiben-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    networks:
+      - jishiben-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mysql-data:
+    name: jishiben-mysql-data
+
+networks:
+  jishiben-net:
+    name: jishiben-net
+    driver: bridge

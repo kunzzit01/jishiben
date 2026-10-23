@@ -1,0 +1,86 @@
+{
+  "updated": "2026-10-23 01:39:47",
+  "note": "数据源为 docs/PROGRESS.json，5 秒自动刷新。App 在 http://localhost:8081（账号 mingsoon249@gmail.com / 12345678），数据库浏览器在 http://127.0.0.1:8090。",
+  "items": [
+    {
+      "title": "git 语义化提交",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "9 条 commit，工作区干净；提交身份沿用仓库历史的 kkyylim663-ux",
+      "evidence": "140afc35 feat(assets) 卡片改币种切换器\ndad036fd fix(sync) dateFormat 直传\n00affd3e chore(i18n,screens)\ne1d72e95 fix(ledger,nav)\n7cb70027 feat(category)\n6d16b12a feat(assets)\n7434eeb7 feat(home)\n92544b7a feat(api)\n3ad64c38 feat(design-system)"
+    },
+    {
+      "title": "非受控文件备份（server/design/deploy/docs/scripts）",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "根目录无 git；打时间戳 tar 包，排除 server/target 与 node_modules",
+      "evidence": ".tools/backups/deliverables-20261023-090915.tgz（216 条目，含 22 屏 .op）"
+    },
+    {
+      "title": "清库前全库备份",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "清空不可逆，先 mysqldump 出全库（含 flyway 历史），gunzip 回环校验一致",
+      "evidence": ".tools/backups/pre-wipe-20261023-091517.sql.gz（14.7 KB，含原 27 账号 / 39 流水）"
+    },
+    {
+      "title": "清库 + 灌演示数据 + 建号",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "全部走 API，业务规则真跑一遍；语言字段后端不支持，只能 App 内选",
+      "evidence": "users 1 · ledgers 3 · assets 10 · categories 130 · transactions 1629 · budgets 15 · payment_plans 5\n登录 200 · 报表 6 币种分块 · 超支项 125% / 118%"
+    },
+    {
+      "title": "api-stop.sh 加 taskkill 兜底",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "kill 无效 → taskkill 强杀 → 端口兜底；三项校验全过才删 pidfile；非 java 占端口时拒绝强杀",
+      "evidence": "实测 kill 无效 → SUCCESS terminated；再 start 后 health=200"
+    },
+    {
+      "title": "清理 syncService 死绕行",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "后端早已接受 YYYY-MM-DD，旧代码仍把它置空",
+      "evidence": "PATCH /api/profile {dateFormat:'YYYY-MM-DD'} → 200 且回读一致"
+    },
+    {
+      "title": "可复跑清库脚本",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "默认 dry-run，--apply 才真删；含「会波及非测试邮箱就停机」安全闸门",
+      "evidence": "scripts/purge-test-data.mjs；当前库只剩 1 个真实账号，脚本判定 0 目标"
+    },
+    {
+      "title": "资产页顶部卡片重构",
+      "status": "done",
+      "updated": "01:39:47",
+      "detail": "改为「币种 · 资产」+ 可点币种胶囊；删掉本月净变动；列表对应分组高亮",
+      "evidence": "截图 .tools/shots/asset-card-390-light-after-EUR.png"
+    },
+    {
+      "title": "币种选择持久化（可选）",
+      "status": "todo",
+      "updated": "01:39:47",
+      "detail": "当前切了币种刷新回自动档；要留住需新增 AsyncStorage key"
+    },
+    {
+      "title": "剩余 6 屏照稿重排",
+      "status": "blocked",
+      "updated": "01:39:47",
+      "detail": "设置 / 日历 / 分类管理 / 账户详情 / 收据扫描 / 概览 —— 等你确认是否开这轮"
+    },
+    {
+      "title": "VPS 实跑 docker compose",
+      "status": "blocked",
+      "updated": "01:39:47",
+      "detail": "唯一能把『只能静态审查』变成『已证明』的动作，需要你的服务器"
+    },
+    {
+      "title": "真机联调",
+      "status": "blocked",
+      "updated": "01:39:47",
+      "detail": "相机扫码 / 生物识别 / 推送 / 阴影竖带最终确认，Web 与无头都验不了"
+    }
+  ]
+}

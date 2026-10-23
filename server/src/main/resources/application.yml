@@ -1,0 +1,103 @@
+# jishiben API — Spring Boot 3 / MySQL 8
+# Every datasource and secret value comes from the environment; the defaults below are
+# local-development conveniences only and never contain a real credential.
+spring:
+  application:
+    name: jishiben-api
+
+  datasource:
+    url: "${DB_URL:jdbc:mysql://127.0.0.1:3306/jishiben?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&rewriteBatchedStatements=true}"
+    username: "${DB_USER:jishiben}"
+    password: "${DB_PASSWORD:}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: jishiben-pool
+      maximum-pool-size: "${DB_POOL_MAX_SIZE:10}"
+      minimum-idle: "${DB_POOL_MIN_IDLE:2}"
+      connection-timeout: 10000
+      validation-timeout: 3000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Flyway. validate keeps entities and migrations from drifting apart.
+      ddl-auto: "${JPA_DDL_AUTO:validate}"
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+    show-sql: "${JPA_SHOW_SQL:false}"
+
+  flyway:
+    enabled: "${FLYWAY_ENABLED:true}"
+    locations: classpath:db/migration
+    encoding: UTF-8
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    out-of-order: false
+    clean-disabled: true
+
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: "${SERVER_PORT:8080}"
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: "${HEALTH_SHOW_DETAILS:never}"
+      probes:
+        enabled: true
+
+app:
+  jwt:
+    # Must be supplied at runtime (>= 32 bytes for HS256). Empty default fails closed.
+    secret: "${JWT_SECRET:}"
+    issuer: "${JWT_ISSUER:jishiben-api}"
+    access-token-ttl: "${JWT_ACCESS_TTL:PT24H}"
+    refresh-token-ttl: "${JWT_REFRESH_TTL:P30D}"
+  cors:
+    allowed-origins: "${CORS_ALLOWED_ORIGINS:*}"
+  # AI receipt scanning (server-side proxy for POST /api/ai/receipt-scan).
+  # The key is NEVER committed: it arrives from the environment, and an empty value is a supported
+  # state — the endpoint then answers 503 AI_NOT_CONFIGURED and the app falls back to manual entry.
+  ai:
+    openrouter:
+      api-key: "${OPENROUTER_API_KEY:}"
+      model: "${OPENROUTER_MODEL:anthropic/claude-sonnet-4.5}"
+      base-url: "${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}"
+      connect-timeout-ms: "${OPENROUTER_CONNECT_TIMEOUT_MS:5000}"
+    receipt-scan:
+      # Decoded image ceiling: base64 on the wire is ~4/3 of this (8 MB decoded).
+      max-image-bytes: "${AI_RECEIPT_MAX_IMAGE_BYTES:8388608}"
+      # Upstream read timeout; a slower answer becomes 504 AI_UPSTREAM_TIMEOUT.
+      timeout-ms: "${AI_RECEIPT_TIMEOUT_MS:30000}"
+    voice-parse:
+      # Decoded audio ceiling: base64 on the wire is ~4/3 of this (10 MB decoded). Over it is 413.
+      max-audio-bytes: "${AI_VOICE_MAX_AUDIO_BYTES:10485760}"
+      # Speech-to-text model slug (transcription endpoint). The accounting parse reuses
+      # openrouter.model above; both steps share the read timeout configured for the AI client.
+      stt-model: "${AI_VOICE_STT_MODEL:qwen/qwen3-asr-flash-2026-02-10}"
+
+logging:
+  level:
+    root: INFO
+    com.jishiben.api: "${LOG_LEVEL_APP:INFO}"
+    org.flywaydb: INFO

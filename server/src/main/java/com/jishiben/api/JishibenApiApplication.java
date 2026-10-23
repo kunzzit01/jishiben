@@ -1,0 +1,12 @@
+package com.jishiben.api;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class JishibenApiApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(JishibenApiApplication.class, args);
+    }
+}

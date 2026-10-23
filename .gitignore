@@ -52,3 +52,9 @@ jizhang-app-backup-pre-*/
 # ─── 临时工作目录（本地产物，不入库） ───
 _scratch/
 agent/
+
+# 后端与部署（2026-10 加入 monorepo 布局）
+server/target/
+deploy/.env
+deploy/backups/
+.tools/

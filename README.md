@@ -1,92 +1,90 @@
-# 记账APP - 项目说明
+# jishiben 记账本
 
-这是一个用 Expo + React Native + TypeScript 做的记账APP初版，包含四个页面：
-- **首页**：按日期分组显示记账记录，显示本月支出总额
-- **记一笔**：添加支出/收入记录，选分类、日期、备注
-- **统计**：本月分类占比环形图 + 近6个月支出趋势图
-- **我的**：预算设置、分类管理（新增/删除自定义分类）
+一个「前端（Expo / React Native Web）+ 后端（Spring Boot）+ MySQL」的自托管记账应用，
+目标形态：**在 VPS 上一条 docker compose 命令跑起来**。
 
-数据目前保存在**手机本地**（用 AsyncStorage），换设备不会同步，银行自动接入和云端同步还没做，属于后续功能。
+---
 
-## 新功能：5个底部标签 + 资产管理 + 转账/兑换
-
-**底部导航改成了5个格子：资产 / 统计 / 首页 / AI专区 / 设置项**
-
-- **首页**变成了仪表盘样式：顶部收入/支出/结余卡片（带环比上月百分比变化）、收入/支出/转账/兑换四个快捷入口、今日账单预览、本月预算进度、最近使用分类。点"查看全部"能看完整的按月账单列表（原来首页那个月份切换列表，现在挪到这里了，路径是 首页→查看全部）
-- **资产**：新增资产账户（现金/银行卡/信用卡/电子钱包/投资/其他），每个账户可以设置自己的货币和起始余额，净资产按币种分开显示（不同货币不会强行加总，避免出现"我们帮你编了个汇率"这种不严谨的情况）
-- **转账**：在"收入/支出"旁边加了"转账"类型，选转出账户→转入账户→填金额。**如果两个账户货币不一样，会让你手动填当时的汇率**，系统按这个算出对方实际到账多少。**手续费是选填项，一旦填了会自动生成一笔"手续费"支出记录**，不会漏记
-- **AI专区**：原来"记一笔"这个Tab位置现在用来放AI相关功能，目前有"扫描小票"入口（复用之前做的AI识别），其他AI功能（消费分析、语音记账等）先做了占位卡片，标注"敬请期待"
-- **设置项**：就是原来的"我的"，改了个名字，功能不变
-
-**"转账"和"兑换"目前指向同一套逻辑**——因为跨币种转账本身就需要填汇率，这就是"兑换"要做的事，没必要重复做两套几乎一样的流程。
-
-## 新功能：设置中心 + 多账本 + 货币切换 + 统计/首页升级
-
-**"我的" → "设置"里现在有四个入口：**
-- **类别分类**：原来"我的分类"那部分功能原样搬过来了，新增/删除分类逻辑完全没变
-- **选择货币**：内置十几种常见货币（人民币、美元、欧元、马来西亚令吉等），选完后全APP的金额符号都会跟着换
-- **自定义周期**：可以选按日/周/月/年查看账单，或者手动填一个起止日期的自定义范围（目前这个偏好会保存下来，后续版本会让报表页跟着这个设置联动展示）
-- **开设账本**：支持多账本模式，有"生意账本/报销账本/公司账本/团队账本"四个快捷模板一键创建，也可以自定义账本名称和图标。切换账本后，首页、记账、统计看到的都是当前选中账本的数据，互相隔离
-
-**统计页顶部新增支出/收入切换标签**：以前只能看支出的分类占比图，现在点一下"收入"标签，环形图和趋势图会切换成收入维度的数据。
-
-**首页新增月份切换器**：顶部有 ‹ › 箭头可以翻看以往任意月份的账单，同时收入和支出金额都会显示在顶部（以前只显示支出）。
-
-## 新功能：AI扫描小票自动记账
-
-在"记一笔"页面右上角有个"📷 扫一扫"按钮，点击后可以拍照或从相册选照片，AI会自动识别小票上的金额、商家、日期，并猜一个分类，帮你把表单填好。
-
-**使用前必须先配置API Key**，否则点扫描会提示报错：
-1. 打开 `src/config/aiConfig.ts` 这个文件
-2. 把 `OPENROUTER_API_KEY` 后面的占位文字换成你自己的OpenRouter API Key（去 https://openrouter.ai/keys 复制）
-3. 确认 `AI_MODEL` 这个模型名称在OpenRouter上还有效（去 https://openrouter.ai/models 搜"claude"核对当前的模型名称写法，如果和文件里写的不一样，改成对的）
-
-**⚠️ 安全提醒**：这种把API Key直接写在APP代码里的方式，只适合你自己测试或者很小范围地给熟人用。因为APP装到别人手机上后，密钥理论上是能被反编译提取出来的，如果之后想大范围发布给不特定用户使用，建议改成"APP调用你自己的服务器，服务器再去调用AI"的架构，避免密钥暴露和被盗用刷额度，这部分可以随时找我做升级。
-
-## 如何在你自己电脑上运行
-
-### 1. 解压这个项目文件夹到你想放的位置
-
-### 2. 打开终端，进入项目文件夹，安装依赖
-```
-cd jizhang-app
-npm install
-```
-这一步会根据 package.json 自动下载所有需要的包，可能要几分钟。
-
-### 3. 启动开发服务器
-```
-npx expo start
-```
-
-### 4. 手机上预览
-- 手机装好 Expo Go App（iOS/Android应用商店都能搜到）
-- 终端会显示一个二维码，iPhone用相机扫、Android用Expo Go里的扫码功能扫
-- 就能在手机上看到APP实际运行效果了
-
-## 如果遇到报错
-
-直接把终端里完整的报错信息复制发给我（Claude），我来帮你分析修复，改完后你重新运行 `npx expo start` 看效果就行，不需要重新走安装流程。
-
-## 目录结构说明
+## 目录结构
 
 ```
-jizhang-app/
-├── App.tsx                      # 入口文件，配置底部四个Tab
-├── src/
-│   ├── context/AppContext.tsx   # 全局状态管理 + 本地数据存储
-│   ├── screens/                 # 四个页面
-│   │   ├── HomeScreen.tsx
-│   │   ├── AddTransactionScreen.tsx
-│   │   ├── ReportScreen.tsx
-│   │   └── ProfileScreen.tsx
-│   ├── components/DonutChart.tsx # 报表页用的环形图组件
-│   ├── types/index.ts           # 数据类型定义
-│   └── utils/defaultCategories.ts # 预置分类数据
+jishiben/
+├── _repo/jishiben/        前端源码（Expo SDK 57，独立 git 仓库）
+│   ├── src/               屏幕 / 组件 / 服务 / 主题
+│   ├── App.tsx            导航与 Provider 装配
+│   └── .dockerignore      web 镜像构建时排除 node_modules 等
+├── server/                后端源码（Spring Boot 3.3 / Java 21）
+│   ├── src/main/java/com/jishiben/api/    auth / ledger / asset / category / transaction /
+│   │                                      budget / paymentplan / profile / reports / rates /
+│   │                                      push / premium / ai / health
+│   ├── src/main/resources/db/migration/   Flyway V1–V9（空库自动建表）
+│   └── Dockerfile                         多阶段构建（maven → jre-alpine）
+├── deploy/                部署编排（VPS 用）
+│   ├── docker-compose.yml api + mysql + web 三服务
+│   ├── web.Dockerfile     前端静态导出 + nginx 反代（同源 /api，无 CORS）
+│   ├── nginx/web.conf     静态站点 + /api → api:8080
+│   ├── mysql/conf.d/      字符集配置
+│   ├── backup.sh / restore.sh
+│   └── .env.example       全部必填变量（DB 口令 / JWT_SECRET / 端口 / AI 可选）
+├── design/                设计体系（tokens.json / COMPONENTS.md）与 .op 设计稿
+├── docs/                  API.md（54 端点契约）/ DB-SCHEMA.md / DEPLOY.md / FEATURES.md
+└── scripts/               本地开发工具（启停服务 / 灌数据 / 冒烟 / 数据库浏览）
 ```
 
-## 后续可以继续加的功能
+> `.tools/` 是本地开发用的 MySQL 二进制与数据目录，**不要上传到 VPS**。
 
-- 编辑已有记账记录（目前只能新增和删除）
-- 接入 Firebase/Supabase 做账号登录和云端同步
-- 银行自动同步（对接 Plaid 等聚合服务商）
+---
+
+## 本地开发
+
+```bash
+bash scripts/mysql-start.sh     # 本地 MySQL @127.0.0.1:3307
+bash scripts/api-start.sh       # 后端 @8080
+cd _repo/jishiben && npx expo start --web --port 8082
+```
+
+登录演示账号：`mingsoon249@gmail.com` / `12345678`（数据可用 `scripts/seed-demo.mjs` 重灌）
+
+---
+
+## 部署到 VPS（一条命令）
+
+```bash
+# 1) 把代码送上去（或在服务器上 git clone 前端仓库 + 拷 server/ deploy/）
+bash scripts/pack-for-vps.sh          # 生成 dist/jishiben-vps-<时间>.tar.gz
+scp dist/jishiben-vps-*.tar.gz user@vps:/opt/ && ssh user@vps
+
+# 2) 在服务器上
+tar -xzf jishiben-vps-*.tar.gz && cd jishiben
+cp deploy/.env.example deploy/.env
+vi deploy/.env                        # 改 DB_PASSWORD / MYSQL_ROOT_PASSWORD / JWT_SECRET
+docker compose -f deploy/docker-compose.yml up -d --build
+
+# 3) 验收
+curl -s localhost/api/health          # {"status":"ok",...}
+```
+
+**Flyway 会在 api 启动时自动把 schema 建到最新版**，不需要手工导入 SQL。
+
+详见 [docs/DEPLOY.md](docs/DEPLOY.md)（含本机 Docker 实跑记录与注意事项）。
+
+---
+
+## 三个服务
+
+| 服务 | 镜像 | 端口 | 说明 |
+|---|---|---|---|
+| `web` | jishiben/web | 对外 `HTTP_PORT`(80) | 前端静态站点 + `/api` 反代（同源，无 CORS） |
+| `api` | jishiben/api | 仅内网 8080 | Spring Boot，JWT 鉴权 |
+| `mysql` | mysql:8.0 | 仅内网 3306 | 数据卷 `jishiben-mysql-data` |
+
+只有 `web` 对外发布端口；数据库与 API 在宿主机上不可直连。
+
+---
+
+## 安全基线
+
+- 前端**不含任何第三方密钥**（`grep -r "sk-or-v1\|openrouter.ai" _repo/jishiben/src` = 0）；
+  小票识别与语音记账都经 `/api/ai/*` 中转，密钥只在服务端环境变量里。
+- 访问令牌只存内存 + 设备本地存储，不落日志、不进 URL。
+- `JWT_SECRET` 与数据库口令必须换成随机长串；`deploy/.env` 不提交。

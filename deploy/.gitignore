@@ -1,0 +1,5 @@
+# 真实口令只存在于部署机本地
+.env
+backups/*.sql.gz
+backups/*.sha256
+backups/*.counts
