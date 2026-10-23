@@ -179,13 +179,16 @@ export function IconCircle({
       popP.value = 1.06;
       return;
     }
-    // 只保留「选中瞬间弹一下」这一处动效：持续的呼吸光晕会让整屏看起来在发晕（用户反馈）。
+    // 弹一下：1.0 → 1.11 → 1.05（终态与下面的 translateY(-4) 一起构成「抬起」）
     popP.value = withSequence(
-      withTiming(1.12, { duration: 130, easing: Easing.out(Easing.quad) }),
-      withSpring(1.06, { damping: 12, stiffness: 180 })
+      withTiming(1.11, { duration: 130, easing: Easing.out(Easing.quad) }),
+      withSpring(1.05, { damping: 12, stiffness: 180 })
     );
   }, [selected, reduceMotion, popP]);
-  const animatedRoot = useAnimatedStyle(() => ({ transform: [{ scale: popP.value }] }));
+  // 选中 = 向上抬起 4px；未选中 = 原位。⚠ translateY 不参与布局，不会把网格顶开。
+  const animatedRoot = useAnimatedStyle(() => ({
+    transform: [{ translateY: selected ? -4 : 0 }, { scale: popP.value }],
+  }));
   const radius = size / 2;
   // 渐变定义 id 带基色指纹：同色实例共用一份定义（web 的 url(#id) 按文档解析），异色不会串
   const ballId = `ic3d${base.replace(/[^0-9a-zA-Z]/g, '')}`;
@@ -237,7 +240,12 @@ export function IconCircle({
   // 所以根节点只留地面投影，白环改由顶层那个绝对定位的描边层画（见 JSX 末尾）。
   // 用户定版：不要「晕」。彩色外发光在浅色底上会糊成一团粉色雾（看起来像失焦），
   // 所以选中态只保留中性地面投影；识别交给贴边白环 + 一点弹入动效。
-  const selectedShadow = selected ? '0px 6px 10px -4px rgba(0,0,0,0.22)' : outerShadow;
+  // 选中态（用户最终定版 E）：**不上环、不发光**，只让球「浮起来」——
+  // 更深的双层地面投影 + 位置上移 4px + 轻微放大。理由：球体本身是彩色立体材质，
+  // 任何往球上加东西（环/光/角标）都会与球色打架；而「抬升」是立体物件最自然的选中语义。
+  const selectedShadow = selected
+    ? '0px 14px 22px -8px rgba(0,0,0,0.38), 0px 5px 9px -3px rgba(0,0,0,0.22)'
+    : outerShadow;
 
   // 内阴影（§5）：顶部 inset 白 .55 / 底部 inset 暗色 —— 单独一层画在球面之上（CSS 的 inset
   // 画在背景与内容之间，挂在根节点会被球面 SVG 盖住）
@@ -300,20 +308,6 @@ export function IconCircle({
           size={iconSize ?? Math.round(size * 0.48)}
           color={semantic.onAccent}
           style={styles.icon}
-        />
-      ) : null}
-      {/* 选中白环：画在球面与图标之上（紧贴球边、无间隙），中性色所以任何球色下都清晰 */}
-      {selected ? (
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              borderRadius: radius,
-              borderWidth: 2,
-              borderColor: 'rgba(255,255,255,0.95)',
-            },
-          ]}
         />
       ) : null}
       {children}
