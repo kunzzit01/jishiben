@@ -14,6 +14,9 @@ const DEFAULT_API_BASE_URL = 'http://localhost:8080';
 function readBaseUrl(): string {
   const raw = process.env.EXPO_PUBLIC_API_BASE_URL;
   const value = typeof raw === 'string' ? raw.trim() : '';
+  // 同源部署：容器里前端静态文件与 /api 由同一个 nginx 提供，base 取空串即可
+  // （请求会变成 /api/xxx，由 nginx 反代到 api:8080；既没有 CORS，也不依赖具体域名）
+  if (value === '/' || value === 'same-origin') return '';
   const base = value || DEFAULT_API_BASE_URL;
   // 去掉结尾斜杠，拼路径时统一由调用方加 /api/...
   return base.replace(/\/+$/, '');
