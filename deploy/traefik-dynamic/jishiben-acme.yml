@@ -1,0 +1,21 @@
+# Traefik 动态配置：只把「裸 IP + ACME 挑战路径」转给我们自己的容器。
+#
+# 背景：Traefik 3.7.6 不支持 IP 证书（issue #11894 未合并；日志会报
+#   ERR Cannot retrieve the ACME challenge for <IP>），所以证书必须由 certbot 用 HTTP-01 申请。
+# 本路由让 http://187.127.125.136/.well-known/acme-challenge/<token> 落到 jishiben-web，
+# 由它的 nginx 从 deploy/acme-webroot 提供文件。
+#
+# 影响面：rule 限定 Host=裸IP 且路径为挑战路径，不影响 kunzzgroup.com 等任何现有路由。
+# 回滚：删除本文件（Traefik file provider 会自动卸载该路由）。
+http:
+  routers:
+    jishiben-acme:
+      rule: "Host(`187.127.125.136`) && PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints: [web]
+      priority: 1000000
+      service: jishiben-acme
+  services:
+    jishiben-acme:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8088"

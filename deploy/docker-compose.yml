@@ -97,6 +97,8 @@ services:
       - ./downloads:/usr/share/nginx/html/downloads:ro
       # Play 上架要求的隐私政策页：http://<地址>:<HTTP_PORT>/privacy
       - ./public/privacy.html:/usr/share/nginx/html/privacy.html:ro
+      # ACME HTTP-01 挑战根目录（Let's Encrypt IP 证书用；由 Traefik 转发到此路径）
+      - ./acme-webroot:/usr/share/nginx/html/.well-known/acme-challenge:ro
     networks:
       - jishiben-net
     logging:
