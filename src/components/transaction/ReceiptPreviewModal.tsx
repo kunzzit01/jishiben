@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { Image, Modal, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { useBottomSystemInset } from '../../hooks/useBottomSystemInset';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/useTheme';
@@ -21,9 +22,10 @@ export function ReceiptPreviewModal({ visible, uri, onClose }: Props) {
   // 旋转后大图仍按旧宽高画，宽屏上会只剩中间一条、小屏上会顶到状态栏后面）
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const bottomInset = useBottomSystemInset();
   // 大图区 = 视口高 − 顶部安全区 − 底部安全区 − 关闭键占位（40），最矮也留 160；
   // 宽度收进安全区内（左右各 16），图片仍是 resizeMode="contain"，不会拉伸变形。
-  const imageMaxHeight = Math.max(160, windowHeight - insets.top - insets.bottom - 40);
+  const imageMaxHeight = Math.max(160, windowHeight - insets.top - bottomInset - 40);
   const imageWidth = Math.max(160, windowWidth - 32);
 
   return (

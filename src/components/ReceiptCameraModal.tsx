@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +33,7 @@ export function ReceiptCameraModal({
 }: ReceiptCameraModalProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const bottomInset = useBottomSystemInset();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [flash, setFlash] = useState<'off' | 'on'>('off');
@@ -88,7 +90,7 @@ export function ReceiptCameraModal({
 
         {/* 底部：相册 + 快门 */}
         {permission?.granted && (
-          <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={[styles.bottomBar, { paddingBottom: bottomInset + 20 }]}>
             <Pressable style={styles.sideBtn} onPress={onPickFromLibrary} hitSlop={10}>
               <Ionicons name="images-outline" size={24} color="#fff" />
               <Text style={styles.sideBtnText}>相册</Text>

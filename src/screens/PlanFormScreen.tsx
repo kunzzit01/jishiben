@@ -33,6 +33,7 @@ import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import { useAmountExpression } from '../hooks/useAmountExpression';
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { getAssetDisplayBalance } from '../utils/creditCard';
 import { formatMoney } from '../utils/formatMoney';
@@ -54,6 +55,7 @@ export default function PlanFormScreen({ route, navigation }: any) {
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const insets = useSafeAreaInsets();
+  const bottomInset = useBottomSystemInset();
   const isFocused = useIsFocused();
   const setTabBarForceHidden = useTabBarForceHide();
   const styles = useMemo(
@@ -560,7 +562,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
 
       {/* 保存按钮：ui/Button gradient 档（与「记一笔」完成键同规格）；计算器键盘开着时让位给键盘面板 */}
       {!keypadOpen && (
-        <View style={[styles.saveFooter, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+        <View style={[styles.saveFooter, { paddingBottom: Math.max(bottomInset, spacing.lg) }]}>
           <Button
             title={tr('finance.save')}
             variant="gradient"
@@ -578,7 +580,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
           style={[
             styles.keypadFooter,
             {
-              paddingBottom: Math.max(insets.bottom - 40, spacing.sm),
+              paddingBottom: Math.max(bottomInset - 40, spacing.sm),
               backgroundColor: semantic.surface,
               borderTopColor: semantic.hairline,
             },
@@ -796,7 +798,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
               })()}
             </Reanimated.ScrollView>
             {/* 贴底添加入口：与记一笔 addAccountPickerBtn 同款有框胶囊，footer 垫安全区 */}
-            <View style={{ marginTop: 10, paddingBottom: Math.max(insets.bottom, 20) + 8 - 9 }}>
+            <View style={{ marginTop: 10, paddingBottom: Math.max(bottomInset, 20) + 8 - 9 }}>
               <PressableScale
                 style={styles.sheetAddBtn}
                 activeScale={0.97}

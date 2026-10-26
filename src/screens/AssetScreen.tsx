@@ -42,6 +42,7 @@ import { AssetType } from '../types';
 import { useTheme } from '../theme/useTheme';
 import { useLayout } from '../theme/useLayout';
 import { useTabClearance } from '../hooks/useTabClearance';
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarScrollHandler } from '../context/TabBarAutoHideContext';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import SegmentedControl from '../components/SegmentedControl';
@@ -755,6 +756,7 @@ export default function AssetScreen() {
   const { semantic, typography, spacing, radius, layout, gradients } = useTheme();
   const { pagePadding, contentMaxWidth } = useLayout();
   const insets = useSafeAreaInsets();
+  const bottomInset = useBottomSystemInset();
   const navigation = useNavigation<any>();
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
@@ -1968,7 +1970,7 @@ export default function AssetScreen() {
               <View
                 style={[
                   styles.keypadFooter,
-                  { borderTopColor: semantic.hairline, paddingBottom: Math.max(insets.bottom, spacing.lg) },
+                  { borderTopColor: semantic.hairline, paddingBottom: Math.max(bottomInset, spacing.lg) },
                 ]}
               >
                 <AmountCalculatorKeypad

@@ -38,6 +38,7 @@ import ComponentGallery from './src/screens/_preview/ComponentGallery';
 import { useNotificationSetup } from './src/hooks/useNotificationSetup';
 import { usePaymentReminders } from './src/hooks/usePaymentReminders';
 import { useBottomSystemInset } from './src/hooks/useBottomSystemInset';
+import { AndroidNavBarAppearance } from './src/hooks/useAndroidNavBarAppearance';
 import {
   TabBarAutoHideProvider,
   useCreateTabBarAutoHide,
@@ -663,6 +664,7 @@ function AppContent() {
       {/* V2.2 系统导航栏：日 #F5F2FB 底 + 深色按钮 / 夜 #06050C 底 + 浅色按钮，
           随主题切换（style 的可选值里 dark = 深色按钮、light = 浅色按钮） */}
       <NavigationBar style={isDark ? 'light' : 'dark'} />
+      <AndroidNavBarAppearance />
       <NavBarScrim />
       {servicesReady ? <DeferredServices /> : null}
     </>

@@ -26,6 +26,7 @@ import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import PressableScale from '../components/PressableScale';
 import { useAmountExpression } from '../hooks/useAmountExpression';
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { hapticSuccess } from '../utils/haptics';
 import { AppText, BottomSheet, Button, ListRow, ScreenHeader } from '../components/ui';
@@ -73,6 +74,7 @@ export default function AddAssetScreen({ route }: any) {
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const bottomInset = useBottomSystemInset();
   const setTabBarForceHidden = useTabBarForceHide();
   const styles = useMemo(
     () => makeStyles(colors, semantic, typography, spacing),
@@ -457,7 +459,7 @@ export default function AddAssetScreen({ route }: any) {
             styles.keypadFooter,
             // 底部留白与"记一笔"同公式（insets−40，edge-to-edge 下根视图已延伸到导航条后面），
             // 不再垫满 insets——那会在键盘下方多出一条空位
-            { paddingBottom: Math.max(insets.bottom - 40, 8), backgroundColor: colors.card, borderTopColor: colors.dividerHair },
+            { paddingBottom: Math.max(bottomInset - 40, 8), backgroundColor: colors.card, borderTopColor: colors.dividerHair },
           ]}
         >
           <AmountCalculatorKeypad
