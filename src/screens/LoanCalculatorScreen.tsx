@@ -333,7 +333,13 @@ export default function LoanCalculatorScreen({ navigation }: any) {
               </PressableScale>
 
               {showSchedule && (
-                <View style={{ marginTop: spacing.md }}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginTop: spacing.md }}
+                  contentContainerStyle={st.scheduleTable}
+                >
+                  <View style={st.scheduleTableInner}>
                   <View style={[st.scheduleRow, st.scheduleHeader]}>
                     <AppText variant="caption" color={semantic.textSecondary} style={[st.scheduleCell, st.periodCell]}>
                       {t('addTx.loanSchedulePeriod')}
@@ -347,7 +353,11 @@ export default function LoanCalculatorScreen({ navigation }: any) {
                     <AppText variant="caption" color={semantic.textSecondary} style={st.scheduleCell}>
                       {t('addTx.loanScheduleInterest')}
                     </AppText>
-                    <AppText variant="caption" color={semantic.textSecondary} style={st.scheduleCell}>
+                    <AppText
+                      variant="caption"
+                      color={semantic.textSecondary}
+                      style={[st.scheduleCell, st.balanceCell]}
+                    >
                       {t('addTx.loanScheduleBalance')}
                     </AppText>
                   </View>
@@ -365,12 +375,13 @@ export default function LoanCalculatorScreen({ navigation }: any) {
                       <AppText variant="caption" style={st.scheduleCell}>
                         {fmt(r.interest, decimalPlaces)}
                       </AppText>
-                      <AppText variant="caption" style={st.scheduleCell}>
+                      <AppText variant="caption" style={[st.scheduleCell, st.balanceCell]}>
                         {fmt(r.balance, decimalPlaces)}
                       </AppText>
                     </View>
                   ))}
-                </View>
+                  </View>
+                </ScrollView>
               )}
             </GlassView>
           ) : (
@@ -423,7 +434,19 @@ const st = StyleSheet.create({
   },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   scheduleHeader: { paddingBottom: 6 },
-  scheduleCell: { flex: 1, textAlign: 'right' },
-  periodCell: { flex: 0.6, textAlign: 'left' },
+  // 5 列数字表在窄屏无法均分：原先 flex:1 且无内边距，320 宽下每列仅 ~55px，
+  // 而 998,646.88 这类金额需 ~70px → 右对齐文字向左溢出并贴住前一列
+  // （实测字形间隙为 0，渲染成 4,978.121,353.123,625.00998,646.88）。
+  // 改为固定列宽 + 左右内边距 + 等宽数字；超出容器时由外层横向滚动兜底。
+  scheduleCell: {
+    width: 70,
+    textAlign: 'right',
+    paddingHorizontal: 4,
+    fontVariant: ['tabular-nums'],
+  },
+  periodCell: { width: 36, textAlign: 'left' },
+  balanceCell: { width: 78 },
+  scheduleTable: { flexGrow: 1 },
+  scheduleTableInner: { minWidth: '100%' },
   hint: { marginTop: 24 },
 });

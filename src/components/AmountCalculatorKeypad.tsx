@@ -386,7 +386,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   rightColumn: {
-    width: '25%',
+    // 25% → 26%：把省下的 2px 内边距让给日期串，避免「10月26日」在 320 宽被省略
+    width: '26%',
     flexDirection: 'column',
   },
   // 键外层（列宽 1/3 或 1/4；高度 = 键高 + 缝，内边距 = 半缝）
@@ -407,7 +408,9 @@ const styles = StyleSheet.create({
   // 日期键：图标 + 标签 + 日期，竖排居中
   dateTile: {
     rowGap: 1,
-    paddingHorizontal: 4,
+    // 4 → 2：320 宽下右列内容只有 42px，而「10月26日」在 11px 下需要 45px，
+    // 原内边距把最后 1 个字挤成省略号。减到 2 后可用宽度 46px，窄屏不再截断。
+    paddingHorizontal: 2,
   },
   dateLabelText: {
     fontSize: 12,
