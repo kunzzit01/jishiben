@@ -68,6 +68,13 @@ public class AiOpenRouterClient {
     private final ObjectMapper objectMapper;
     private final RestClient client;
     private final int timeoutMs;
+    /**
+     * 单次调用的输出上限。
+     * 免费视觉模型（如 nvidia/nemotron-3.5-super-vl:free）都是推理型：会先消耗上千个
+     * reasoning token 才输出正文。上游默认预算太小会导致 content 为空、JSON 解析失败，
+     * 表现为「配了 key 也用不了」。这里给足默认值并允许用环境变量覆盖。
+     */
+    private final int maxTokens;
 
     public AiOpenRouterClient(
             ObjectMapper objectMapper,
@@ -76,7 +83,8 @@ public class AiOpenRouterClient {
             @Value("${app.ai.openrouter.base-url:https://openrouter.ai/api/v1}") String baseUrl,
             @Value("${app.ai.openrouter.connect-timeout-ms:5000}") int connectTimeoutMs,
             @Value("${app.ai.receipt-scan.timeout-ms:30000}") int timeoutMs,
-            @Value("${app.ai.voice-parse.stt-model:qwen/qwen3-asr-flash-2026-02-10}") String sttModel) {
+            @Value("${app.ai.voice-parse.stt-model:qwen/qwen3-asr-flash-2026-02-10}") String sttModel,
+            @Value("${app.ai.openrouter.max-tokens:2048}") int maxTokens) {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = model == null || model.isBlank() ? "anthropic/claude-sonnet-4.5" : model.trim();
         this.sttModel = sttModel == null || sttModel.isBlank()
@@ -84,6 +92,7 @@ public class AiOpenRouterClient {
                 : sttModel.trim();
         this.objectMapper = objectMapper;
         this.timeoutMs = timeoutMs;
+        this.maxTokens = maxTokens > 0 ? maxTokens : 2048;
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -114,6 +123,7 @@ public class AiOpenRouterClient {
         Map<String, Object> body = Map.of(
                 "model", model,
                 "temperature", 0,
+                "max_tokens", maxTokens,
                 "messages", List.of(Map.of(
                         "role", "user",
                         "content", List.of(
@@ -177,6 +187,7 @@ public class AiOpenRouterClient {
         Map<String, Object> body = Map.of(
                 "model", model,
                 "temperature", 0,
+                "max_tokens", maxTokens,
                 "messages", List.of(Map.of("role", "user", "content", prompt)));
         return parseVoiceAccounting(post("/chat/completions", body, "Voice parsing"), transcript);
     }

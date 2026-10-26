@@ -84,6 +84,8 @@ app:
       model: "${OPENROUTER_MODEL:anthropic/claude-sonnet-4.5}"
       base-url: "${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}"
       connect-timeout-ms: "${OPENROUTER_CONNECT_TIMEOUT_MS:5000}"
+      # 输出上限：推理型免费视觉模型会先吃掉上千 reasoning token，必须给足否则正文为空
+      max-tokens: "${AI_MAX_TOKENS:2048}"
     receipt-scan:
       # Decoded image ceiling: base64 on the wire is ~4/3 of this (8 MB decoded).
       max-image-bytes: "${AI_RECEIPT_MAX_IMAGE_BYTES:8388608}"

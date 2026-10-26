@@ -53,7 +53,8 @@ class AiOpenRouterClientTest {
         server.createContext("/audio/transcriptions", handler);
         server.start();
         return new AiOpenRouterClient(new ObjectMapper(), apiKey, "anthropic/claude-sonnet-4.5",
-                "http://127.0.0.1:" + server.getAddress().getPort(), 2000, readTimeoutMs, "qwen/voice-stt");
+                "http://127.0.0.1:" + server.getAddress().getPort(), 2000, readTimeoutMs, "qwen/voice-stt",
+                2048);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
@@ -85,7 +86,7 @@ class AiOpenRouterClientTest {
     @Test
     void anUnconfiguredServerAnswers503WithItsOwnCode() {
         AiOpenRouterClient unconfigured = new AiOpenRouterClient(new ObjectMapper(), "  ", "m",
-                "https://openrouter.ai/api/v1", 1000, 1000, "qwen/voice-stt");
+                "https://openrouter.ai/api/v1", 1000, 1000, "qwen/voice-stt", 2048);
 
         assertThat(unconfigured.isConfigured()).isFalse();
         assertThatThrownBy(() -> unconfigured.scan("image/png", "AQ==", 1))
@@ -191,7 +192,7 @@ class AiOpenRouterClientTest {
         server.start();
         AiOpenRouterClient configured = new AiOpenRouterClient(new ObjectMapper(), TEST_KEY,
                 "anthropic/claude-sonnet-4.5", "http://127.0.0.1:" + server.getAddress().getPort(),
-                2000, 5000, "qwen/voice-stt");
+                2000, 5000, "qwen/voice-stt", 2048);
 
         AiVoiceDtos.VoiceParseResponse response = configured.parseVoice("m4a", "AQ==", 1);
 

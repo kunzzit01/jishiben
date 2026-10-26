@@ -70,6 +70,8 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-4.5}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       AI_VOICE_STT_MODEL: ${AI_VOICE_STT_MODEL:-qwen/qwen3-asr-flash-2026-02-10}
+      # 输出 token 上限：推理型免费视觉模型会先吃掉上千 reasoning token
+      AI_MAX_TOKENS: ${AI_MAX_TOKENS:-2048}
       LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
       TZ: UTC
     networks:
