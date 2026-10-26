@@ -3,7 +3,8 @@
 //
 // 组成（V2.4 定稿：贴底版 + 薄胶囊）：
 //   栏身 48（胶囊，全圆角）+ 栏底距安全区上沿的缝隙 0（栏下沿紧贴系统导航栏，0dp 不留白）
-//   + 设备底部安全区（手势条 0-34 / 三键导航 ~48；安全区只在这里算一次）。
+//   + 设备底部安全区（⚠ 唯一来源 = useBottomSystemInset：手势条 0-34 / 安卓三键导航实测 ~48；
+//     与 App.tsx 外壳的 bottom 偏移、NavBarScrim 遮罩高度是同一个数，只算一次）。
 //   中央「+」58 圆**凸出栏顶 13**（圆钮顶与外壳顶齐平），外壳高度 = 栏身 + 凸起。
 // 目标：滚到底时最后一项完整露在栏上方，又不留空白。
 //
@@ -12,7 +13,7 @@
 //   2. 本文件的 useTabClearance（各页面滚动容器的底部 padding）
 //   3. TabBarAutoHideContext 的收起距离（tabBarHideOffset）
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomSystemInset } from './useBottomSystemInset';
 
 /** 栏身高度（App.tsx 外壳与 react-navigation 内层栏共用同一个值）——V2.4：48 = 内容 33 + 上下各 7.5 */
 export const TAB_BAR_HEIGHT = 48;
@@ -37,8 +38,16 @@ export function tabBarHideOffset(insetsBottom: number): number {
   return TAB_BAR_SHELL_HEIGHT + TAB_BAR_GAP + insetsBottom + 4;
 }
 
-/** 页面滚动容器统一的底部留白：滚到底时最后一项完整露在 Tab 栏上方 */
+/**
+ * 页面滚动容器统一的底部留白：滚到底时最后一项完整露在 Tab 栏上方。
+ *
+ * ⚠ 底部 inset 必须与 App.tsx 外壳的 `bottom: TAB_BAR_GAP + <同一个值>` 同源，
+ * 所以这里用 useBottomSystemInset（= max(insets.bottom, 安卓实测导航条)）而不是裸 insets.bottom：
+ * - 手势导航 / iOS Home Indicator / web：两者相等，数值与改动前完全一致；
+ * - 安卓三键导航且 insets.bottom 报 0（Expo Go / 部分 OEM）：栏身上移了而补白没涨，
+ *   最后一项会被栏身盖住——同源后一起涨，比例始终是「栏身上沿高出屏幕底 edge 多少，内容就留多少」。
+ */
 export function useTabClearance(): number {
-  const insets = useSafeAreaInsets();
-  return TAB_BAR_HEIGHT + TAB_BAR_GAP + insets.bottom;
+  const bottomInset = useBottomSystemInset();
+  return TAB_BAR_HEIGHT + TAB_BAR_GAP + bottomInset;
 }

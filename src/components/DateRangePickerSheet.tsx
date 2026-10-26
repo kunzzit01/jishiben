@@ -3,7 +3,7 @@
 // ReportScreen 共用这份日历，保证日期选择交互/样式完全一致。
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, PanResponder, Dimensions, Pressable, BackHandler } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, PanResponder, Pressable, BackHandler, useWindowDimensions } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -13,6 +13,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/useTheme';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import PressableScale from './PressableScale';
@@ -99,6 +100,10 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   const scrimColor = theme.semantic.scrim;
   // 底部弹层贴屏幕底：底部补白要让出系统导航栏（原来写死 38，不认真机导航条）
   const bottomInset = useBottomSystemInset();
+  // 窗口尺寸走 useWindowDimensions：旋转 / 分屏 / 折叠屏展开 / RN Web 改窗口时重算
+  // （原来的 Dimensions.get 只在启动时取一次，翻页距离与面板高度都会停在旧尺寸）
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const t = useT();
   const now = new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
@@ -167,9 +172,8 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   const swipeTranslate = useRef(new Animated.Value(0)).current;
   const viewMonthRef = useRef(viewMonth);
   viewMonthRef.current = viewMonth;
-  // 翻页距离用"面板内容宽度"（屏宽 - sheet左右padding），旧页完全滑出画面
-  const flipDistance =
-    (typeof Dimensions !== 'undefined' ? Dimensions.get('window').width : 360) - 40 - (mode === 'range' ? 116 : 0);
+  // 翻页距离用"面板内容宽度"（窗口宽 - sheet左右padding），旧页完全滑出画面
+  const flipDistance = windowWidth - 40 - (mode === 'range' ? 116 : 0);
 
   // dir=1 翻到下个月（内容向左滑出、新月从右侧进），dir=-1 翻到上个月
   const flipMonth = (dir: 1 | -1) => {
@@ -302,6 +306,11 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   const sheetAnimStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetPanY.value }] }), []);
   const scrimAnimStyle = useAnimatedStyle(() => ({ opacity: scrimOpacity.value }), []);
 
+  // 面板最大高度 = min(屏高 × 0.85, 视口高 − 顶部安全区)：px 值随窗口重算，不再写死 '85%'。
+  // 底部安全区由 paddingBottom（max(20, bottomInset + 16)）让出，不在这里重复扣，
+  // 否则底部会多出一条空带。面板自身没有输入框，不需要键盘上抬。
+  const sheetMaxHeight = Math.round(Math.max(0, Math.min(windowHeight * 0.85, windowHeight - insets.top)));
+
   if (!visible) return null;
 
   return (
@@ -313,7 +322,9 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
 
       {/* 底部卡片:底部锚定、圆角 24、最高 85% 屏高;整体跟手下拉 */}
       <GestureDetector gesture={sheetPanGesture}>
-        <Reanimated.View style={[s.sheet, { paddingBottom: Math.max(20, bottomInset + 16) }, sheetAnimStyle]}>
+        <Reanimated.View
+          style={[s.sheet, { paddingBottom: Math.max(20, bottomInset + 16), maxHeight: sheetMaxHeight }, sheetAnimStyle]}
+        >
           <View style={s.grabber} />
           {/* 标题栏:✕ 关闭移到右侧 + 标题居中(与选择账本头部同款) */}
           <View style={s.sheetHeader}>
@@ -465,7 +476,6 @@ const makeStyles = (colors: ThemeColors) =>
       bottom: 0,
       left: 0,
       right: 0,
-      maxHeight: '85%',
       backgroundColor: colors.card,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,

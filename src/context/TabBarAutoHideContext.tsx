@@ -15,8 +15,10 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// 收起距离跟外壳几何同源（T07）：不再写死 60 + 8 + 30
+// 收起距离跟外壳几何同源（T07）：不再写死 60 + 8 + 30；
+// 底部 inset 也必须与外壳的 bottom 偏移同源（useBottomSystemInset，含安卓三键导航实测值），
+// 否则收起后整栏露不出屏外 / 多滑一截
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { tabBarHideOffset } from '../hooks/useTabClearance';
 
 type TabBarAutoHideValue = {
@@ -53,11 +55,13 @@ type AutoHideState = {
 };
 
 export function useCreateTabBarAutoHide(): TabBarAutoHideValue {
-  const insets = useSafeAreaInsets();
+  // 底部 inset 的唯一来源（= max(insets.bottom, 安卓实测导航条)）：收起位移必须跟外壳
+  // 实际贴的位置同源，否则三键导航下栏会停在屏幕里露出半截
+  const bottomInset = useBottomSystemInset();
   // 底部安全区只通过 ref 读取：变化时不重建 owners / forced / 动画值（以前放在 useMemo 里，
   // insets.bottom 一变就整套重建，丢掉仍然活着的 owner，栏可能被错误弹出）
-  const bottomRef = useRef(insets.bottom);
-  bottomRef.current = insets.bottom;
+  const bottomRef = useRef(bottomInset);
+  bottomRef.current = bottomInset;
   const stateRef = useRef<AutoHideState | null>(null);
   if (stateRef.current === null) {
     stateRef.current = {

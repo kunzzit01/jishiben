@@ -11,7 +11,6 @@ import {
   Animated,
   Modal,
   Switch,
-  Dimensions,
   Platform,
   Keyboard,
   BackHandler,
@@ -326,7 +325,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const { colors, isDark, semantic, spacing, layout, radius } = useTheme();
   // 矮屏（可用高 < 700）：金额卡内边距 / 行距再收紧一档，保证「金额 + 至少 2 行类别 + 键盘」一屏可见
-  const { isShort, categoryColumns, keypadKeyHeight } = useLayout();
+  // height / width = useLayout 的窗口尺寸（内部就是 useWindowDimensions），
+  // 旋转 / 分屏 / RN Web 改窗口时自动重算 —— 不再用 Dimensions.get（只在启动时取一次）。
+  const { isShort, categoryColumns, keypadKeyHeight, height: windowHeight, width: windowWidth } = useLayout();
   // 设计稿 03 屏：类别九宫格固定四列（36 方块 + 11pt 标签）。窄/矮屏也不再收成 5 列 ——
   // useLayout().categoryColumns 是全局版型参数（theme/** 不在本次改动范围），所以在本页覆写
   const gridColumns = 4;
@@ -471,8 +472,13 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 遮挡高度分两种：自绘计算器面板用 keypadPanelH（按键高算出的实际面板高，与
     // 类别网格停止线共用同一个值，不会再估矮越线）；系统键盘（备注框聚焦弹出来的那个）
     // 用 keyboardDidShow 事件给的真实高度，不能套用面板的常量——两个高度并不一样。
-    const occludedHeight = amountKeypadOpen ? keypadPanelH + keypadBottomPad : keyboardVisible ? keyboardHeight : 0;
-    const visibleH = Dimensions.get('window').height - insets.top - occludedHeight;
+    // 自绘面板整体（含 iOS 键盘上抬量）都算遮挡；系统键盘用事件给的真实高度。
+    const occludedHeight = amountKeypadOpen
+      ? keypadPanelH + keypadBottomPad + keypadKeyboardLift
+      : keyboardVisible
+        ? keyboardHeight
+        : 0;
+    const visibleH = windowHeight - insets.top - occludedHeight;
     const targetOffset = Math.max(y - visibleH / 2, 0);
     // 延迟一帧再滚：紧跟在 setAmountKeypadOpen(true) 之后调用时，键盘面板刚出现，
     // 布局还没稳定，不等一下滚动目标位置会算得不准
@@ -693,7 +699,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     gLoopRef.current = setInterval(() => {
       const fingerY = gFingerYRef.current;
       if (fingerY < 0) return;
-      const winH = Dimensions.get('window').height;
+      const winH = windowHeight;
       const EDGE = 140;
       let delta = 0;
       if (fingerY < EDGE) delta = -12;
@@ -937,7 +943,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const amountCurrencyCode = selectedAsset?.currency ?? currency;
   // Hero 账户选择框宽度 = 转账页账户块的实测宽度（transferBlockW，onLayout 从转账块同步来，
   // 两页切换零跑位）；首次渲染还没量到时用几何公式兜底（转账卡内 flex:1 均分 = (屏宽−116)/2）
-  const [transferBlockW, setTransferBlockW] = useState((Dimensions.get('window').width - 116) / 2);
+  const [transferBlockW, setTransferBlockW] = useState(() => (windowWidth - 116) / 2);
   // T14：金额显示串——键盘打开时，单项 = 正在输入的金额串（带光标），
   // 多项（有 +/− 运算符）= 算式移到金额上方 15pt、金额行显示合计（expressionTotal 复用共享求和函数）；
   // 键盘关着时 = 已保存的金额（与保存语义一致，不改任何计算逻辑）
@@ -1086,6 +1092,20 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       hideSub.remove();
     };
   }, [isFocused]);
+
+  // 键盘区实际占掉的高度 = 面板本身 + 底部让位（类别网格的停止线、字段滚动居中都用这一个值，不再各处各算）
+  const keypadAreaH = keypadPanelH + keypadBottomPad;
+  // iOS 键盘避让：iOS 的系统键盘弹出时窗口高度不变（安卓 adjustResize 会自动缩小窗口，
+  // 底部面板天然停在键盘上沿），而备注框聚焦时系统键盘与自绘面板是共存的（noteFocusRef），
+  // 不抬起来「备注输入框 + 完成键」就整块压在键盘底下。
+  // 上抬量夹在「面板仍完整留在顶部安全区内」：320×568 这种矮屏 + 高键盘不会把面板顶出屏幕。
+  const keypadKeyboardLift =
+    Platform.OS === 'ios' && keyboardVisible
+      ? Math.max(0, Math.min(keyboardHeight, windowHeight - insets.top - keypadAreaH))
+      : 0;
+  // 图标选择弹层（Modal）最大高度 = min(屏高 × 0.72, 视口高 − 顶部安全区)；
+  // 底部安全区由它自己的 paddingBottom（bottomInset + 16）让出，不重复扣。
+  const iconPickerMaxHeight = Math.round(Math.max(0, Math.min(windowHeight * 0.72, windowHeight - insets.top)));
 
 
   // 最终网格内容：固定在前的（本次选过 + 最近用过）、按默认顺序补齐到可见容量；
@@ -1986,7 +2006,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             底部留白收紧(insets-32)：edge-to-edge 下根视图已延伸到导航条后面，
             再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
         {amountKeypadOpen && (
-          <View style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0 }]}>
+          <View style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }]}>
             <AmountCalculatorKeypad
               onPressKey={handleExprKey}
               onPressToday={() => setDatePickerOpen(true)}
@@ -2325,7 +2345,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           onRequestClose={() => setIconPickerOpen(false)}
         >
           <TouchableOpacity style={[styles.iconPickerOverlay, { backgroundColor: semantic.scrim }]} activeOpacity={1} onPress={() => setIconPickerOpen(false)}>
-            <Pressable style={[styles.iconPickerSheet, { paddingBottom: bottomInset + 16 }]} onPress={() => {}}>
+            <Pressable
+              style={[styles.iconPickerSheet, { paddingBottom: bottomInset + 16, maxHeight: iconPickerMaxHeight }]}
+              onPress={() => {}}
+            >
               <View style={styles.iconPickerHeader}>
                 <Text style={styles.iconPickerTitle}>{t('addTx.pickIconTitle')}</Text>
                 <TouchableOpacity
@@ -2603,7 +2626,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
       {amountKeypadOpen && (
         <View
-          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0 }]}
+          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }]}
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => setAmountCursor(amountExpr.pressKeyAt(key, amountCursor))}
@@ -2837,7 +2860,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     backgroundColor: colors.card,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: Dimensions.get('window').height * 0.72,
     paddingBottom: 16,
   },
   iconPickerHeader: {
@@ -2929,7 +2951,9 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
 
   // ---------- T15/V2：类别网格（列数按版型；格 = 42 立体球 + 12pt 标签，标签预留 2 行高度） ----------
   // 网格区可滚动：吃掉剩余高度（flex:1），历史类别超出可见容量时滚下去看，「全部」永远殿后
-  catGridScroll: { flex: 1 },
+  // minHeight: 0 —— flex:1 的滚动容器在 RN Web / 安卓上默认按内容撑高（min-height auto），
+  // 不写 0 时键盘把剩余高度压到很小时网格会和键盘互相压住；写 0 才会老老实实缩到剩余高度并内部滚动
+  catGridScroll: { flex: 1, minHeight: 0 },
   catGridContent: {
     flexDirection: 'row',
     flexWrap: 'wrap',

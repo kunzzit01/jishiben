@@ -320,7 +320,8 @@ function makeLedgerRowStyles(semantic: SemanticColors, spacing: Spacing, layout:
     col: { flex: 1, minWidth: 0, rowGap: 2 },
     balanceLine: { flexDirection: 'row', alignItems: 'baseline', columnGap: spacing.xs },
     // 余额数字可压缩（放不下自动换紧凑格式），保证行右缘 ≤ 页面边距内的 344
-    balanceAmount: { flexShrink: 1 },
+    // minWidth 0：账本抽屉里「分币种结余」与币种代码同一行，长金额要能真的收
+    balanceAmount: { flexShrink: 1, minWidth: 0 },
     // 动作列：设为默认 + 铅笔 + 垃圾桶（各 44 触控区），固定宽 132 保证各行按钮左缘对齐；
     // 默认那本不显示「设为默认」，用同宽空槽占位而不是省掉一格
     actions: {
@@ -1119,10 +1120,12 @@ const HeroCardPage = React.memo(function HeroCardPage({
           {budget > 0 ? (
             <>
               <View style={styles.heroBudgetHead}>
-                <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={styles.budgetText}>
+                {/* 挤窄顺序：左标题（flexShrink 2，纯标签）先收 → 右「已用 / 额度」最后收，
+                    两段都不许把卡片撑破（320 视口超长金额时以前是整行溢出卡外） */}
+                <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadLabel]}>
                   {t('home.budgetLabel')}
                 </AppText>
-                <AppText variant="caption" weight="600" color={textColor} numberOfLines={1} style={styles.budgetText}>
+                <AppText variant="caption" weight="600" color={textColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadValue]}>
                   {hidden
                     ? HIDDEN_AMOUNT
                     : `${fmtMoney(expense, { showCurrency: false })} / ${fmtMoney(budget, { showCurrency: false })}`}
@@ -2761,6 +2764,8 @@ export default function HomeScreen({ navigation }: any) {
                       accessibilityLabel={t('home.selectCurrency')}
                       accessibilityState={{ disabled: totalsByCurrency.length <= 1 }}
                       testID="home-currency-pill"
+                      // 胶囊可被挤窄：极端情况下（超长定位文案）先收标签，绝不把右侧眼睛顶出卡片
+                      style={styles.heroCardHeadPill}
                     >
                       <View style={styles.pillStack}>
                         {/* 不可见占位：把**所有**币种的标签叠在一格里（高度夹成一行、溢出裁掉），格子宽 = 最宽那条的真实像素宽。
@@ -3246,7 +3251,9 @@ function makeStyles(
       padding: layout.card,
       rowGap: spacing.sm,
     },
-    heroCardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    heroCardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.sm },
+    // 头部左胶囊可被挤窄（眼睛是右端定宽项，绝不因为标签太长被顶出卡片）
+    heroCardHeadPill: { flexShrink: 1, minWidth: 0 },
     heroCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
     // 金额槽（页内第一行）：minHeight 保住金额降档时的行高（HERO_AMOUNT_MIN_H）→ 页高不随字号档变化
     heroAmountSlot: {
@@ -3265,6 +3272,10 @@ function makeStyles(
       justifyContent: 'space-between',
       columnGap: spacing.sm,
     },
+    // 标题行两段文字：横向 flex 里的文本容器一律 flexShrink + minWidth 0；
+    // 左标签收得比右值快（2 : 1）—— 右值「已用 / 额度」里是真金额，尽量最后才收
+    heroBudgetHeadLabel: { flexShrink: 2, minWidth: 0 },
+    heroBudgetHeadValue: { flexShrink: 1, minWidth: 0 },
     // 进度条行：条吃满剩余宽度、右侧百分比定宽（各页条长一致，切页不跳）
     heroBudgetBarRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, marginTop: spacing.xs },
     heroBudgetBarWrap: { flex: 1 },
@@ -3413,7 +3424,8 @@ function makeStyles(
     },
     daySumText: { flexShrink: 0 },
     // 日期标签（今天 / 昨天 / 10月7日 周三）：可被挤窄，合计整块不被挤
-    dayHeaderDate: { flexShrink: 1 },
+    // minWidth 0：web 上 flex 子项默认 min-width:auto，没有它「flexShrink 1」形同虚设 → 药丸会被撑破
+    dayHeaderDate: { flexShrink: 1, minWidth: 0 },
     heroFadeOverlay: { position: 'absolute', left: 0, right: 0, top: 330 * 0.6, height: 330 * 0.4 },
     // V3 字号（设计稿逐值）：行标题 14/600、副标题 12/400、日期头 12、预算文字 12.5
     dayHeaderLabelText: { fontSize: 12, lineHeight: 16 },
@@ -3433,7 +3445,7 @@ function makeStyles(
     heroDots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', columnGap: 6, marginTop: spacing.xs },
     heroDot: { height: 5, width: 5, borderRadius: 3 },
     // 胶囊：所有币种文字叠在同一格里；占位文字不可见
-    pillStack: { alignItems: 'center', justifyContent: 'center' },
+    pillStack: { alignItems: 'center', justifyContent: 'center', flexShrink: 1, minWidth: 0 },
     pillSpacer: { opacity: 0, height: 17, overflow: 'hidden' },
     heroDotActive: { width: 14, opacity: 1 },
     heroDotIdle: { opacity: 0.3 },
@@ -3461,7 +3473,8 @@ function makeStyles(
       justifyContent: 'center',
       flexShrink: 0,
     },
-    currencyMenuTextCol: { flex: 1, flexShrink: 1 },
+    // minWidth 0：币种名太长时先收名字列，右端金额 / 勾选不会被顶出抽屉
+    currencyMenuTextCol: { flex: 1, flexShrink: 1, minWidth: 0 },
     // 卡片右上角的"+ 新增 / 查看全部"：做成胶囊，比裸文字有更大的可点区域和更明确的按钮感
     addLinkBtn: {
       flexDirection: 'row',

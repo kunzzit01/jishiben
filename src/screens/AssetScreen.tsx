@@ -513,12 +513,13 @@ function AssetRow({
             {title}
           </AppText>
           {!!subtitle && (
-            // 副行**永远一行**（窄屏 + 巨额时曾经逐字竖排：中文可断行、又没有行数限制）。
-            // 放不下就尾部省略 —— 一行高度恒定，行高不再随金额长度乱跳。
+            // 副行最多两行（窄屏 + 巨额时曾经逐字竖排：中文可断行、又没有行数限制）。
+            // 信用卡的副行里带着「可用额度 ……」这种真金额，只给一行时 320 视口会把它省略掉；
+            // 两行是「可读」与「行高不失控」的折中，绝不会逐字竖排。
             <AppText
               variant="footnote"
               color={semantic.textSecondary}
-              numberOfLines={1}
+              numberOfLines={2}
               ellipsizeMode="tail"
               style={{ marginTop: spacing.xs }}
             >
@@ -617,7 +618,8 @@ function SheetInfoRow({
       }}
       testID={testID}
     >
-      <AppText variant="subhead" color={semantic.textSecondary} style={{ flexShrink: 1 }}>
+      {/* minWidth 0：web 上 flex 子项默认 min-width:auto → 只有 flexShrink 1 是收不动的 */}
+      <AppText variant="subhead" color={semantic.textSecondary} style={{ flexShrink: 1, minWidth: 0 }}>
         {label}
       </AppText>
       <View style={{ flexShrink: 0, alignItems: 'flex-end' }}>
@@ -744,6 +746,11 @@ export default function AssetScreen() {
   // 用户选过币种后，卡片只显示那一种币种的合计（绝不跨币种相加）
   const [cardCurrency, setCardCurrency] = useState<string | null>(null);
   const [currencyMenuOpen, setCurrencyMenuOpen] = useState(false);
+  /* 大金额的「判档宽度」：取**父级实测宽**（定值），交给 MoneyText 自己降档。
+     不能靠 MoneyText 自身盒宽 —— 普通金额的盒子是「宽 = 内容宽」（flexShrink 0），
+     量回来的永远是内容宽，长金额永远判成「放得下」→ 直接画到渐变卡外面。 */
+  const [totalAmountW, setTotalAmountW] = useState(0);
+  const [detailAmountW, setDetailAmountW] = useState(0);
   type AssetItem = (typeof assets)[number];
   const { semantic, typography, spacing, radius, layout, gradients } = useTheme();
   const { pagePadding, contentMaxWidth } = useLayout();
@@ -1356,13 +1363,27 @@ export default function AssetScreen() {
                   </PressableScale>
                 </View>
               </View>
-              <MoneyText
-                value={primaryTotal}
-                kind="plain"
-                variant="display"
-                color={semantic.textInverse}
-                hidden={balanceHidden}
-              />
+              {/* 金额槽：判档宽度 = 卡片内实测宽（定值）。320 视口 12 位金额按 40 号要 ~390px，
+                  卡片内只有 256px —— 不给可用宽就只能画到卡外（渐变卡没有 overflow 裁剪） */}
+              <View
+                style={styles.totalAmountSlot}
+                onLayout={(e) => {
+                  const w = Math.round(e.nativeEvent.layout.width);
+                  setTotalAmountW((prev) => (Math.abs(prev - w) >= 1 ? w : prev));
+                }}
+              >
+                <MoneyText
+                  value={primaryTotal}
+                  kind="plain"
+                  variant="display"
+                  color={semantic.textInverse}
+                  hidden={balanceHidden}
+                  availableWidth={totalAmountW || undefined}
+                  // 地板档（18）仍放不下 → 紧凑格式（100.1T）+ 长按看全文，
+                  // 与首页净资产金额槽 / 账户行同一套兜底，不靠裁切掩盖溢出
+                  compactFallback
+                />
+              </View>
             </LinearGradient>
           </View>
         )}
@@ -1608,7 +1629,7 @@ export default function AssetScreen() {
                     variant="headline"
                     weight="600"
                     color={semantic.textInverse}
-                    numberOfLines={1}
+                    numberOfLines={2}
                     style={styles.heroName}
                     testID="asset-detail-hero-name"
                   >
@@ -1628,8 +1649,24 @@ export default function AssetScreen() {
                 <AppText variant="footnote" color={withAlpha(semantic.textInverse, 0.86)} style={styles.heroLabel}>
                   {sheetAsset.type === 'credit' ? t('asset.creditDebt') : t('asset.currentBalance')}
                 </AppText>
-                <View testID="asset-detail-hero-balance">
-                  <MoneyText value={sheetHeroBalance} variant="display" weight="600" color={semantic.textInverse} />
+                <View
+                  testID="asset-detail-hero-balance"
+                  style={styles.heroAmountSlot}
+                  onLayout={(e) => {
+                    const w = Math.round(e.nativeEvent.layout.width);
+                    setDetailAmountW((prev) => (Math.abs(prev - w) >= 1 ? w : prev));
+                  }}
+                >
+                  {/* 判档宽度 = 卡片内实测宽：320 视口上 12 位余额按 display 40 号约 390px，
+                      卡片内只有 256px，不降档就会画到渐变卡外面去 */}
+                  <MoneyText
+                    value={sheetHeroBalance}
+                    variant="display"
+                    weight="600"
+                    color={semantic.textInverse}
+                    availableWidth={detailAmountW || undefined}
+                    compactFallback
+                  />
                 </View>
                 {sheetAsset.type === 'credit' && (
                   <>
@@ -1988,6 +2025,8 @@ function makeStyles(
       columnGap: spacing.sm,
     },
     totalCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
+    // 卡内大金额槽：吃满卡内宽（宽度与金额字号无关 → 不会和 MoneyText 的降档互相追成反馈环）
+    totalAmountSlot: { alignSelf: 'stretch' },
     // 卡上的币种胶囊（与首页净资产卡的币种胶囊同规格：12.5/17 + 600；宽了就让文字先收，不挤压眼睛按钮）
     cardPillHit: { flexDirection: 'row', alignItems: 'center', columnGap: 4, flexShrink: 1, minWidth: 0 },
     cardPillText: { fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
@@ -2065,8 +2104,10 @@ function makeStyles(
       justifyContent: 'space-between',
       columnGap: spacing.sm,
     },
-    // 长账户名先收窄，不把币种胶囊挤出卡外
+    // 长账户名先收窄（最多两行：320 视口上一行只会剩「银……」），币种胶囊不被挤出卡外
     heroName: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+    // 详情卡大金额槽：吃满卡内宽（判档宽度来源，同上）
+    heroAmountSlot: { alignSelf: 'stretch' },
     heroCodeChip: {
       height: 22,
       minWidth: 44,

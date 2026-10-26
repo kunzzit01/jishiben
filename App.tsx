@@ -21,7 +21,7 @@ import type {
   AddTransactionStackParamList,
   AssetStackParamList,
 } from './src/navigation/routes';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -370,7 +370,10 @@ function SlidingTabBar(props: any) {
 }
 
 function SlidingTabBarInner(props: any) {
-  const insets = useSafeAreaInsets();
+  // 底部让位（安卓三键导航实测 / 手势条 / iPhone Home Indicator / web 0）唯一来源：
+  // 与自绘键盘、底部抽屉、NavBarScrim 遮罩同一个数。不读裸 insets.bottom —— Expo Go /
+  // 非 edge-to-edge 的安卓机 insets.bottom 可能报 0，栏会压到系统导航条上。
+  const bottomInset = useBottomSystemInset();
   const { translateY, opacity } = useTabBarAutoHide();
   const { radius, semantic } = useTheme();
   const { state, navigation } = props;
@@ -395,8 +398,9 @@ function SlidingTabBarInner(props: any) {
       style={[
         styles.tabShell,
         {
-          // 栏底贴着安全区上沿（GAP 0）；外壳向上多出圆钮凸起
-          bottom: TAB_BAR_GAP + insets.bottom,
+          // 栏底贴着安全区上沿（GAP 0）；外壳向上多出圆钮凸起。
+          // bottom / height 全部来自 useTabClearance 的令牌与底部 inset，本文件不写死数字
+          bottom: TAB_BAR_GAP + bottomInset,
           height: TAB_BAR_SHELL_HEIGHT,
           transform: [{ translateY }],
           opacity,
@@ -420,6 +424,9 @@ function SlidingTabBarInner(props: any) {
     </Animated.View>
   );
 }
+
+/** Tab 图标墨迹尺寸（tabBarIcon 的 size 与 tabBarIconStyle 的盒高同源，避免两处各写一个数后漂移） */
+const TAB_ICON_SIZE = 20;
 
 const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   首页: 'home-outline',
@@ -543,7 +550,15 @@ function AppContent() {
                 variant="caption2"
                 color={color}
                 numberOfLines={1}
-                style={position === 'beside-icon' ? { marginStart: spacing.xs } : undefined}
+                // 系统大字（令牌上限 1.3×）+ 窄屏：320 宽时一个槽位只有 (320−32)/5 ≈ 57pt，
+                // 11pt 的英文 "Settings" 已经贴满，放大后被硬截成 "Setting…"（内容消失）。
+                // 允许等比缩到 0.8 完整留在槽内（iOS 生效；Android 忽略该属性，退回省略号，不会重叠）
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+                // 横排（横屏 / 平板 / 宽窗口：标签和图标在同一个横向 flex 里）时标签必须可收缩，
+                // 否则长标签会把图标挤出槽位、压到相邻槽位上 —— flexShrink + minWidth:0 只加在这一支；
+                // 竖排（below-icon）的主轴是高度，加 flexShrink 反而会把行高挤掉让文字被竖向裁切，故不加
+                style={position === 'beside-icon' ? { marginStart: spacing.xs, flexShrink: 1, minWidth: 0 } : undefined}
               >
                 {tabLabels[route.name] ?? route.name}
               </AppText>
@@ -554,8 +569,9 @@ function AppContent() {
             tabBarStyle: {
               height: TAB_BAR_HEIGHT,
               // 关键:覆盖 BottomTabBar 内部默认的 paddingBottom: insets.bottom——
-              // 外壳已经用 bottom: TAB_BAR_GAP + insets.bottom 避开过安全区，库内部再 pad 一次
-              // 会把内容区压扁，导致 Tab 文字下半截被挤出卡片
+              // 外壳已经用 bottom: TAB_BAR_GAP + bottomInset(useBottomSystemInset) 避开过安全区，
+              // 库内部再 pad 一次会把内容区压扁，导致 Tab 文字下半截被挤出卡片。
+              // 这里清零不是"写死底部内边距"：让位由外壳的唯一 inset 来源负责（见 SlidingTabBarInner）
               paddingBottom: 0,
               backgroundColor: 'transparent',
               borderTopWidth: 0,
@@ -570,7 +586,7 @@ function AppContent() {
             },
             // 图标托默认 31×28（TabBarIcon 的 HIG 尺寸），比 20 号图标多出的 4pt 空档会算进上留白；
             // 收到 20（=图标本身），图标与标签的墨迹才真正上下等距。
-            tabBarIconStyle: { height: 20 },
+            tabBarIconStyle: { height: TAB_ICON_SIZE },
             // 自定义 tab 按钮：去掉 Android 默认的灰色水波纹（和紫色水滴叠在一起很脏）。
             // 铁律：底部 Tab 按钮不加任何按压视觉反馈、不发生布局位移（保留震动）
             tabBarButton: (props: any) => (
@@ -582,7 +598,9 @@ function AppContent() {
                 // 按 Apple HIG 栏高≈内容高设计的），68 高胶囊里多出的高度全堆到标签下方 ——
                 // 图标整体偏上、下方留白翻倍。按钮自身撑满栏高，在这里居中即可上下等距。
                 // 水平内边距收到 4：给 11pt 英文标签（Settings 等）多留一点排版余量
-                style={[props.style, { paddingHorizontal: 4, justifyContent: 'center' }]}
+                // minWidth:0 + flexShrink：槽位只有 (屏宽−32)/5（320 宽 ≈ 57pt），
+                // 内容（图标 / 标签）超出时收缩而不是横向溢出挡住相邻 Tab
+                style={[props.style, { paddingHorizontal: 4, justifyContent: 'center', minWidth: 0, flexShrink: 1 }]}
               >
                 {/* 选中圆盘：绝对定位画在图标 + 标签之下，不占排版、不随按压变化 */}
                 {props.accessibilityState?.selected ? (
@@ -601,7 +619,7 @@ function AppContent() {
                 const solid = icon.replace('-outline', '') as keyof typeof Ionicons.glyphMap;
                 if (solid in Ionicons.glyphMap) name = solid;
               }
-              return <Ionicons name={name} size={20} color={color} />;
+              return <Ionicons name={name} size={TAB_ICON_SIZE} color={color} />;
             },
           })}
         >
@@ -721,7 +739,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   // 浮空 Tab 栏外壳：只负责几何定位 + 承载收起/展开的 transform。
-  // 高度 / 距底 / 圆钮槽位在外壳内联给（都要读 insets 与令牌常量）。
+  // 高度 / 距底 / 圆钮槽位在外壳内联给（都要读底部 inset 与令牌常量，
+  // 底部 inset 的唯一来源 = useBottomSystemInset，与 useTabClearance / 收起位移同源）。
   // 中央「+」凸出栏顶 13（V2.4），整圆都在外壳内；
   // overflow 必须 visible（+ 的投影画到外壳边缘之外）。
   // 左右 16：UI V2 稿的悬浮胶囊缩进（与页面内容边距一致）
@@ -741,7 +760,12 @@ const styles = StyleSheet.create({
   },
   // 栏身材质层（UI V2.1 §2 的 GlassView）：铺满内容区，全圆角由组件 radius='full' 给
   tabBarGlass: { height: '100%' },
-  // 中央圆钮槽：整圆都在槽内（槽高 = 圆径），横向居中 → 圆钮对准五个槽位的中缝
+  // 中央圆钮槽：整圆都在槽内（槽高 = 圆径），横向居中 → 圆钮对准五个槽位的中缝。
+  // 居中不写任何 px：left:0/right:0 铺满外壳 + alignItems:'center'，即外壳宽度的 50%。
+  // 外壳左右缩进对称（16/16），而库给每个路由一个 flex:1 槽位
+  // （@react-navigation/bottom-tabs BottomTabBar.tsx bottomItem:{flex:1}；记一笔 虽然
+  //  tabBarButton 返回 null，但 BottomTabItem 的外层 View 仍占位），
+  // 因此 5 个等宽槽位的第 3 个中点 === 外壳中线，320/360/390/430、横竖屏都由几何保证。
   centerButtonSlot: {
     position: 'absolute',
     left: 0,
@@ -750,14 +774,15 @@ const styles = StyleSheet.create({
     height: TAB_CENTER_BUTTON_SIZE,
     alignItems: 'center',
   },
-  // 选中圆盘：绝对定位，居中于栏身（高 48）内（内容 33 + 上下各留 3.5）
+  // 选中圆盘：绝对定位，居中于栏身内（上下各留 4）。
+  // 尺寸从 TAB_BAR_HEIGHT 派生（48 → 40 / 半径 20）：改栏身高度时圆盘不会错位或变成椭圆
   tabDisc: {
     position: 'absolute',
     top: 4,
     left: 8,
     right: 8,
-    height: 40,
-    borderRadius: 20,
+    height: TAB_BAR_HEIGHT - 8,
+    borderRadius: (TAB_BAR_HEIGHT - 8) / 2,
   },
   // 圆钮顶部柔和高光（上半圆）
   centerButtonGloss: {

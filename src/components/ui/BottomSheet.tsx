@@ -26,7 +26,7 @@
 //     抽屉里再套一张四角圆角的卡，看起来会像浮起来的卡片（验收退回第 5 条）。
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Pressable, StyleProp, StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native';
+import { BackHandler, Keyboard, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -95,6 +95,29 @@ export function BottomSheet({
   const forceHideTabBar = useTabBarForceHide();
   const showClose = closeButton ?? !!title;
   const styles = useMemo(() => makeStyles(spacing), [spacing]);
+
+  // 键盘避让：iOS 的系统键盘弹出时窗口高度不变（安卓是 adjustResize，窗口自己缩小、
+  // 抽屉自然停在键盘上沿），所以只有 iOS 需要把抽屉整体抬到键盘上沿。
+  // 高度取 keyboardDidShow 的真实 endCoordinates.height（与记一笔页同一套事件源，不另建一套）。
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e?.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+  // 上抬量夹在「抽屉仍完整留在顶部安全区之下」的范围内：矮屏 + 高键盘不会把抽屉顶出屏幕
+  const keyboardLift = Platform.OS === 'ios' ? Math.max(0, Math.min(keyboardHeight, windowHeight - insets.top)) : 0;
+  // 面板最大高度 = min(屏高 × maxHeightRatio, 视口高 − 顶部安全区 − 键盘上抬量)。
+  // 底部安全区由面板自己的 paddingBottom（bottomInset + spacing.lg）让出，不再从 maxHeight 里减一次，
+  // 否则底部会多留一条空带。内容超高时由 children 里的 ScrollView（flexShrink: 1）内部滚动。
+  const panelMaxHeight = Math.round(
+    Math.max(0, Math.min(windowHeight * maxHeightRatio, windowHeight - insets.top - keyboardLift))
+  );
 
   // 屏幕外起点：取屏高，保证任何尺寸的卡都从可视区外滑入
   // （首帧就画在屏外，不会先闪一帧「完整面板」再滑入）
@@ -254,7 +277,9 @@ export function BottomSheet({
             borderTopRightRadius: radius.xl,
             // 内容底部留白 = 安全区 + 16（用户定版；不能用 max，否则三键导航机型会贴死）
             paddingBottom: bottomInset + spacing.lg,
-            maxHeight: Math.round(windowHeight * maxHeightRatio),
+            maxHeight: panelMaxHeight,
+            // iOS 键盘弹起时整体抬到键盘上沿（安卓窗口已自行缩小，这里恒为 0）
+            marginBottom: keyboardLift,
           },
           sheetAnimStyle,
           style,
