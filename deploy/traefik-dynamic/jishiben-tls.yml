@@ -1,0 +1,26 @@
+# Traefik 动态配置：为裸 IP 提供 HTTPS（证书由 certbot 签发，不用 Traefik 内置 ACME）
+#
+# 前置条件（必须先存在，否则 Traefik 读不到证书会报错）：
+#   /letsencrypt/jishiben/fullchain.pem 与 privkey.pem
+#   —— 由 deploy/scripts/renew-ip-cert.sh 复制，Traefik 已挂载该 volume 到 /letsencrypt
+#
+# 影响面：只新增 Host=裸IP 这一条 router；不影响 kunzzgroup.com 等现有路由。
+# 回滚：删除本文件（file provider 自动卸载）。
+tls:
+  certificates:
+    - certFile: /letsencrypt/jishiben/fullchain.pem
+      keyFile: /letsencrypt/jishiben/privkey.pem
+
+http:
+  routers:
+    jishiben-https:
+      rule: "Host(`187.127.125.136`)"
+      entryPoints: [websecure]
+      priority: 100
+      tls: {}
+      service: jishiben-web
+  services:
+    jishiben-web:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8088"
