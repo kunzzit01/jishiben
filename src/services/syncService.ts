@@ -1054,6 +1054,31 @@ interface RowFailure {
   id: string;
   op: 'upsert' | 'delete';
   reason: string;
+  /**
+   * 该行在本地就已确定无法上云（例如 transfer 缺 from/to），推送前直接被拦下，
+   * 不需要联网、也不会好起来。这类失败只记诊断日志，**不再弹「同步失败」模态框**——
+   * 否则每次同步都会用同一行坏数据打扰用户（历史问题：Supabase 导入里
+   * 一条转账的转出账户已被删除，App 每次同步都会重推并被后端 400 拒绝）。
+   */
+  silent?: boolean;
+}
+
+/**
+ * 推送前的本地预检：返回 null 表示可以推，否则返回不可推的原因。
+ * 规则必须与后端校验保持一致（见 TransactionService 的 transfer 分支）。
+ */
+function preflightReject(table: TableName, row: Row): string | null {
+  if (table === 'transactions') {
+    const t = row as unknown as {
+      type?: string;
+      fromAssetUid?: string | null;
+      toAssetUid?: string | null;
+    };
+    if (t.type === 'transfer' && (!t.fromAssetUid || !t.toAssetUid)) {
+      return 'transfer 缺少转出或转入账户（源数据残缺，本机跳过上传）';
+    }
+  }
+  return null;
 }
 
 function errorMessage(e: unknown): string {
@@ -1232,8 +1257,14 @@ function toApiBody(table: TableName, row: Row): unknown {
 }
 
 async function pushUpsert(table: TableName, row: Row, failedRows: RowFailure[]): Promise<void> {
-  const body = toApiBody(table, row);
   const id = String((row as { clientUid: string }).clientUid);
+  const reject = preflightReject(table, row);
+  if (reject) {
+    // 不联网、不重试、不打扰用户；保留在本地（数据不丢），仅记录诊断
+    failedRows.push({ table, id, op: 'upsert', reason: reject, silent: true });
+    return;
+  }
+  const body = toApiBody(table, row);
   await pushRow(
     table,
     id,
@@ -1691,8 +1722,13 @@ export async function fullSync(): Promise<SyncResult> {
     const failedRows = await pushSnapshot(normalized);
     await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
-    if (failedRows.length) {
-      return { ok: false, error: 'constraint', detail: formatRowFailures(failedRows) };
+    const blocking = failedRows.filter((f) => !f.silent);
+    const silenced = failedRows.filter((f) => f.silent);
+    if (silenced.length) {
+      console.warn('已跳过 ' + silenced.length + ' 条本机无法上云的记录（不打扰用户）', formatRowFailures(silenced));
+    }
+    if (blocking.length) {
+      return { ok: false, error: 'constraint', detail: formatRowFailures(blocking) };
     }
     return { ok: true };
   } catch (e) {
@@ -1753,8 +1789,13 @@ export async function pushNow(): Promise<SyncResult> {
     const failedRows = await pushLocalSnapshot();
     await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
-    if (failedRows.length) {
-      return { ok: false, error: 'constraint', detail: formatRowFailures(failedRows) };
+    const blocking = failedRows.filter((f) => !f.silent);
+    const silenced = failedRows.filter((f) => f.silent);
+    if (silenced.length) {
+      console.warn('已跳过 ' + silenced.length + ' 条本机无法上云的记录（不打扰用户）', formatRowFailures(silenced));
+    }
+    if (blocking.length) {
+      return { ok: false, error: 'constraint', detail: formatRowFailures(blocking) };
     }
     return { ok: true };
   } catch (e) {
