@@ -632,6 +632,7 @@ export const en = {
     aiZone: 'AI Zone',
     aiZoneSub: 'Manage AI features and services',
     overview: 'Overview',
+    calculators: 'Calculators',
     calculator: 'Calculator',
     calculatorSub: 'Loan, compound interest and other finance tools',
     subscribe: 'Subscription',

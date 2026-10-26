@@ -347,6 +347,18 @@ export default function ProfileScreen({ navigation }: any) {
             onPress={() => navigation.navigate(ROUTES.OVERVIEW)}
             testID="profile-overview-row"
           />
+          {/* 计算器（贷款 / 复利）：CalculatorHubScreen 在 App.tsx 双注册，但此前全仓没有
+              任何 navigate(ROUTES.CALCULATOR) —— 功能存在却无法到达（评审实测：设置页与
+              财务规划页都没有入口）。入口补在「功能」分组，与 AI 专区 / 概览模式同规格。 */}
+          <ListRow
+            leading={
+              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="calculator-outline" />
+            }
+            title={tr('profile.calculators')}
+            chevron
+            onPress={() => navigation.navigate(ROUTES.CALCULATOR)}
+            testID="profile-calculators-row"
+          />
         </ListSection>
 
         {/* 支持：帮助与反馈 / 关于应用 */}

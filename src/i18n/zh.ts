@@ -634,6 +634,7 @@ export const zh = {
     aiZone: 'AI 专区',
     aiZoneSub: '管理 AI 相关功能与服务',
     overview: '概览模式',
+    calculators: '计算器',
     calculator: '计算器',
     calculatorSub: '贷款、复利等理财计算工具',
     subscribe: '订阅',
