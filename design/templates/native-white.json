@@ -1,0 +1,41 @@
+{
+  "name": "原生白",
+  "style": "apple-minimal",
+  "intent": "系统原生感：白底、浅灰卡、单一蓝色强调，长期耐看",
+  "layout": {
+    "hero": "plain",
+    "list": "flat",
+    "tab": "flat",
+    "density": "comfortable"
+  },
+  "radius": 18,
+  "color": {
+    "canvas": "#FFFFFF",
+    "surface": "#F5F5F7",
+    "surfaceAlt": "#FFFFFF",
+    "ink": "#1D1D1F",
+    "inkMuted": "#6E6E73",
+    "inkSubtle": "#86868B",
+    "hairline": "#E5E5EA",
+    "accent": "#0A84FF",
+    "positive": "#34C759",
+    "negative": "#FF3B30",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "level1": "none",
+    "level2": "0 4px 24px rgba(0,0,0,.06)"
+  },
+  "typography": {
+    "display": {
+      "size": 40,
+      "weight": 550,
+      "tracking": "-0.03em"
+    },
+    "title": {
+      "size": 19,
+      "weight": 600,
+      "tracking": "-0.02em"
+    }
+  }
+}

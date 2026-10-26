@@ -1,0 +1,43 @@
+{
+  "name": "午夜蓝（深色）",
+  "style": "dark-saas",
+  "intent": "全深色：低对比背景 + 亮蓝强调，夜间使用不刺眼",
+  "layout": {
+    "hero": "solid",
+    "list": "card",
+    "tab": "pill",
+    "density": "comfortable"
+  },
+  "radius": 20,
+  "color": {
+    "canvas": "#0B1020",
+    "surface": "#141B2E",
+    "surfaceAlt": "#1B2438",
+    "ink": "#E8EDF8",
+    "inkMuted": "#9BAAC6",
+    "inkSubtle": "#6B7A96",
+    "hairline": "#1F2A40",
+    "accent": "#5B8CFF",
+    "heroBg": "#141B2E",
+    "onHero": "#E8EDF8",
+    "positive": "#4ADE80",
+    "negative": "#FF7A85",
+    "onAccent": "#0B1020"
+  },
+  "shadow": {
+    "level1": "0 2px 12px rgba(0,0,0,.35)",
+    "level2": "0 14px 32px rgba(0,0,0,.45)"
+  },
+  "typography": {
+    "display": {
+      "size": 40,
+      "weight": 600,
+      "tracking": "-0.03em"
+    },
+    "title": {
+      "size": 17,
+      "weight": 600,
+      "tracking": "0"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "杂志沙",
+  "style": "japanese-minimal",
+  "intent": "数字当主角：无卡片无阴影，细线分区，52px 细字重",
+  "layout": {
+    "hero": "plain",
+    "list": "flat",
+    "tab": "minimal",
+    "density": "airy"
+  },
+  "radius": 4,
+  "color": {
+    "canvas": "#FBFAF7",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#F5F2EA",
+    "ink": "#1A1A1A",
+    "inkMuted": "#4A4740",
+    "inkSubtle": "#9A9486",
+    "hairline": "#E6E2D8",
+    "accent": "#1A1A1A",
+    "positive": "#2F7D52",
+    "negative": "#1A1A1A",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "level1": "none",
+    "level2": "none"
+  },
+  "typography": {
+    "display": {
+      "size": 52,
+      "weight": 300,
+      "tracking": "-0.045em"
+    },
+    "title": {
+      "size": 15,
+      "weight": 500,
+      "tracking": "0"
+    }
+  }
+}

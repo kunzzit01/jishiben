@@ -1,0 +1,43 @@
+{
+  "name": "玻璃紫（现版精修）",
+  "style": "glassmorphism",
+  "intent": "保留渐变 hero 与玻璃预算卡，交易列表收进白卡，Tab 栏圆角化",
+  "layout": {
+    "hero": "gradient",
+    "list": "card",
+    "tab": "pill",
+    "density": "comfortable"
+  },
+  "radius": 22,
+  "color": {
+    "canvas": "#F5F4FC",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#F1EFFB",
+    "ink": "#1B1638",
+    "inkMuted": "#3C3663",
+    "inkSubtle": "#8B86AD",
+    "hairline": "#F1EFFA",
+    "accent": "#6C5CE7",
+    "gradientFrom": "#6C5CE7",
+    "gradientTo": "#8B7CFF",
+    "positive": "#2F9E68",
+    "negative": "#E5484D",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "level1": "0 10px 26px rgba(76,63,196,.08)",
+    "level2": "0 16px 34px rgba(108,92,231,.32)"
+  },
+  "typography": {
+    "display": {
+      "size": 42,
+      "weight": 600,
+      "tracking": "-0.03em"
+    },
+    "title": {
+      "size": 17,
+      "weight": 600,
+      "tracking": "0"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "Bento 墨黑",
+  "style": "bento-grid",
+  "intent": "信息密度优先：深色净资产卡 + 预算环 + 四宫格，一屏多塞 4 条交易",
+  "layout": {
+    "hero": "solid",
+    "list": "card",
+    "tab": "pill",
+    "density": "compact"
+  },
+  "radius": 16,
+  "color": {
+    "canvas": "#F6F6F9",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#15161C",
+    "ink": "#15161C",
+    "inkMuted": "#4A4D5E",
+    "inkSubtle": "#8B8FA0",
+    "hairline": "#F2F2F6",
+    "accent": "#6C5CE7",
+    "heroBg": "#15161C",
+    "onHero": "#FFFFFF",
+    "positive": "#7EE0A8",
+    "negative": "#FF8B8B",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "level1": "0 2px 10px rgba(21,22,28,.05)",
+    "level2": "0 8px 22px rgba(21,22,28,.10)"
+  },
+  "typography": {
+    "display": {
+      "size": 30,
+      "weight": 600,
+      "tracking": "-0.03em"
+    },
+    "title": {
+      "size": 16.5,
+      "weight": 650,
+      "tracking": "-0.01em"
+    }
+  }
+}

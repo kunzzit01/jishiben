@@ -1,0 +1,43 @@
+{
+  "name": "松墨绿",
+  "style": "quiet-luxury",
+  "intent": "低饱和绿 + 米白底：稳重、克制，适合财务工具的信任感",
+  "layout": {
+    "hero": "gradient",
+    "list": "card",
+    "tab": "flat",
+    "density": "comfortable"
+  },
+  "radius": 14,
+  "color": {
+    "canvas": "#F4F7F3",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#EBF1E9",
+    "ink": "#16241C",
+    "inkMuted": "#3E5247",
+    "inkSubtle": "#7C9186",
+    "hairline": "#E3EBE1",
+    "accent": "#1F6F4A",
+    "gradientFrom": "#1F6F4A",
+    "gradientTo": "#2E8B5F",
+    "positive": "#1F6F4A",
+    "negative": "#C2412D",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "level1": "0 6px 18px rgba(22,36,28,.07)",
+    "level2": "0 14px 30px rgba(31,111,74,.18)"
+  },
+  "typography": {
+    "display": {
+      "size": 40,
+      "weight": 550,
+      "tracking": "-0.03em"
+    },
+    "title": {
+      "size": 17,
+      "weight": 600,
+      "tracking": "0"
+    }
+  }
+}
