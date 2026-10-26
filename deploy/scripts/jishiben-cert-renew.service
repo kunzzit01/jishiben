@@ -1,0 +1,12 @@
+# Let's Encrypt IP 证书续期（160 小时有效期 → 必须高频检查）
+[Unit]
+Description=jishiben IP certificate renewal (Let's Encrypt shortlived)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/jishiben/deploy/scripts/renew-ip-cert.sh
+# 失败时写一条明显的标记，便于监控/告警抓取
+ExecStopPost=/bin/sh -c '[ "$EXIT_STATUS" = "0" ] || echo "RENEW-FAILED $(date -Is)" >> /var/log/jishiben-cert-failed.log'
+TimeoutStartSec=300

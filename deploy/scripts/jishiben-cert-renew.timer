@@ -1,0 +1,11 @@
+# 每 6 小时检查一次（证书 160 小时，certbot 在剩余 1/3 时续期）
+[Unit]
+Description=Check jishiben IP certificate every 6h
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:17:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
