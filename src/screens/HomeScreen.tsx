@@ -524,6 +524,10 @@ function TxRow({
 }
 
 /** TxRow 的样式（令牌进、StyleSheet 出；几何取自 V2 稿：行高 ≥60、内边距 16、行间距 12） */
+
+// TxRow 的 props 全是原始值 + 稳定回调：包一层 memo，避免整页重渲染（点眼睛 / 吸顶 / 滚动状态变化）
+// 时把已挂载的每一行重算一遍；行内容真的变化时 props 变，memo 仍会更新。
+const TxRowMemo = React.memo(TxRow);
 function makeTxRowStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout) {
   return StyleSheet.create({
     row: {
@@ -1947,7 +1951,7 @@ export default function HomeScreen({ navigation }: any) {
     // 列表卡底边 = 末组最后一行：26 下圆角 + 4pt 卡底边（稿里卡内 padding 下 4）
     const isCardBottom = !!section.isLast && index === (section.data?.length ?? 0) - 1;
     return (
-      <TxRow
+      <TxRowMemo
         title={hasOwnTitle ? ownTitle : catName}
         categoryName={hasOwnTitle ? catName : ''}
         categoryIcon={catIcon}
@@ -1962,6 +1966,7 @@ export default function HomeScreen({ navigation }: any) {
       />
     );
   }, [t, getCategoryById, getAssetById, navigation]);
+
   const renderTxRow = useCallback(({ item, index, section }: { item: Transaction; index: number; section: TxDaySection }) => (
     <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX}>
       {buildTxRow(item, index, section, item.id === flashTxId)}
