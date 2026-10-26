@@ -65,6 +65,11 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-jishiben-api}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-PT24H}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      # AI（小票识别 / 语音记账）：不填则接口返回 503 AI_NOT_CONFIGURED，App 自动降级为手动记账
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-4.5}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      AI_VOICE_STT_MODEL: ${AI_VOICE_STT_MODEL:-qwen/qwen3-asr-flash-2026-02-10}
       LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
       TZ: UTC
     networks:
