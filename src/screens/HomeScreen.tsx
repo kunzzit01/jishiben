@@ -2671,9 +2671,6 @@ export default function HomeScreen({ navigation }: any) {
           {/* 顶部用户区（设计稿 01 屏）：40 头像 + 用户名（= 账本名）+ 展开箭头；右侧 搜索 / 通知 / 日历切换。
               账本抽屉入口从旧玻璃胶囊挪到用户名上（同一行为）；日历切换是既有功能，位置右移 */}
           <View style={styles.userRow}>
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={20} color={semantic.accent} />
-            </View>
             <PressableScale
               onPress={() => openSheet('ledger')}
               activeScale={0.96}
@@ -3233,14 +3230,6 @@ function makeStyles(
     // ── 设计稿 01 屏：用户区 / 渐变净资产卡 / 快捷方块 ──
     userRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
     // 头像 40 圆：brandSoft 底 + accent 图标（稿）
-    avatar: {
-      width: 40,
-      height: 40,
-      borderRadius: radius.full,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: semantic.brandSoft,
-    },
     userNamePress: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs, flexShrink: 1, minWidth: 0 },
     userNameText: { flexShrink: 1, minWidth: 0 },
     userRowSpacer: { flexGrow: 1 },
