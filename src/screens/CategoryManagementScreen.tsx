@@ -133,6 +133,39 @@ function groupIndexAt(
   return Math.min(count - 1, idx);
 }
 
+/**
+ * 一格「槽位跨度」：整组换位时，中间那些卡要挪动的量 = 被拖卡自身高度 + 卡间距。
+ * 等价于相邻两卡 top 之差（无论 onLayout 报的高度是否已含 marginBottom，这个差都成立），
+ * 所以优先量下一对；被拖卡在最后一张时改用上一对的间距换算自身跨度。
+ */
+function groupSlotSpan(index: number, count: number, boxAt: (i: number) => GroupBox): number {
+  const heightOf = (i: number) => Math.max(0, boxAt(i).bottom - boxAt(i).top);
+  if (index + 1 < count) {
+    const pitch = boxAt(index + 1).top - boxAt(index).top;
+    if (pitch > 0) return pitch;
+  }
+  if (index > 0) {
+    const prevPitch = boxAt(index).top - boxAt(index - 1).top;
+    if (prevPitch > 0) return Math.max(0, heightOf(index) + prevPitch - heightOf(index - 1));
+  }
+  return heightOf(index);
+}
+
+/**
+ * 幽灵落点 = 让位后留给被拖卡的那块空位的顶边（必须和 groupShifts 画出来的空位一致，
+ * 否则幽灵会飞进让位后的某张卡身上）。两种情形都等于提交后这张卡的最终 top：
+ * · 往下拖（to > from）：中间卡整段上移一格跨度，空位落在这一段**下方**
+ *   → tops[to] + h_to - h_from（= 让位后目标卡的底边 + 间距）；
+ * · 往上拖 / 原位：空位就在目标卡原来的位置上 → tops[to]。
+ */
+function groupLandTop(from: number, to: number, tops: number[], ends: number[]): number {
+  const top = tops[to] ?? 0;
+  if (to <= from) return top;
+  const fromH = Math.max(0, (ends[from] ?? 0) - (tops[from] ?? 0));
+  const toH = Math.max(0, (ends[to] ?? 0) - top);
+  return top + toH - fromH;
+}
+
 const GROUP_DRAG_SCALE = 1.03;
 /**
  * web 专用：把手行上必须让浏览器**别**接管滚动。
@@ -253,7 +286,9 @@ function GroupCardSlot({
         ends.value,
         count.value
       );
-      moveY.value = withTiming(tops.value[idx] ?? baseY.value, { duration: 150 });
+      const landY =
+        tops.value[idx] == null ? baseY.value : groupLandTop(from.value, idx, tops.value, ends.value);
+      moveY.value = withTiming(landY, { duration: 150 });
       scale.value = withTiming(1, { duration: 150 });
       cbs.current.onDragEnd(from.value, idx);
     };
@@ -675,7 +710,9 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
           gEnds.value,
           gCount.value
         );
-        gMoveY.value = withTiming(gTops.value[idx] ?? gBaseY.value, { duration: 150 });
+        const landY =
+          gTops.value[idx] == null ? gBaseY.value : groupLandTop(gFrom.value, idx, gTops.value, gEnds.value);
+        gMoveY.value = withTiming(landY, { duration: 150 });
         gScale.value = withTiming(1, { duration: 150 });
         handleGroupDragEnd(gFrom.value, idx);
       },
@@ -695,15 +732,12 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     const last = sections.length - 1;
     const to = Math.max(0, Math.min(last, Math.trunc(groupDrag.hover) || 0));
     if (to === from) return map;
-    // 每张卡高度不同（展开的组比收起的组高得多），所以让位量不能用「槽位 top 之差」推，
+    // 每张卡高度不同（展开的组比收起的组高得多），所以让位量不能用「槽位 top 之差」逐张推，
     // 那样只对等高卡片成立：收起的卡被拖到展开卡中间时腾不出位置（用户实测）。
-    // 正确做法：把「被拖卡的高度 + 它与下一张之间的间距」整段搬走，按方向推移中间的卡。
-    const boxAt = (i: number) => groupBoxRef.current.get(sections[i]?.group) ?? { top: 0, bottom: 0 };
-    const fromBox = boxAt(from);
-    const draggedH = Math.max(0, fromBox.bottom - fromBox.top);
-    const nextTop = from + 1 <= last ? boxAt(from + 1).top : 0;
-    const gap = nextTop > 0 ? Math.max(0, nextTop - fromBox.bottom) : 0;
-    const span = draggedH + gap;
+    // 正确量 = 被拖卡自己那一格的跨度（自身高度 + 卡间距）：整段平移这个量，
+    // 正好等于换位完成后的最终位置，空位高度恰好等于被拖卡高度。
+    const boxAt = (i: number): GroupBox => groupBoxRef.current.get(sections[i]?.group) ?? { top: 0, bottom: 0 };
+    const span = groupSlotSpan(from, sections.length, boxAt);
     sections.forEach((s, i) => {
       if (i === from) {
         map.set(s.group, 0);
