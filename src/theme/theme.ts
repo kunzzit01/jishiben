@@ -204,7 +204,7 @@ export const lightColors: ThemeColors = {
   bgGradientFrom: '#DCD3FF',
   bgGradientTo: '#F5F2FB',
   headerTint: '#DCD3FF',
-  card: '#f5f1fb',
+  card: '#FFFFFF',
   cardShadow: 'rgba(23,15,45,0.05)',
   cardBorder: 'rgba(23,15,45,0.14)',
 
@@ -252,7 +252,7 @@ export const lightColors: ThemeColors = {
   // Hero 卡上玻璃件内容色日间档（第 6 轮·修正 3）：亮白玻璃上换深紫（= 预算面板文字同族）
   homeGlassIcon: '#3B2A78',
   homeGlassText: '#3B2A78',
-  homeGlassAccent: '#5B45E0',
+  homeGlassAccent: '#1677FF',
   // 图标统一色日间档 = 原太阳图标色（深紫，与面板文字同族）
   homeIconColor: '#3B2A78',
 
@@ -267,7 +267,7 @@ export const lightColors: ThemeColors = {
   homeHeroGlassSheen: '#FFFFFF',
 
   summaryCard: '#F1F1F4',
-  divider: '#DEDEE4',
+  divider: '#E2EAF5',
   dividerHair: '#DCDCE4',
 
   summaryCardGradientFrom: '#FFFFFF',
@@ -278,10 +278,10 @@ export const lightColors: ThemeColors = {
 
   // UI V2.1 §3：日间不再有白字压在浅色上；三级字/未选中 Tab 都提了对比度
   textPrimary: '#17142A',
-  // V2.2c：日间二级字提对比度（#4F4A66 → #433E5A）
-  textSecondary: '#433E5A',
-  textTertiary: '#6A6680',
-  link: '#5B45E0',
+  // V2.2c：日间二级字提对比度（#4F4A66 → #52698D）
+  textSecondary: '#52698D',
+  textTertiary: '#8397B4',
+  link: '#1677FF',
 
   income: '#2FA75F', // tokens: amount.income
   expense: '#EF1116', // tokens: amount.expense（双主题改造：紫 → 红）
@@ -310,7 +310,7 @@ export const lightColors: ThemeColors = {
   fabOrbGlassTop: '#D8CCFB',
   fabOrbGlassFall: '#C3B0F9',
   fabOrbGlassMid: '#A88CF1',
-  fabOrbGlassLow: '#8B6CFF',
+  fabOrbGlassLow: '#6FB2FF',
   fabOrbGlassEdge: '#7C5CFA',
   fabOrbWaterLine: '#E6E6F8',
   fabOrbFillTop: '#6F6BE3',
@@ -351,7 +351,7 @@ export const lightColors: ThemeColors = {
   homeCardSheenCore: 'rgba(255,246,226,0.22)',
   homeCardSheenShoulderA: 'rgba(255,238,205,0.09)',
   homeCardSheenShoulderB: 'rgba(255,225,232,0.09)',
-  homeGlowUnder: '#8B6CFF',
+  homeGlowUnder: '#6FB2FF',
   budgetFillHead: '#A9FBE9',
   budgetFillHeadOver: '#FFB3C1',
   // Hero 卡内预算面板（2026-10-06 回卡）：日间 = 亮玻璃面板（明显浅过卡面）+ 深紫字一套
@@ -445,11 +445,11 @@ export const darkColors: ThemeColors = {
 
   // UI V2.1 §3：夜间不再用 #73738A / #82829A 这类暗灰；三级字改白 56%
   // V2.2c：二级字 .70 → .76
-  textPrimary: '#F2F0FA',
+  textPrimary: '#F4F8FF',
   // 夜间灰字：实测对最亮的渐变色块（#7A2E6A）也 ≥4.5:1（secondary .84 = 5.9，tertiary .72 = 4.8）
-  textSecondary: 'rgba(242,240,250,0.84)',
-  textTertiary: 'rgba(242,240,250,0.72)',
-  link: '#A595FF',
+  textSecondary: 'rgba(244,248,255,0.84)',
+  textTertiary: 'rgba(180,205,240,0.86)',
+  link: '#7FB6FF',
 
   income: '#61E9BE', // tokens: amount.income
   expense: '#FC5F5C', // tokens: amount.expense（双主题改造：紫 → 红）
@@ -568,13 +568,13 @@ export type SemanticColors = {
   tabBar: string;
   /** Tab 选中色（夜白 / 日紫）；未选中色见 tabInactive */
   tabActive: string;
-  /** Tab 选中「标签文字」色：夜间 accentText(#A595FF) 落在栏身上只有 ~4.3:1，改用更亮的 #D2C8FF（≥4.5:1 on 栏身）；日间同 accent */
+  /** Tab 选中「标签文字」色：夜间 accentText(#7FB6FF) 落在栏身上只有 ~4.3:1，改用更亮的 #D2C8FF（≥4.5:1 on 栏身）；日间同 accent */
   tabActiveLabel: string;
   /** Tab 未选中色 */
   tabInactive: string;
   /** 分割线、卡片描边 */
   hairline: string;
-  /** Switch 关闭态轨道（V2.2c：日 #D6D3E0 / 夜白 22%）—— 玻璃 / 渐变上 6% 的发丝线太浅，看不见 */
+  /** Switch 关闭态轨道（V2.2c：日 #CBD9EE / 夜白 22%）—— 玻璃 / 渐变上 6% 的发丝线太浅，看不见 */
   switchTrackOff: string;
   /** 主文字 */
   textPrimary: string;
@@ -653,65 +653,65 @@ export type SemanticColors = {
 
 export const lightSemantic: SemanticColors = {
   // UI V2.1 定稿数值（.zcode/design/UI_V21_SPEC.md 第 1/2/3 节，2026-10-10）
-  bg: '#F5F4FC', // tokens: bg.page
-  surface: '#FBFAFE', // tokens: bg.surface
+  bg: '#F5FAFF', // tokens: bg.page
+  surface: '#FFFFFF', // tokens: bg.surface
   surfaceElevated: '#FFFFFF', // tokens: bg.surfaceRaised
-  surfaceSunken: '#EBE9FD', // tokens: bg.surfaceSunken
-  keypadPanel: '#F3F1FA', // 日间键盘面板：浅薰衣草底，白色圆角键浮在上面（稿 G_AddLight）
+  surfaceSunken: '#EAF4FF', // tokens: bg.surfaceSunken
+  keypadPanel: '#F5F9FF', // 日间键盘面板：浅薰衣草底，白色圆角键浮在上面（稿 G_AddLight）
   keyTile: '#FFFFFF',
-  keyTilePressed: '#E9E5F6',
+  keyTilePressed: '#DCEBFF',
   keyTileHairline: 'rgba(17,17,26,0.06)',
-  keyAccentTile: '#E6E0FC',
-  keyAccentText: '#5B3DF0',
+  keyAccentTile: '#E8F2FF',
+  keyAccentText: '#1677FF',
   // Tab 栏 = 唯一玻璃材质（§2）+ V2.2 高不透明度栏身填充：后面的列表文字不再透出来
   tabBar: 'rgba(255,255,255,0.94)',
-  tabActive: '#5B3DF0',
-  tabActiveLabel: '#5B3DF0',
-  tabInactive: '#6A6680', // = textTertiary（§3：Tab 未选中）
-  hairline: '#EBE9FD', // tokens: border.hairline
-  switchTrackOff: '#D6D3E0',
-  textPrimary: '#14121F', // tokens: text.primary
-  textSecondary: '#433E5A', // tokens: text.secondary
-  textTertiary: '#6A6680', // tokens: text.tertiary
-  accent: '#5E43FC', // tokens: brand.primary
+  tabActive: '#1677FF',
+  tabActiveLabel: '#1677FF',
+  tabInactive: '#8397B4', // = textTertiary（§3：Tab 未选中）
+  hairline: '#EAF4FF', // tokens: border.hairline
+  switchTrackOff: '#CBD9EE',
+  textPrimary: '#071C49', // tokens: text.primary
+  textSecondary: '#52698D', // tokens: text.secondary
+  textTertiary: '#8397B4', // tokens: text.tertiary
+  accent: '#1677FF', // tokens: brand.primary
   onAccent: '#FFFFFF',
-  accentText: '#5B45E0', // tokens: text.link
-  accentSoft: 'rgba(94,67,252,0.10)',
+  accentText: '#1677FF', // tokens: text.link
+  accentSoft: 'rgba(22,119,255,0.10)',
   // ⚠ 双主题改造：支出金额从紫色改为红色（tokens: amount.expense / status.danger）
   amountExpense: '#EF1116',
   amountIncome: '#2FA75F', // tokens: amount.income / status.success
-  amountTransfer: '#433E5A', // tokens: amount.transfer
+  amountTransfer: '#52698D', // tokens: amount.transfer
   danger: '#EF1116', // tokens: status.danger
   warning: '#FAAE2F', // tokens: status.warning
   scrim: 'rgba(10,8,20,0.40)',
-  homeBg: '#F5F4FC', // = bg（tokens: bg.page）
-  homeCard: '#FBFAFE', // = surface（tokens: bg.surface）
-  homeHairline: '#EBE9FD', // = hairline（tokens: border.hairline）
-  homeIconTile: '#F0EDFA',
-  selectedRow: '#E0DFFD', // tokens: bg.brandSoft
-  navBarBg: '#F5F4FC',
-  budgetTrack: 'rgba(23,20,42,0.10)',
-  budgetFill: '#5E43FC', // tokens: brand.primary
+  homeBg: '#F5FAFF', // = bg（tokens: bg.page）
+  homeCard: '#FFFFFF', // = surface（tokens: bg.surface）
+  homeHairline: '#EAF4FF', // = hairline（tokens: border.hairline）
+  homeIconTile: '#EEF5FF',
+  selectedRow: '#E8F2FF', // tokens: bg.brandSoft
+  navBarBg: '#F5FAFF',
+  budgetTrack: 'rgba(7,28,73,0.10)',
+  budgetFill: '#1677FF', // tokens: brand.primary
   budgetFillOver: '#EF1116', // tokens: status.danger
   success: '#2FA75F',
-  brandSoft: '#E0DFFD',
+  brandSoft: '#E8F2FF',
   tileMint: '#D0ECE2',
-  textLink: '#5B45E0',
+  textLink: '#1677FF',
   textInverse: '#FFFFFF',
-  divider: '#DEDEE4',
+  divider: '#E2EAF5',
   chartOrange: '#FE8751',
   chartViolet: '#6F36CC',
-  gradientFrom: '#9083FC',
-  gradientTo: '#634FFC',
-  heroFrom: '#9083FC',
-  heroTo: '#634FFC',
+  gradientFrom: '#2F7CDF',
+  gradientTo: '#1677FF',
+  heroFrom: '#2F7CDF',
+  heroTo: '#1677FF',
 };
 
 export const darkSemantic: SemanticColors = {
   // UI V2.1 定稿数值（.zcode/design/UI_V21_SPEC.md 第 1/2/3 节，2026-10-10）
   // 夜间：bg < surface < surfaceElevated 逐级变亮（底层后退、浮层前进），不靠阴影
-  bg: '#0E121B', // tokens: bg.page
-  surface: '#161B28', // tokens: bg.surface
+  bg: '#020E22', // tokens: bg.page
+  surface: '#0A1A32', // tokens: bg.surface
   surfaceElevated: '#1D2233', // tokens: bg.surfaceRaised
   surfaceSunken: '#161A27', // tokens: bg.surfaceSunken
   keypadPanel: '#121219',
@@ -719,7 +719,7 @@ export const darkSemantic: SemanticColors = {
   keyTilePressed: '#2B2740',
   keyTileHairline: 'rgba(255,255,255,0.07)',
   keyAccentTile: '#2B2547',
-  keyAccentText: '#A595FF',
+  keyAccentText: '#7FB6FF',
   // Tab 栏 = 唯一玻璃材质（§2）+ V2.2 高不透明度栏身填充：后面的列表文字不再透出来
   tabBar: 'rgba(14,10,30,0.92)',
   tabActive: '#FFFFFF',
@@ -728,45 +728,45 @@ export const darkSemantic: SemanticColors = {
   // ⚠ 不是 textTertiary（0.56）：Tab 标签是 11pt 小字（§4 要 4.5:1），而浮空 Tab 栏是玻璃 +
   //    模糊，实测栏内底色会被下方内容提亮到 rgb(90-104, 80-93, 96-144) —— 0.56 只有 3.0-3.4:1。
   //    0.85 实测 4.48:1（差 0.02 不达标），取 0.90（选中 / 未选中仍靠「实心图标 vs 线框图标 + 亮度差」区分）
-  tabInactive: 'rgba(242,240,250,0.90)',
+  tabInactive: 'rgba(244,248,255,0.86)',
   hairline: 'rgba(255,255,255,0.05)',
   switchTrackOff: 'rgba(255,255,255,0.22)',
-  textPrimary: '#F2F0FA',
+  textPrimary: '#F4F8FF',
   // 夜间灰字（见 darkColors 同名注释）：secondary .84 / tertiary .72，对最亮渐变色块 ≥4.5:1
-  textSecondary: 'rgba(242,240,250,0.84)',
-  textTertiary: 'rgba(242,240,250,0.72)',
-  accent: '#6F52F8', // tokens: brand.primary
+  textSecondary: 'rgba(244,248,255,0.84)',
+  textTertiary: 'rgba(180,205,240,0.86)',
+  accent: '#1685FF', // tokens: brand.primary
   onAccent: '#FFFFFF',
-  accentText: '#A595FF', // tokens: text.link
-  accentSoft: 'rgba(165,149,255,0.14)',
+  accentText: '#7FB6FF', // tokens: text.link
+  accentSoft: 'rgba(22,133,255,0.16)',
   // ⚠ 双主题改造：支出金额从紫色改为红色（tokens: amount.expense / status.danger）
   amountExpense: '#FC5F5C',
   amountIncome: '#61E9BE', // tokens: amount.income / status.success
-  amountTransfer: 'rgba(242,240,250,0.84)', // tokens: amount.transfer
+  amountTransfer: 'rgba(244,248,255,0.84)', // tokens: amount.transfer
   danger: '#FC5F5C', // tokens: status.danger
   warning: '#FFC21D', // tokens: status.warning
   scrim: 'rgba(0,0,0,0.55)',
-  homeBg: '#0E121B', // = bg（tokens: bg.page）
-  homeCard: '#161B28', // = surface（tokens: bg.surface）
+  homeBg: '#020E22', // = bg（tokens: bg.page）
+  homeCard: '#0A1A32', // = surface（tokens: bg.surface）
   homeHairline: 'rgba(255,255,255,0.05)', // = hairline（tokens: border.hairline）
-  homeIconTile: '#221E30',
-  selectedRow: '#251A66', // tokens: bg.brandSoft
-  navBarBg: '#0E121B',
+  homeIconTile: '#10264A',
+  selectedRow: '#0E2A55', // tokens: bg.brandSoft
+  navBarBg: '#020E22',
   budgetTrack: 'rgba(255,255,255,0.14)',
-  budgetFill: '#6F52F8', // tokens: brand.primary
+  budgetFill: '#1685FF', // tokens: brand.primary
   budgetFillOver: '#FC5F5C', // tokens: status.danger
   success: '#61E9BE',
-  brandSoft: '#251A66',
+  brandSoft: '#0E2A55',
   tileMint: '#17382A',
-  textLink: '#A595FF',
+  textLink: '#7FB6FF',
   textInverse: '#FFFFFF',
   divider: '#2A2A33',
   chartOrange: '#FC5F2C',
-  chartViolet: '#8B6CFF',
-  gradientFrom: '#8063F8',
-  gradientTo: '#5E3DFA',
-  heroFrom: '#7C63F6',
-  heroTo: '#2710A6',
+  chartViolet: '#6FB2FF',
+  gradientFrom: '#1685FF',
+  gradientTo: '#1257B6',
+  heroFrom: '#1257B6',
+  heroTo: '#0A2A66',
 };
 
 /**
@@ -986,7 +986,7 @@ export const gradients: {
   keyConfirm: LinearGradientToken;
 } = {
   // ⚠ 双主题改造：Hero 渐变日夜两套不再共用（tokens: brand.heroFrom/heroTo）。
-  //   日间 = 亮紫 → 主紫；夜间 = 中紫 → 深靛紫（更深，压在 bg #0E121B 上不刺眼）。
+  //   日间 = 亮紫 → 主紫；夜间 = 中紫 → 深靛紫（更深，压在 bg #020E22 上不刺眼）。
   heroDark: {
     colors: [darkSemantic.heroFrom, darkSemantic.heroTo],
     locations: [0, 1],
@@ -1002,7 +1002,7 @@ export const gradients: {
   },
   heroLight: {
     // 日间：深端在上、亮端在下（180° 竖直）——Hero 顶部的文字是白字（tokens: text.inverse），
-    // 深端 #634FFC 上白字 5.2:1；若把亮端 #9083FC 放顶部，白字只有 3.1:1、深字也只有 3.5:1，
+    // 深端 #1677FF 上白字 5.2:1；若把亮端 #2F7CDF 放顶部，白字只有 3.1:1、深字也只有 3.5:1，
     // 两头都不达标。取值仍严格来自 tokens（brand.heroFrom / heroTo），只调方向。
     colors: [lightSemantic.heroTo, lightSemantic.heroFrom],
     locations: [0, 1],
@@ -1114,8 +1114,8 @@ export const darkGlass: GlassToken = {
  * fill = 胶囊底 / text = 选中字色 / muted = 未选中字色（玻璃上，取 text.secondary 保证对比）
  */
 export const glassPill = {
-  light: { fill: '#5B3DF0', text: '#FFFFFF', muted: '#4F4A66' },
-  dark: { fill: '#FFFFFF', text: '#1A1040', muted: 'rgba(242,240,250,0.84)' },
+  light: { fill: '#1677FF', text: '#FFFFFF', muted: '#4F4A66' },
+  dark: { fill: '#FFFFFF', text: '#1A1040', muted: 'rgba(244,248,255,0.84)' },
 } as const;
 
 /**

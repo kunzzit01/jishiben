@@ -1,0 +1,50 @@
+{
+  "name": "霓虹赛博",
+  "style": "cyberpunk",
+  "source": "skills/cyberpunk/SKILL.md",
+  "intent": "暗底 + 霓虹青/品红描边与发光，等宽小标签，扫描线装饰",
+  "layout": {
+    "hero": "neon",
+    "list": "neon",
+    "tab": "neon",
+    "density": "compact"
+  },
+  "radius": 12,
+  "color": {
+    "canvas": "#0A0A12",
+    "surface": "#12121F",
+    "surfaceAlt": "#16162A",
+    "ink": "#E8E8F0",
+    "inkMuted": "#A9A9C0",
+    "inkSubtle": "#8A8AA0",
+    "hairline": "rgba(0,240,255,0.28)",
+    "accent": "#00F0FF",
+    "accentAlt": "#FF00E5",
+    "warn": "#FFE600",
+    "positive": "#00F0FF",
+    "negative": "#FF00E5",
+    "onAccent": "#0A0A12"
+  },
+  "glow": {
+    "accent": "0 0 8px rgba(0,240,255,.85), 0 0 24px rgba(0,240,255,.35)",
+    "alt": "0 0 8px rgba(255,0,229,.7), 0 0 24px rgba(255,0,229,.32)"
+  },
+  "typography": {
+    "display": {
+      "size": 38,
+      "weight": 800,
+      "tracking": "-0.02em",
+      "family": "mono"
+    },
+    "label": {
+      "size": 10,
+      "tracking": "0.2em",
+      "transform": "uppercase"
+    }
+  },
+  "decoration": {
+    "grid": true,
+    "scanlines": true,
+    "cornerCuts": true
+  }
+}

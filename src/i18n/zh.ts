@@ -432,6 +432,8 @@ export const zh = {
   },
   home: {
     netWorth: '净资产',
+    /** 首页顶部标语（照片背景上那一句） */
+    slogan: '每一笔，都更有数。',
     noAssetsTitle: '还没有添加资产账户',
     noAssetsHint: '点这里，创建第一个资产账户',
     budgetLabel: '本月预算',

@@ -1,0 +1,44 @@
+{
+  "name": "合成器网格",
+  "style": "vaporwave",
+  "source": "skills/vaporwave/SKILL.md",
+  "intent": "粉紫渐变天空 + 网格地平线 + 霓虹字，复古未来",
+  "layout": {
+    "hero": "sky",
+    "list": "glass",
+    "tab": "pill",
+    "density": "comfortable"
+  },
+  "radius": 18,
+  "color": {
+    "sky1": "#FF71CE",
+    "sky2": "#B967FF",
+    "sky3": "#5C3D99",
+    "canvas": "#1A0F2E",
+    "surface": "rgba(255,255,255,0.10)",
+    "surfaceSolid": "#241540",
+    "ink": "#FFFFFF",
+    "inkDim": "rgba(255,255,255,0.8)",
+    "inkSubtle": "rgba(255,255,255,0.6)",
+    "accent": "#FF71CE",
+    "accentAlt": "#5CF2FF",
+    "positive": "#5CF2FF",
+    "negative": "#FF71CE",
+    "onAccent": "#1A0F2E"
+  },
+  "typography": {
+    "display": {
+      "size": 40,
+      "weight": 700,
+      "tracking": "-0.02em"
+    },
+    "label": {
+      "size": 10,
+      "tracking": "0.24em",
+      "transform": "uppercase"
+    }
+  },
+  "decoration": {
+    "gridHorizon": true
+  }
+}

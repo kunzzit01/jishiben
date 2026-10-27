@@ -13,7 +13,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BottomTabBar } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { LinearGradient } from 'expo-linear-gradient';
 import type {
   MainTabParamList,
   HomeStackParamList,
@@ -45,18 +44,24 @@ import {
   useTabBarAutoHide,
 } from './src/context/TabBarAutoHideContext';
 import { useTheme } from './src/theme/useTheme';
+// 底栏 / 圆钮的颜色唯一来源（唯一视觉标准：design/reference/home-day.png、home-night.png）
+import { useHomePalette } from './src/theme/homePalette';
 import { TabSceneDisplayGate } from './src/navigation/TabSceneDisplayGate';
 import { useSystemColorScheme } from './src/theme/useSystemColorScheme';
-// 浮空 Tab 栏的几何常量（全项目唯一来源）：外壳 / 底部留白 / 收起距离共用同一组数
+// 贴底通栏 Tab 栏的几何常量（全项目唯一来源）：栏身 / 凹槽 / 圆钮 / 底部留白 共用同一组数
 import {
   TAB_BAR_HEIGHT,
   TAB_BAR_GAP,
-  TAB_BAR_SHELL_HEIGHT,
+  TAB_BAR_NOTCH_GAP,
+  TAB_BAR_NOTCH_R,
+  TAB_BAR_RAISE,
+  TAB_CENTER_BUTTON_CY,
   TAB_CENTER_BUTTON_SIZE,
-  TAB_CENTER_BUTTON_BOTTOM,
 } from './src/hooks/useTabClearance';
+// 底板：凹槽由 SVG 路径（notchBarPath）真正挖出来，不是用色块遮盖
+import { NotchTabBarSurface } from './src/components/nav/NotchTabBar';
 // 标签文字走统一文字组件（令牌字号 caption2 = 11pt；英文自动走打包 Inter）
-import { AppText, GlassView } from './src/components/ui';
+import { AppText } from './src/components/ui';
 import { StartupSkeleton } from './src/components/ui/StartupSkeleton';
 // 启动占位页只需要"现有主题底色"这一个令牌：此时 ThemeModeProvider 还没挂载，
 // useTheme() 用不了（它会抛错），只能直接引 token
@@ -324,12 +329,15 @@ function NavBarScrim() {
   );
 }
 
-// 中央「记一笔」圆钮（UI V2 §3.4，2026-10-10；V2.4 改几何）：
-// 58pt 圆 + accent 渐变 + 顶部内高光 + 柔和粉紫投影，**凸出栏顶 13**（栏 48 高，圆钮底距栏底 3）。
-// 触摸区：整圆都在外壳内，Android 判得中。
+// 中央「记一笔」圆钮（参照 design/reference/home-day.png 底栏中央的蓝色圆钮）：
+// 52pt 圆 = 2 × 凹槽半径（26），圆心落在栏顶上边缘下方 19.63 → 顶部只露出 6.37，
+// 其余坐在 NotchTabBarSurface 用路径挖出的凹槽里（与凹槽之间留 notchGap = 6 的缝）。
+// 颜色全部来自 useHomePalette（fabBg / fabIcon），外圈只有一层很淡的 fabGlow 光晕（投影做的，
+// 比再叠一圈描边更克制 —— 参考图里这个圆是平的，只有一点点外发光）。
+// 触摸区：整圆都在外壳内（外壳高 = 栏身 + 露出的 6.37），Android 判得中。
 // 铁律：不加任何按压视觉反馈（无缩放 / 无位移 / 无水波），只保留点击震动。
 function CenterTabButton({ onPress }: { onPress?: () => void }) {
-  const { semantic } = useTheme();
+  const palette = useHomePalette();
   const t = useT();
 
   return (
@@ -338,32 +346,20 @@ function CenterTabButton({ onPress }: { onPress?: () => void }) {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={t('nav.add')}
-      style={[styles.centerButton, { boxShadow: '0px 8px 18px rgba(108,77,246,0.45)' }]}
+      style={[
+        styles.centerButton,
+        { backgroundColor: palette.fabBg, boxShadow: `0px 6px 16px ${palette.fabGlow}` },
+      ]}
     >
-      {/* 根元素是普通 View（圆角 + overflow 裁切），渐变画在子层 */}
-      <LinearGradient
-        colors={['#6C4DF6', '#9B5BD6']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-      {/* 顶部柔和高光：上半圆白色渐隐 */}
-      <LinearGradient
-        colors={['rgba(255,255,255,0.32)', 'rgba(255,255,255,0)']}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.centerButtonGloss}
-        pointerEvents="none"
-      />
-      <Ionicons name="add" size={26} color={semantic.onAccent} />
+      <Ionicons name="add" size={24} color={palette.fabIcon} />
     </Pressable>
   );
 }
 
-// 浮空 Tab 栏外壳（UI V2 §3.4）：几何定位（absolute / 左右 16 / 贴安全区 / 高 48 / 全圆角胶囊）与
-// 收起展开的 transform 在这里；材质（栏身色 / 阴影）交给内层栏自己的 tabBarStyle。
-// 中央「+」58 圆凸出栏顶 13（V2.4）—— 外壳高度 = 栏身 + 凸起。
+// 贴底通栏 Tab 栏外壳（参照 design/reference/home-day.png）：几何定位（absolute / 左右 0 / 贴屏幕底 /
+// 高 = 栏身 + 底部安全区 + 圆钮露出的 6.37）与收起展开的 transform 在这里；
+// 底板（底色 + 中央凹槽 + 上边缘 hairline）由 NotchTabBarSurface 用 SVG 路径画 —— 凹槽是真的挖出来的，
+// 不是色块遮盖。
 // 注意：v7 会以普通函数方式调用 tabBar（tabBar(props) 而非 <tabBar/>），
 // 所以这层不能放 hooks——hooks 全部在 SlidingTabBarInner 组件里。
 function SlidingTabBar(props: any) {
@@ -372,12 +368,21 @@ function SlidingTabBar(props: any) {
 
 function SlidingTabBarInner(props: any) {
   // 底部让位（安卓三键导航实测 / 手势条 / iPhone Home Indicator / web 0）唯一来源：
-  // 与自绘键盘、底部抽屉、NavBarScrim 遮罩同一个数。不读裸 insets.bottom —— Expo Go /
-  // 非 edge-to-edge 的安卓机 insets.bottom 可能报 0，栏会压到系统导航条上。
+  // 与自绘键盘、底部抽屉、NavBarScrim 遮罩、useTabClearance 同一个数。不读裸 insets.bottom ——
+  // Expo Go / 非 edge-to-edge 的安卓机 insets.bottom 可能报 0，栏会压到系统导航条上。
   const bottomInset = useBottomSystemInset();
   const { translateY, opacity } = useTabBarAutoHide();
-  const { radius, semantic } = useTheme();
   const { state, navigation } = props;
+
+  // 底板高度（含底部安全区）= 栏身 58 + inset：底板一路铺到屏幕底边，不再浮在安全区之上。
+  // tabBarStyle 里的 height / paddingBottom 用同一组数（见 AppContent），两边不会漂移。
+  const barHeight = TAB_BAR_HEIGHT + bottomInset;
+  // 圆钮底边距底板底边（冻结契约，别自己重算）：底板坐标里圆心在上边缘下方 19.63、半径 26，
+  // 即圆心距底边 barHeight − 19.63，圆底边再减半径 26 → barHeight − 19.63 − 26。
+  // 390 宽 / 34 inset：92 − 19.63 − 26 = 46.37（圆钮底部距屏幕底 46.37，顶部露出栏顶 6.37）。
+  const centerButtonBottom = barHeight - TAB_CENTER_BUTTON_CY - TAB_CENTER_BUTTON_SIZE / 2;
+  // 外壳比底板再高 6.37：圆钮顶部露在栏顶之上，整圆必须留在外壳内，Android 才判得中触摸
+  const shellHeight = barHeight + TAB_BAR_RAISE;
 
   // 中央「+」的按压：与 react-navigation 内层 BottomTabItem 的行为逐字一致
   // （先 emit tabPress，没被阻止才 navigate）——这样 resetToRootOnTabPress 的
@@ -394,37 +399,40 @@ function SlidingTabBarInner(props: any) {
 
   return (
     <Animated.View
-      // box-none：外壳本身不吃触摸（透明区域让页面照常点击），子元素（栏 / 圆钮）正常接收
+      // box-none：外壳本身不吃触摸（凹槽两侧的透明区让页面照常点击），子元素（栏 / 圆钮）正常接收
       pointerEvents="box-none"
       style={[
         styles.tabShell,
         {
-          // 栏底贴着安全区上沿（GAP 0）；外壳向上多出圆钮凸起。
-          // bottom / height 全部来自 useTabClearance 的令牌与底部 inset，本文件不写死数字
-          bottom: TAB_BAR_GAP + bottomInset,
-          height: TAB_BAR_SHELL_HEIGHT,
+          // 贴底通栏：外壳下沿 = 屏幕底边（GAP 恒 0）；高度 = 栏身 + 安全区 + 圆钮露出的部分
+          bottom: TAB_BAR_GAP,
+          height: shellHeight,
           transform: [{ translateY }],
           opacity,
         },
       ]}
     >
-      {/* 内层栏（react-navigation 自带）：几何（高度 / 全圆角）留在 screenOptions 的 tabBarStyle；
-          材质（填充 / 描边 / 顶部内高光 / 投影 / 模糊回退）统一走 UI V2.1 §2 的 GlassView。
-          V2.2：栏身填充换成高不透明度磨砂（夜 92% / 日 94%，semantic.tabBar）；
-          D5：strongBlur 强模糊（iOS 强度 70 / web backdrop-filter 28px）；Android 无原生模糊，只靠 fill */}
-      <View style={styles.tabBarRow}>
-        <GlassView radius={radius.full} fill={semantic.tabBar} strongBlur style={[styles.tabBarGlass, { borderWidth: StyleSheet.hairlineWidth, borderColor: semantic.hairline }]}>
-          <BottomTabBar {...props} />
-        </GlassView>
+      {/* 层级（从下到上）：底板 Surface → 库的 BottomTabBar → 中央圆钮。
+          这层包装只负责两件事：贴底 + 顶部两个外角 18 圆角（overflow 裁切只裁底板，不裁圆钮——
+          圆钮画在它外面） */}
+      <View style={[styles.tabBarRow, { height: barHeight }]}>
+        <NotchTabBarSurface height={barHeight} notchR={TAB_BAR_NOTCH_R} notchGap={TAB_BAR_NOTCH_GAP} />
+        <BottomTabBar {...props} />
       </View>
 
       {/* 中央「+」：绝对定位在外壳之内（整圆都在可点区里），横向居中对齐五个槽位的中缝 */}
-      <View style={styles.centerButtonSlot} pointerEvents="box-none">
+      <View
+        style={[styles.centerButtonSlot, { bottom: centerButtonBottom, height: TAB_CENTER_BUTTON_SIZE }]}
+        pointerEvents="box-none"
+      >
         <CenterTabButton onPress={onPressAdd} />
       </View>
     </Animated.View>
   );
 }
+
+/** 底板顶部两个外角的圆角（参考图实测 ≈18dp）：只在包装层裁切，不参与 notchBarPath 的数学 */
+const TAB_BAR_TOP_RADIUS = 18;
 
 /** Tab 图标墨迹尺寸（tabBarIcon 的 size 与 tabBarIconStyle 的盒高同源，避免两处各写一个数后漂移） */
 const TAB_ICON_SIZE = 20;
@@ -466,9 +474,12 @@ function resetToRootOnTabPress(tabName: string) {
 // App() 自己不行——ThemeModeProvider 是 App() 渲染出来的，
 // useTheme() 得在它渲染出的子孙组件里调用才能读到值。
 function AppContent() {
-  const { isDark, colors, semantic, spacing, radius } = useTheme();
-  // 选中态圆盘（纯状态指示，无按压动画）：夜 白 10% / 日 accent 10%
-  const tabDiscColor = isDark ? 'rgba(255,255,255,0.10)' : semantic.accentSoft;
+  const { isDark, colors, semantic, spacing } = useTheme();
+  // 底栏 / 圆钮的颜色唯一来源（唯一视觉标准 design/reference/home-day.png｜home-night.png）
+  const palette = useHomePalette();
+  // 栏身高度 = TAB_BAR_HEIGHT + 底部安全区：与外壳（SlidingTabBarInner）、页面留白（useTabClearance）
+  // 共用同一个 inset 来源，三处不会各自漂移
+  const bottomInset = useBottomSystemInset();
   const t = useT();
   const tabAutoHide = useCreateTabBarAutoHide();
 
@@ -538,10 +549,10 @@ function AppContent() {
           )}
           screenOptions={({ route }) => ({
             headerShown: false,
-            // 选中 = 实心图标 + tabActive（夜白 / 日紫）；未选中 = 线框图标 + tabInactive（UI V2 §1）
-            tabBarActiveTintColor: semantic.tabActiveLabel,
-            // 未选中标签：夜间 .66 alpha 保证 11pt 文字 ≥4.5:1（日间沿用 textTertiary）
-            tabBarInactiveTintColor: semantic.tabInactive,
+            // 选中 = 实心图标 + palette.tabActive；未选中 = 线框图标 + palette.tabInactive
+            // （颜色唯一来源改为 useHomePalette：与参考图底栏同一个蓝，不再走旧语义令牌）
+            tabBarActiveTintColor: palette.tabActive,
+            tabBarInactiveTintColor: palette.tabInactive,
             // 无障碍读屏名（标签改成函数式渲染后，库不再自动拼「x, tab, n of m」，显式给名字）
             tabBarAccessibilityLabel: tabLabels[route.name] ?? route.name,
             // 标签走统一文字组件：令牌字号 caption2 = 11pt（旧的 13pt 让英文「Settings」
@@ -564,25 +575,23 @@ function AppContent() {
                 {tabLabels[route.name] ?? route.name}
               </AppText>
             ),
-            // 栏身材质（UI V2.1 §2）：浮空胶囊的填充 / 描边 / 顶部内高光 / 投影 / 模糊回退
-            // 统一由外层 GlassView 画，这里只留几何（高度 / 全圆角 / 裁切）——底色与描边清空；
-            // 几何（左右 16 / 距底 18）由 SlidingTabBar 外壳负责
+            // 栏身只留几何，材质 / 描边 / 凹槽全部由外层 NotchTabBarSurface 的 SVG 画：
+            // 底色透明（让底板透出来）、无圆角（顶部两个外角由包装层 18 圆角 + overflow 裁切）、
+            // 无投影（贴底通栏不浮空）。
             tabBarStyle: {
-              height: TAB_BAR_HEIGHT,
-              // 关键:覆盖 BottomTabBar 内部默认的 paddingBottom: insets.bottom——
-              // 外壳已经用 bottom: TAB_BAR_GAP + bottomInset(useBottomSystemInset) 避开过安全区，
-              // 库内部再 pad 一次会把内容区压扁，导致 Tab 文字下半截被挤出卡片。
-              // 这里清零不是"写死底部内边距"：让位由外壳的唯一 inset 来源负责（见 SlidingTabBarInner）
-              paddingBottom: 0,
+              // 高度 = 栏身 58 + 底部安全区：底板铺到屏幕底边，所以安全区算在栏身之内
+              height: TAB_BAR_HEIGHT + bottomInset,
+              // 关键：把库默认的 paddingBottom: insets.bottom 换成同一个 inset 来源
+              // （useBottomSystemInset）。这样内容区恒为 58，5 个槽位排在凹槽下方那条带上；
+              // 不用 0 是因为底板现在真的延伸进了安全区，内容若不内缩就会顶到 Home Indicator 上。
+              paddingBottom: bottomInset,
+              // 底板底色在 Surface 的 SVG 里（palette.tabBg），栏身必须透明才透得出来
               backgroundColor: 'transparent',
+              // 上边缘 hairline 由 Surface 画（只描上边缘 + 凹槽，不下描边、不画圆角框）
               borderTopWidth: 0,
-              // 全圆角胶囊（UI V2：不再用 20 圆角方框，也不再画发丝描边）
-              borderRadius: radius.full,
-              // 圆角要裁掉内容（历史上按渐变出血的装饰层会漏出来出直角）
-              overflow: 'hidden',
+              borderRadius: 0,
               // ⚠库的 BottomTabBar 自带 styles.bottom.elevation: 8（安卓默认"黑"阴影）——
-              // 半透明/浅色栏身上会透出一条中性暗带（=用户追过的"白条"暗半）；清零，
-              // 阴影统一交给外层 GlassView 的令牌投影
+              // 贴底栏不需要任何投影，清零
               elevation: 0,
             },
             // 图标托默认 31×28（TabBarIcon 的 HIG 尺寸），比 20 号图标多出的 4pt 空档会算进上留白；
@@ -603,10 +612,7 @@ function AppContent() {
                 // 内容（图标 / 标签）超出时收缩而不是横向溢出挡住相邻 Tab
                 style={[props.style, { paddingHorizontal: 4, justifyContent: 'center', minWidth: 0, flexShrink: 1 }]}
               >
-                {/* 选中圆盘：绝对定位画在图标 + 标签之下，不占排版、不随按压变化 */}
-                {props.accessibilityState?.selected ? (
-                  <View pointerEvents="none" style={[styles.tabDisc, { backgroundColor: tabDiscColor }]} />
-                ) : null}
+                {/* 参考图底栏没有选中底色块：选中只靠 palette.tabActive 的图标 + 文字（实心图标） */}
                 {props.children}
               </PlatformPressable>
             ),
@@ -740,77 +746,47 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  // 浮空 Tab 栏外壳：只负责几何定位 + 承载收起/展开的 transform。
-  // 高度 / 距底 / 圆钮槽位在外壳内联给（都要读底部 inset 与令牌常量，
+  // 贴底通栏 Tab 栏外壳：只负责几何定位 + 承载收起/展开的 transform。
+  // 高度 / 贴底距离在 SlidingTabBarInner 内联给（要读底部 inset 与令牌常量，
   // 底部 inset 的唯一来源 = useBottomSystemInset，与 useTabClearance / 收起位移同源）。
-  // 中央「+」凸出栏顶 13（V2.4），整圆都在外壳内；
-  // overflow 必须 visible（+ 的投影画到外壳边缘之外）。
-  // 左右 16：UI V2 稿的悬浮胶囊缩进（与页面内容边距一致）
+  // 左右 0：通栏贴死屏幕两侧（参考图底栏不留左右缩进）。
+  // overflow 必须 visible（圆钮顶部露出栏顶 6.37，投影也画到外壳边缘之外）。
   tabShell: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
     overflow: 'visible',
   },
-  // 内层栏的内容区：与外壳同尺寸（栏身 = 外壳高度；+ 收进栏内后不再留凸起区）
+  // 底板包装层：贴底、满宽、高度 = 栏身 + 底部安全区（内联给）。
+  // 顶部两个外角 18 圆角靠这里 + overflow 裁切实现（参考图）；⚠ 不能改 notchBarPath 的数学，
+  // 也不能让这层裁到圆钮 —— 圆钮是它的兄弟节点，画在裁切区之外。
   tabBarRow: {
     position: 'absolute',
     left: 0,
     right: 0,
-    top: TAB_BAR_SHELL_HEIGHT - TAB_BAR_HEIGHT,
-    height: TAB_BAR_HEIGHT,
+    bottom: 0,
+    borderTopLeftRadius: TAB_BAR_TOP_RADIUS,
+    borderTopRightRadius: TAB_BAR_TOP_RADIUS,
+    overflow: 'hidden',
   },
-  // 栏身材质层（UI V2.1 §2 的 GlassView）：铺满内容区，全圆角由组件 radius='full' 给
-  tabBarGlass: { height: '100%' },
   // 中央圆钮槽：整圆都在槽内（槽高 = 圆径），横向居中 → 圆钮对准五个槽位的中缝。
-  // 居中不写任何 px：left:0/right:0 铺满外壳 + alignItems:'center'，即外壳宽度的 50%。
-  // 外壳左右缩进对称（16/16），而库给每个路由一个 flex:1 槽位
-  // （@react-navigation/bottom-tabs BottomTabBar.tsx bottomItem:{flex:1}；记一笔 虽然
-  //  tabBarButton 返回 null，但 BottomTabItem 的外层 View 仍占位），
-  // 因此 5 个等宽槽位的第 3 个中点 === 外壳中线，320/360/390/430、横竖屏都由几何保证。
+  // 居中不写任何 px：left:0/right:0 铺满外壳 + alignItems:'center'，即屏幕宽度的 50%。
+  // 库给每个路由一个 flex:1 槽位（@react-navigation/bottom-tabs BottomTabBar.tsx
+  // bottomItem:{flex:1}；「记一笔」虽然 tabBarButton 返回 null，但 BottomTabItem 的外层 View 仍占位），
+  // 因此 5 个等宽槽位的第 3 个中点 === 外壳中线 === 底板凹槽中线，320/390/430、横竖屏都由几何保证。
+  // bottom 在 JSX 内联给（= barHeight − 19.63 − 26，要读底部 inset）。
   centerButtonSlot: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: TAB_CENTER_BUTTON_BOTTOM,
-    height: TAB_CENTER_BUTTON_SIZE,
     alignItems: 'center',
   },
-  // 选中圆盘：绝对定位，居中于栏身内（上下各留 4）。
-  // 尺寸从 TAB_BAR_HEIGHT 派生（48 → 40 / 半径 20）：改栏身高度时圆盘不会错位或变成椭圆
-  tabDisc: {
-    position: 'absolute',
-    top: 4,
-    left: 8,
-    right: 8,
-    height: TAB_BAR_HEIGHT - 8,
-    borderRadius: (TAB_BAR_HEIGHT - 8) / 2,
-  },
-  // 圆钮顶部柔和高光（上半圆）
-  centerButtonGloss: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '50%',
-  },
-  // 中央圆钮本体（UI V2）：58pt 圆，accent 渐变 + 顶部内高光在 JSX 内联给；
-  // 根元素是普通 View（圆角 + overflow 裁切），渐变画在 absolute 子层
+  // 中央圆钮本体：52pt 圆（= 2 × 凹槽半径），底色 / 加号 / 光晕全部来自 palette（JSX 内联给）
   centerButton: {
     width: TAB_CENTER_BUTTON_SIZE,
     height: TAB_CENTER_BUTTON_SIZE,
     borderRadius: TAB_CENTER_BUTTON_SIZE / 2,
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  // 顶部内高光：1dp 白色亮线（稿里 inset 0 1px 0 rgba(255,255,255,.35)）
-  centerButtonHighlight: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.35)',
   },
 });

@@ -430,6 +430,8 @@ export const en = {
   },
   home: {
     netWorth: 'Net Worth',
+    /** Hero slogan shown over the photo backdrop */
+    slogan: 'Every ringgit, on record.',
     noAssetsTitle: 'No asset accounts yet',
     noAssetsHint: 'Tap here to create your first account',
     budgetLabel: 'Monthly Budget',

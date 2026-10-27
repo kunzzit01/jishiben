@@ -71,6 +71,8 @@ interface AmountCalculatorKeypadProps {
   onNoteBlur?: () => void;
   /** 表单当前已选日期（YYYY-MM-DD）：日期键显示它；等于今天或不传时才标注"今天" */
   selectedDate?: string;
+  /** 隐藏日期键（添加资产这类没有日期概念的页面）：完成键随之占满右侧三行 */
+  hideDateKey?: boolean;
 }
 
 export function AmountCalculatorKeypad({
@@ -90,6 +92,7 @@ export function AmountCalculatorKeypad({
   onNoteFocus,
   onNoteBlur,
   selectedDate,
+  hideDateKey,
 }: AmountCalculatorKeypadProps) {
   const { semantic, gradients } = useTheme();
   const t = useT();
@@ -221,7 +224,10 @@ export function AmountCalculatorKeypad({
             <View key={idx} style={[styles.gridCell, cellStyle]}>
               <Pressable
                 onPress={() => handlePress(item.key, item.type)}
-                style={({ pressed }) => [styles.tile, { backgroundColor: tileBg(pressed) }]}
+                style={({ pressed }) => [
+                  styles.tile,
+                  { backgroundColor: tileBg(pressed), borderWidth: 1, borderColor: semantic.keyTileHairline },
+                ]}
               >
                 {item.type === 'clear' ? (
                   <Text style={[styles.keyText, styles.keyTextClear, { color: semantic.textSecondary }]}>C</Text>
@@ -246,8 +252,8 @@ export function AmountCalculatorKeypad({
               delayLongPress={350}
               style={({ pressed }) => [
                 styles.tile,
-                // 退格：淡紫实底（keyAccentTile），按下略深
-                { backgroundColor: pressed ? semantic.keyTilePressed : semantic.keyAccentTile },
+                // 退格：品牌淡底，按下略深；加发丝边让白键在冰蓝面板上立得住
+                { backgroundColor: pressed ? semantic.keyTilePressed : semantic.keyAccentTile, borderWidth: 1, borderColor: semantic.keyTileHairline },
               ]}
               accessibilityRole="button"
               accessibilityLabel={t('addTx.keypadBackspace')}
@@ -256,6 +262,7 @@ export function AmountCalculatorKeypad({
             </Pressable>
           </View>
 
+          {!hideDateKey && (
           <View style={[styles.rightCell, cellStyle]}>
             <Pressable
               onPress={() => handlePress('today', 'today')}
@@ -272,9 +279,10 @@ export function AmountCalculatorKeypad({
               </Text>
             </Pressable>
           </View>
+          )}
 
-          {/* 完成：占第 3、4 行，accent 渐变，长按 = 保存后继续记下一笔 */}
-          <View style={[styles.rightCell, { height: 2 * (keyH + KEY_GAP), padding: KEY_HALF_GAP }]}>
+          {/* 完成：默认占第 3、4 行；隐藏日期键时占第 2~4 行。长按 = 保存后继续记下一笔 */}
+          <View style={[styles.rightCell, { height: (hideDateKey ? 3 : 2) * (keyH + KEY_GAP), padding: KEY_HALF_GAP }]}>
             <Pressable
               onPress={() => handlePress('confirm', 'confirm')}
               onLongPress={onConfirmLongPress}

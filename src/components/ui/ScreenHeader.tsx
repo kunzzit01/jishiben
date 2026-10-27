@@ -118,12 +118,27 @@ export function ScreenHeader({
     );
   }
 
+  // 返回键：36 圆 + 浅底 + 发丝边（与首页顶部那组圆形工具键同一套语言）
   const backButton = onBack ? (
-    <IconButton
-      icon="chevron-back"
-      accessibilityLabel={backAccessibilityLabel ?? tr('common.back')}
-      onPress={onBack}
-    />
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: semantic.surfaceElevated,
+        borderWidth: 1,
+        borderColor: semantic.hairline,
+        boxShadow: '0 2px 8px rgba(7,28,73,0.10)',
+      }}
+    >
+      <IconButton
+        icon="chevron-back"
+        accessibilityLabel={backAccessibilityLabel ?? tr('common.back')}
+        onPress={onBack}
+      />
+    </View>
   ) : null;
 
   // 版式 2：顶栏只有返回键 + 右侧动作，标题在下方左对齐占满整行

@@ -18,6 +18,9 @@ import { getCategoryLabel } from '../i18n/categories';
 import { useLanguage } from '../i18n/LanguageContext';
 import type { LangMode } from '../i18n';
 import { useTheme } from '../theme/useTheme';
+import type { HomePalette } from '../theme/homePalette';
+import { useHomePalette } from '../theme/homePalette';
+import { useThemeMode } from '../context/ThemeModeContext';
 import { useLayout } from '../theme/useLayout';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler, useTabBarForceHide } from '../context/TabBarAutoHideContext';
@@ -32,7 +35,12 @@ import { AppText, BottomSheet, Button, EmptyState, GlassView, HeroGradient, Icon
 import { MonthlyBudgetSheet } from '../components/MonthlyBudgetSheet';
 import { TransactionSearchSheet, type SearchRow } from '../components/TransactionSearchSheet';
 import { withAlpha } from '../components/ui/color';
-import { ProgressBar } from '../components/ui/ProgressBar';
+import { FolderAssetCard } from '../components/home/FolderAssetCard';
+import { HomeHeroBackdrop } from '../components/home/HomeHeroBackdrop';
+import { AccountChip, RoundIconButton } from '../components/home/HomeHeaderControls';
+import { QuickActions } from '../components/home/QuickActions';
+import type { QuickActionKey } from '../components/home/QuickActions';
+import { IconChevronDown, IconChevronRight, IconEye, IconEyeOff } from '../components/home/HomeIcons';
 // HeroMetalSheen / AuroraFlowShader 文件与色 token 原样保留（可恢复）；V2 定稿里没有
 // 紫色金属卡与流光，所以这里不再 import —— 陀螺仪（useHeroSheen）也就不会启动，省电。
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
@@ -57,17 +65,30 @@ const FLASH_ROW_MS = 500;
 
 // ── UI V2 首页版型常量（数值取自 .zcode/design/mockups/G_HomeDark|Light.dc.html 的内联样式）──
 /** Hero 净资产整数段字号（V2 稿：58 / 500；RM 24 / 小数 28 由 MoneyText 按比例派生） */
-const HERO_AMOUNT_SIZE = 40;
+const HERO_AMOUNT_SIZE = 43;
 /** 大金额行盒高（V2 稿 line-height 64；隐藏态的 •••••• 也用它，显隐切换时行高不跳） */
 const HERO_AMOUNT_LINE = 64;
 /** Hero 金额行的最小行盒高（= MoneyText hero 行高比 1.103 × 40 取整）：降档时行高不再变，页面高度恒定 */
-const HERO_AMOUNT_MIN_H = 44;
+const HERO_AMOUNT_MIN_H = 47;
+/** 预算槽定高（页内第二行）：标签 20 + 明细 16 + 间距 4 + 条 6 = 46，已设 / 未设两态等高 */
+const HERO_BUDGET_SLOT_H = 46;
 /** 金额行的「眼睛」占位宽（眼睛 36 + 间距 10，V2 稿 1:1）：金额盒子的宽度上限 = 行宽 − 它 */
 const HERO_EYE_RESERVE = 46;
 /** 金额行与眼睛的间距（V2 稿 10；比 spacing.sm 大 2，按稿 1:1） */
 const HERO_EYE_GAP = 10;
-/** 账单列表卡圆角（V2 稿 26 —— 比 radius.lg(20) 大的内容卡档，只在首页用） */
-const LIST_CARD_RADIUS = 22;
+/** 「最近交易」统一面板的圆角 = radius.lg（不再单独开一档，与 MonthSummary 同一张卡） */
+const LIST_CARD_RADIUS = 20;
+/** 交易行分类图标圆底直径 / 圈内图标尺寸（参考图 38 / 18） */
+const TX_ICON_SIZE = 38;
+const TX_ICON_GLYPH = 18;
+/** 金额列固定宽度：右对齐 + 定宽，金额长短变化时列宽不跳动（tabular-nums 对齐） */
+const TX_AMOUNT_COL_WIDTH = 92;
+/** 面板描边宽度（1px 描边，不用 shadow 撑轮廓） */
+const PANEL_BORDER = 1;
+/** 顶部柔和光场：只铺顶部这段高度（dp）—— 光场本身在到达下边缘前就淡到 0，不靠高度裁切 */
+const TOP_GLOW_HEIGHT = 420;
+/** 光场整体透明度：交给渐变自身的 alpha 表达强度，外层不再二次衰减（否则顶部永远偏白） */
+const TOP_GLOW_OPACITY = 1;
 // ── 币种分页（手势）：一次滑动只翻相邻的一页，不管甩得多快 ──
 /** 位移超过页宽的这个比例 → 翻一页（3%，很灵敏） */
 const PAGER_DIST_FRAC = 0.03;
@@ -119,20 +140,6 @@ function monthKeyOf(year: number, month: number) {
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * 渐变上大金额的投影（V2 稿：0 2px 20px，比旧版的大而柔）。
- * 色取品牌深紫令牌（heroDark 起点色）按主题配透明度 —— 不在页面里写死色值。
- * UI V2.1 §3：投影只在夜间给（浅字压深紫渐变）；日间文字是深色压浅色渐变，投影只会糊字。
- */
-function heroTextShadowStyle(darkestGradientColor: string, isDark: boolean): TextStyle {
-  if (!isDark) return {};
-  return {
-    textShadowColor: withAlpha(darkestGradientColor, 0.35),
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 20,
-  };
 }
 
 /** 账本创建时间戳 → 'YYYY-MM-DD'（本地时区；账本行的日期展示用） */
@@ -239,7 +246,7 @@ function LedgerRow({
                 {t('home.noAssets')}
               </AppText>
             ) : (
-              totals.map(([code, amount]) => (
+              totals.slice(0, 3).map(([code, amount]) => (
                 // 抽屉是「看不出是什么钱」的地方 → 带币种代码（计划 4.4）；金额走 MoneyText（flexShrink 1：
                 // 长余额在窄屏/长币种下压缩换紧凑格式，绝不把右侧动作列挤出 344）
                 <View key={code} style={styles2.balanceLine}>
@@ -249,6 +256,12 @@ function LedgerRow({
                   <MoneyText value={amount} variant="subhead" color={semantic.textPrimary} style={styles2.balanceAmount} />
                 </View>
               ))
+            )}
+            {totals.length > 3 && (
+              <AppText variant="caption" color={semantic.textTertiary} numberOfLines={1}>
+                {'+'}
+                {totals.length - 3}
+              </AppText>
             )}
             <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
               {isDefault
@@ -269,6 +282,7 @@ function LedgerRow({
           <IconButton
             icon="star-outline"
             size={20}
+            color={semantic.textSecondary}
             accessibilityLabel={t('home.setDefaultLedger')}
             onPress={onSetDefault}
             testID={`ledger-setdefault-${ledger.id}`}
@@ -277,6 +291,7 @@ function LedgerRow({
         <IconButton
           icon="pencil"
           size={20}
+          color={semantic.textSecondary}
           accessibilityLabel={t('home.editLedger')}
           onPress={onStartRename}
           testID={`ledger-rename-${ledger.id}`}
@@ -418,12 +433,23 @@ function PillStackLabel({ index, pos, text, color, textStyle }: { index: number;
 }
 
 /** 页指示点：宽度与透明度按「当前页距离」插值（当前 14 宽、其余 5 宽），纯 UI 线程 */
-function HeroDotFx({ index, pos, color }: { index: number; pos: SharedValue<number>; color: string }) {
+// 分页点几何（按 V2 包）：底点 5 / 选中 11，每个点自带 16 宽的命中盒，点间距 0、贴着卡底
+const dotStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginTop: 2 },
+  hit: { marginHorizontal: 2.5 },
+});
+
+function HeroDotFx({ index, pos, color, testID }: { index: number; pos: SharedValue<number>; color: string; testID?: string }) {
   const style = useAnimatedStyle(() => {
     const k = Math.max(0, 1 - Math.abs(pos.value - index));
-    return { width: 5 + 9 * k, opacity: 0.45 + 0.55 * k };
+    return { width: 5 + 6 * k, opacity: 0.45 + 0.55 * k };
   });
-  return <Reanimated.View style={[{ height: 5, borderRadius: 3, backgroundColor: color }, style]} />;
+  return (
+    <Reanimated.View
+      testID={testID}
+      style={[{ height: 5, borderRadius: 3, backgroundColor: color }, dotStyles.hit, style]}
+    />
+  );
 }
 
 // 行间发丝分割线（T09 / H4）：与 ListSection 的分割线同款（左右缩进 = 卡内边距，与行文字对齐）。
@@ -431,25 +457,31 @@ function HeroDotFx({ index, pos, color }: { index: number; pos: SharedValue<numb
 //   ItemSeparatorComponent 每次渲染都卸载重挂，VirtualizedList 的测量（frames / 平均行高）
 //   反复失效，滚动时不再补渲染后面的行（T09 自检实测：45 笔只出前 5 行、滚到底没内容）。
 function TxSeparator() {
-  const { semantic, layout } = useTheme();
+  const palette = useHomePalette();
   return (
-    // 外层 = 卡的底色（分割线两侧的行都是 surface；不铺底会从 1px 缝里透出后面的渐变）
-    <View style={{ backgroundColor: semantic.homeCard, marginHorizontal: LIST_CARD_MARGIN }}>
-      <View
-        style={{
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: semantic.homeHairline,
-          marginLeft: TX_SEP_INSET,
-        }}
-      />
+    // 外层 = 面板底色 + 面板左右两道描边（行与分隔线同宽，1px 竖线在整根面板上连续不断缝）
+    <View
+      style={[
+        txPanelStyles.separatorShell,
+        { backgroundColor: palette.panel, borderColor: palette.border },
+      ]}
+    >
+      <View style={{ height: 1, backgroundColor: palette.hairline, marginLeft: TX_SEP_INSET }} />
     </View>
   );
 }
 
-// ── 账单行（UI V2）：左 42 圆图标（IconCircle）+ 标题（备注）+ 副标题（类别 · 账户）+ 右金额。
-// V2 定稿把全 App 列表图标改成圆形，而 ui/TransactionRow 是本车道之外的共享文件（改它会波及其它
-// 车道），所以首页与日历明细行按同规格自绘一份：几何与 TransactionRow 一致，只把 40 方块换成 42 圆。
-// 行自己铺 surface 底 —— 列表滚动时行会压到渐变区上，不铺底会透出渐变。
+/** TxSeparator 的面板几何（模块作用域：ItemSeparatorComponent 必须是稳定组件） */
+const txPanelStyles = StyleSheet.create({
+  separatorShell: {
+    marginHorizontal: LIST_CARD_MARGIN,
+  },
+});
+
+// ── 账单行（参考图）：左 38 圆下沉底 + 类别线条图标 → 标题（备注）+ 副标题（类别 · 账户）→ 右金额列。
+// 行属于「最近交易」那一根统一面板：面板底 + 左右 1px 描边、零圆角、零阴影（圆角只在面板首尾两处）；
+// 行与行之间由 TxSeparator 画 1px 发丝线。类别图标 / 颜色仍是数据驱动（cat.icon / cat.color），
+// 只是不再走 ui/IconCircle 的立体球面 —— ui/TransactionRow 是其它车道的共享文件，这里按首页规格自绘。
 type TxRowProps = {
   /** 标题（有备注用备注，没有则调用方传类别名） */
   title: string;
@@ -458,6 +490,10 @@ type TxRowProps = {
   categoryIcon: IconName;
   categoryColor: string;
   accountName?: string;
+  /** 该笔的日期标签（分组头去掉后，日期回到行副标题） */
+  dateLabel?: string;
+  /** 行顶发丝线：分组头去掉后，跨天相邻的行也要有分隔（整列表第一行除外） */
+  showDivider?: boolean;
   amount: number;
   kind: 'expense' | 'income';
   /** 命中「新增后闪一下」：淡紫底 */
@@ -474,6 +510,9 @@ function TxRow({
   categoryIcon,
   categoryColor,
   accountName,
+  /** 该笔的日期标签（分组头去掉后，日期回到行里：今天 / 昨天 / 10月7日 周三） */
+  dateLabel,
+  showDivider,
   amount,
   kind,
   flash,
@@ -481,15 +520,16 @@ function TxRow({
   onPress,
   testID,
 }: TxRowProps) {
-  const { semantic, spacing, layout } = useTheme();
-  const rowStyles = useMemo(() => makeTxRowStyles(semantic, spacing, layout), [semantic, spacing, layout]);
-  // 设计稿 01 屏：金额 15 / 700，等宽数字（TextStyle 上下文类型让 'tabular-nums' 收窄为 FontVariant）
-  const rowAmountStyle = useMemo<TextStyle>(
-    () => ({ fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] }),
-    []
+  const palette = useHomePalette();
+  const { spacing, radius } = useTheme();
+  const rowStyles = useMemo(
+    () => makeTxRowStyles(palette, spacing, radius),
+    [palette, spacing, radius]
   );
-  // 副标题：类别 · 账户（账户缺失时只有类别，不留下孤零零的分隔点）
-  const subtitle = [categoryName, accountName].filter((part): part is string => !!part).join(' · ');
+  // 副标题：类别 · 账户 · 日期（任一缺失都不留下孤零零的分隔点）
+  const subtitle = [categoryName, accountName, dateLabel]
+    .filter((part): part is string => !!part)
+    .join(' · ');
   return (
     <PressableScale
       onPress={onPress}
@@ -499,58 +539,106 @@ function TxRow({
       hitSlop={0}
       style={[
         rowStyles.row,
-        flash && { backgroundColor: semantic.accentSoft },
+        // 命中「新增后闪一下」：面板底 → 品牌淡底（按压态由 activeScale 承担，不叠底色）
+        flash && { backgroundColor: palette.brandSoft },
         isCardBottom && rowStyles.rowCardBottom,
       ]}
       testID={testID}
     >
-      {/* 类别图标：42 圆（底色/图标色由 IconCircle 按主题从类别色派生） */}
-      <IconCircle color={categoryColor} icon={categoryIcon} shape="tile" size={38} />
+      {/* 行顶发丝线（跨天相邻的行也要分得开）：与文字左缘对齐 */}
+      {showDivider ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: TX_SEP_INSET,
+            right: 0,
+            top: 0,
+            height: StyleSheet.hairlineWidth,
+            backgroundColor: palette.hairline,
+          }}
+        />
+      ) : null}
+      {/* 类别图标：38 圆下沉底 + 18 类别线条图标（分类图标 / 颜色仍是数据驱动的 cat.icon / cat.color） */}
+      <View style={rowStyles.iconCircle}>
+        <Ionicons name={categoryIcon} size={TX_ICON_GLYPH} color={categoryColor} />
+      </View>
       {/* 中：flex:1 吃掉剩余宽度，把金额顶到行尾 */}
       <View style={rowStyles.textBlock}>
-        <AppText variant="subhead" weight="600" style={rowStyles.rowTitleText} numberOfLines={2}>
+        <AppText variant="subhead" weight="600" color={palette.textPrimary} style={rowStyles.rowTitleText} numberOfLines={2}>
           {title}
         </AppText>
         {!!subtitle && (
-          <AppText variant="caption" weight="400" color={semantic.textTertiary} style={rowStyles.rowSubText} numberOfLines={1}>
+          <AppText variant="caption" weight="400" color={palette.textSecondary} style={rowStyles.rowSubText} numberOfLines={1}>
             {subtitle}
           </AppText>
         )}
       </View>
-      {/* 右：金额（MoneyText 自带 flexShrink:0，不要在外面包固定宽度） */}
-      <MoneyText value={amount} kind={kind} variant="body" weight="700" style={rowAmountStyle} />
+      {/* 右：金额列 —— 定宽 + 右对齐 + 等宽数字（金额长短变化时列宽不动）；
+          带正负号（收入 + / 支出 −），走 utilities/formatMoney 的唯一格式化入口 */}
+      <View style={rowStyles.amountCol}>
+        <AppText
+          variant="body"
+          weight="700"
+          color={kind === 'income' ? palette.income : palette.expense}
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          style={rowStyles.amountText}
+        >
+          {fmtMoney(amount, { kind, showCurrency: false })}
+        </AppText>
+      </View>
     </PressableScale>
   );
 }
 
-/** TxRow 的样式（令牌进、StyleSheet 出；几何取自 V2 稿：行高 ≥60、内边距 16、行间距 12） */
-
 // TxRow 的 props 全是原始值 + 稳定回调：包一层 memo，避免整页重渲染（点眼睛 / 吸顶 / 滚动状态变化）
 // 时把已挂载的每一行重算一遍；行内容真的变化时 props 变，memo 仍会更新。
 const TxRowMemo = React.memo(TxRow);
-function makeTxRowStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout) {
+
+/**
+ * TxRow 的样式（调色板进、StyleSheet 出）。
+ * 行不是独立卡片：面板底 + 左右两道 1px 描边 + 零圆角 + 零阴影，
+ * 圆角只挂在整根面板的首段（RecentHeader 顶两角）与末行（底两角）上。
+ */
+function makeTxRowStyles(palette: HomePalette, spacing: Spacing, radius: Radius) {
   return StyleSheet.create({
     row: {
       flexDirection: 'row',
       alignItems: 'center',
       columnGap: spacing.md,
       minHeight: 60,
-      paddingHorizontal: layout.card,
+      paddingHorizontal: pageLayout.card,
       paddingVertical: 9,
-      backgroundColor: semantic.homeCard,
-      // 列表卡左右边距 = LIST_CARD_MARGIN（= 页面令牌，与预算卡同一边线） —— 卡体就是这些行 + 日期头拼出来的（SectionList 内容不好整体收窄）
+      backgroundColor: palette.panel,
+      // 面板不再画左右边线：每一段各带一条 1px 蓝边，叠起来就是两条显眼的竖条（用户实测）
+      // 面板靠「白底 vs 冰蓝页面」的对比成形，比描边干净
       marginHorizontal: LIST_CARD_MARGIN,
     },
-    // 末行 = 列表卡底边：26 下圆角（只圆下两角 → 行高 60 足够撑出真 26 弧）+ 稿里卡内下 4pt
+    // 末行 = 面板底边：只圆下两角（行高 60 足够撑出真圆角）+ 面板下描边
     rowCardBottom: {
       borderBottomLeftRadius: LIST_CARD_RADIUS,
       borderBottomRightRadius: LIST_CARD_RADIUS,
+      borderBottomWidth: PANEL_BORDER,
       paddingBottom: spacing.sm + LIST_CARD_EDGE,
     },
+    // 分类图标：38 圆下沉底（参考图：浅蓝圆 + 类别色线条图标）
+    iconCircle: {
+      width: TX_ICON_SIZE,
+      height: TX_ICON_SIZE,
+      borderRadius: radius.full,
+      backgroundColor: palette.surfaceSunken,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
     textBlock: { flex: 1, minWidth: 0, rowGap: 2 },
-    // 设计稿 01 屏交易行：标题 15/600（中文字形要 ≥1.30 行高 → 20）
+    // 交易行：标题 15/600（中文字形要 ≥1.30 行高 → 20）
     rowTitleText: { fontSize: 15, lineHeight: 20 },
     rowSubText: { fontSize: 12, lineHeight: 16 },
+    // 金额列：定宽 + 右对齐（列宽不随金额长短变化）
+    amountCol: { width: TX_AMOUNT_COL_WIDTH, alignItems: 'flex-end', flexShrink: 0 },
+    amountText: { fontSize: 16, lineHeight: 22, fontVariant: ['tabular-nums'], textAlign: 'right' },
   });
 }
 
@@ -567,27 +655,36 @@ function RecentHeader({
   onPress: () => void;
   testID?: string;
 }) {
-  const { semantic, spacing, layout } = useTheme();
+  const palette = useHomePalette();
+  const { spacing } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        // 标题行 = 统一面板的首段：面板底 + 上两角圆角 + 上/左/右描边（下边交给第一条分隔线）
         row: {
           flexDirection: 'row',
           alignItems: 'center',
           columnGap: spacing.sm,
           marginHorizontal: LIST_CARD_MARGIN,
-          paddingHorizontal: layout.card,
-          paddingTop: spacing.lg,
+          paddingHorizontal: pageLayout.card,
+          // 快捷入口 → 最近交易面板 = heroBlock 底 16 + 这里 8 = spacing.xxl(24) 收口
+          paddingTop: spacing.sm,
           paddingBottom: spacing.sm,
+          backgroundColor: palette.panel,
+          borderTopLeftRadius: LIST_CARD_RADIUS,
+          borderTopRightRadius: LIST_CARD_RADIUS,
+          borderWidth: PANEL_BORDER,
+          borderColor: palette.border,
+          borderBottomWidth: 0,
         },
         spacer: { flexGrow: 1, flexShrink: 1 },
         action: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
       }),
-    [spacing, layout]
+    [spacing, palette]
   );
   return (
     <View style={styles.row}>
-      <AppText variant="headline" weight="700" color={semantic.textPrimary} numberOfLines={1}>
+      <AppText variant="headline" weight="700" color={palette.textPrimary} numberOfLines={1}>
         {label}
       </AppText>
       <View style={styles.spacer} />
@@ -601,10 +698,10 @@ function RecentHeader({
         accessibilityLabel={action}
         testID={testID}
       >
-        <AppText variant="caption" weight="600" color={semantic.accentText}>
+        <AppText variant="caption" weight="600" color={palette.brand}>
           {action}
         </AppText>
-        <Ionicons name="chevron-forward" size={12} color={semantic.accentText} />
+        <IconChevronRight size={16} color={palette.brand} />
       </PressableScale>
     </View>
   );
@@ -615,6 +712,8 @@ function RecentHeader({
 //    按压反馈挂在**外层** PressableScale 上（玻璃整块缩才看得见）。
 //    44 = V2 稿的 .gb 规格（也是全 App 最小触控区），图标 20 与 IconButton 同档。
 const GLASS_ROUND = 44;
+/** 44 圆键底面的「微透明」程度：与顶部 RoundIconButton / AccountChip 同一档（透出顶部光场） */
+const ROUND_SURFACE_OPACITY = 0.72;
 
 function GlassRoundButton({
   icon,
@@ -675,7 +774,8 @@ function GlassRoundTapButton({
   pressSpring: { dampingRatio: number; duration: number };
   testID?: string;
 }) {
-  const { semantic } = useTheme();
+  const palette = useHomePalette();
+  const { radius } = useTheme();
   const scale = useSharedValue(1);
   const [selected, setSelected] = useState(false);
   useAnimatedReaction(
@@ -705,7 +805,7 @@ function GlassRoundTapButton({
   return (
     <GestureDetector gesture={gesture}>
       <Reanimated.View
-        style={[glassRoundStyles.touch, scaleStyle]}
+        style={[glassRoundStyles.touch, scaleStyle, { boxShadow: '0 2px 8px rgba(3,16,48,0.18)' }]}
         accessible
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
@@ -714,14 +814,32 @@ function GlassRoundTapButton({
         onAccessibilityAction={onActivateJS}
         testID={testID}
       >
-        <GlassView radius="full" style={glassRoundStyles.glass}>
+        {/* 44 圆键（与顶部搜索 / 通知同款）：surface 半透明底 + 1px 描边 + textPrimary 图标。
+            底色用「叠一层 opacity」而不是 rgba 字面量 —— 调色板换色时这里不用跟着改 */}
+        <View
+          style={[
+            glassRoundStyles.glass,
+            { borderRadius: radius.full, borderColor: withAlpha(palette.fabIcon, 0.72), borderWidth: 1 },
+          ]}
+        >
+          <View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: palette.fabIcon,
+                opacity: 0.3,
+                borderRadius: radius.full,
+              },
+            ]}
+          />
           <Reanimated.View style={[glassRoundStyles.iconLayer, offStyle]} pointerEvents="none">
-            <Ionicons name={iconOff} size={20} color={semantic.textPrimary} />
+            <Ionicons name={iconOff} size={20} color={palette.fabIcon} />
           </Reanimated.View>
           <Reanimated.View style={[glassRoundStyles.iconLayer, onStyle]} pointerEvents="none">
-            <Ionicons name={iconOn} size={20} color={semantic.textPrimary} />
+            <Ionicons name={iconOn} size={20} color={palette.fabIcon} />
           </Reanimated.View>
-        </GlassView>
+        </View>
       </Reanimated.View>
     </GestureDetector>
   );
@@ -1018,6 +1136,8 @@ const HeroCardPage = React.memo(function HeroCardPage({
   total,
   hidden,
   width,
+  cardW,
+  cardH,
   textColor,
   mutedColor,
   decimalColor,
@@ -1032,7 +1152,11 @@ const HeroCardPage = React.memo(function HeroCardPage({
   code: string;
   total: number;
   hidden: boolean;
+  /** 页宽 = 卡宽（strip 每页正好一张卡的宽） */
   width: number;
+  /** V2 卡画布实测尺寸：内部按包里的百分比定位 */
+  cardW: number;
+  cardH: number;
   textColor: string;
   mutedColor: string;
   decimalColor: string;
@@ -1047,7 +1171,7 @@ const HeroCardPage = React.memo(function HeroCardPage({
   onPressAmount: () => void;
   testID?: string;
 }) {
-  const { semantic } = useTheme();
+  const palette = useHomePalette();
   const t = useT();
   // 金额区自己的 tap：**只包金额槽，不含预算槽**。以前这颗 tap 挂在整条金额行上，
   // 预算槽（RN Pressable）和它同时响应 → 点预算槽会开两个抽屉（币种 + 月度预算）
@@ -1065,15 +1189,24 @@ const HeroCardPage = React.memo(function HeroCardPage({
   // 条 ratio 固定满格 + tone 固定 danger；读屏走 a11y（不含负号）
   const pct = formatBudgetPct(expense, budget, t);
   return (
-    <View style={[styles.heroPagerPage, { width, minWidth: width }]}>
+    <View style={{ width, height: cardH }}>
       {/* 金额槽：判档宽度 = 父级页宽（定值）—— MoneyText 自身盒宽恒等于内容宽，
           用它判档会形成逐帧反馈环（长金额时整页上下抖动）；minHeight 保住降档时的行高 */}
       <GestureDetector gesture={amountTap}>
-        <View style={styles.heroAmountSlot}>
+        <View
+          style={{
+            position: 'absolute',
+            left: cardW * 0.088,
+            right: cardW * 0.088,
+            top: cardH * 0.3,
+          }}
+        >
           {hidden ? (
+            /* 隐藏态占位：字号 / 行高与真实金额完全一致（40 / 44）+ 固定 6 点，
+               显隐切换时金额槽一像素都不变（此前 lineHeight 64 会把整张卡撑高 20dp） */
             <AppText
               variant="display"
-              color={textColor}
+              color={mutedColor}
               style={[styles.heroHiddenAmount, shadow]}
               numberOfLines={1}
               ellipsizeMode="clip"
@@ -1093,9 +1226,9 @@ const HeroCardPage = React.memo(function HeroCardPage({
               // 小数点后两位照常保留，读屏标签仍带币种
               variant="display"
               hero
-              heroSize={HERO_AMOUNT_SIZE}
+              heroSize={cardW * 0.126}
               weight="700"
-              heroDecimalSize={22}
+              heroDecimalSize={cardW * 0.063}
               heroDecimalWeight="600"
               heroDecimalColor={decimalColor}
               heroLetterRatio={-0.03}
@@ -1111,7 +1244,16 @@ const HeroCardPage = React.memo(function HeroCardPage({
       </GestureDetector>
       {/* 预算槽：已设 → 标题 + 已用 / 额度 + 百分比 + 状态色进度条；未设 → 一行「＋ 设置本月预算」。
           两态同高（minHeight）→ 各币种页等高，横滑落定整卡不跳 */}
-      <View style={styles.heroBudgetSlot}>
+      <View
+        style={{
+          position: 'absolute',
+          left: cardW * 0.088,
+          right: cardW * 0.088,
+          top: cardH * 0.635,
+          bottom: cardH * 0.172,
+          justifyContent: 'space-between',
+        }}
+      >
         <PressableScale
           onPress={onPressBudget}
           activeScale={budget > 0 ? 0.98 : 0.96}
@@ -1123,38 +1265,52 @@ const HeroCardPage = React.memo(function HeroCardPage({
         >
           {budget > 0 ? (
             <>
+              {/* 第一行（参考图）：左「本月预算」+ 其下 12 号弱化色金额明细，右「67%」。
+                  百分比用卡上主文字色，**只有超支**才换 palette.expense */}
               <View style={styles.heroBudgetHead}>
-                {/* 挤窄顺序：左标题（flexShrink 2，纯标签）先收 → 右「已用 / 额度」最后收，
-                    两段都不许把卡片撑破（320 视口超长金额时以前是整行溢出卡外） */}
-                <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadLabel]}>
-                  {t('home.budgetLabel')}
-                </AppText>
-                <AppText variant="caption" weight="600" color={textColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadValue]}>
-                  {hidden
-                    ? HIDDEN_AMOUNT
-                    : `${fmtMoney(expense, { showCurrency: false })} / ${fmtMoney(budget, { showCurrency: false })}`}
-                </AppText>
-              </View>
-              <View style={styles.heroBudgetBarRow}>
-                <View style={styles.heroBudgetBarWrap}>
-                  <ProgressBar
-                    ratio={pct.fillRatio}
-                    tone={pct.tone}
-                    height={6}
-                    style={styles.heroBudgetBar}
-                    testID={testID ? `${testID}-bar` : undefined}
-                  />
+                <View style={styles.heroBudgetHeadCol}>
+                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadLabel, { fontSize: cardW * 0.0365 }]}>
+                    {t('home.budgetLabel')}
+                  </AppText>
+                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.heroBudgetDetail, { fontSize: cardW * 0.0296 }]}>
+                    {hidden
+                      ? HIDDEN_AMOUNT
+                      : `${fmtMoney(expense, { showCurrency: false })} / ${fmtMoney(budget, { showCurrency: false })}`}
+                  </AppText>
                 </View>
                 <AppText
                   variant="caption"
                   weight="600"
-                  color={pct.over ? semantic.danger : textColor}
-                  style={styles.heroBudgetPct}
+                  color={pct.over ? palette.expense : textColor}
+                  style={[styles.budgetText, styles.heroBudgetPct, { fontSize: cardW * 0.032 }]}
                   accessibilityLabel={pct.a11y}
                   testID={testID ? `${testID}-pct` : undefined}
                 >
                   {pct.text}
                 </AppText>
+              </View>
+              {/* 第二行（参考图）：进度条独占整行、左对齐、整行宽度（不再与百分比抢同一行）。
+                  自绘，palette 两套值：轨道 trackBg / 填充 progressFrom→progressTo；
+                  宽度口径与原来 ProgressBar 完全一致（pct.fillRatio 封顶 100%），超支只靠颜色与文案表达 */}
+              <View
+                style={[styles.heroBudgetTrack, { backgroundColor: palette.trackBg, height: cardH * 0.042 }]}
+                accessibilityRole="progressbar"
+                accessibilityValue={{
+                  min: 0,
+                  max: 100,
+                  now: Math.round(Math.min(Math.max(pct.fillRatio, 0), 1) * 100),
+                }}
+                testID={testID ? `${testID}-bar` : undefined}
+              >
+                <LinearGradient
+                  colors={[palette.progressFrom, palette.progressTo] as const}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[
+                    styles.heroBudgetFill,
+                    { width: `${Math.min(Math.max(pct.fillRatio, 0), 1) * 100}%` },
+                  ]}
+                />
               </View>
             </>
           ) : (
@@ -1204,6 +1360,8 @@ export default function HomeScreen({ navigation }: any) {
   const getAssetById = useCallback((id: string) => assets.find((a) => a.id === id), [assets]);
 
   const { colors, isDark, semantic, spacing, layout, radius, elevation, glass, gradients, motion } = useTheme();
+  // 顶部「日夜切换」键：写回既有的主题偏好（与设置项里的开关同一个 source of truth）
+  const { setThemeMode } = useThemeMode();
   const t = useT();
   const { langMode: homeLang } = useLanguage();
   const insets = useSafeAreaInsets();
@@ -1216,21 +1374,24 @@ export default function HomeScreen({ navigation }: any) {
   const tabClearance = useTabClearance();
 
   const onTabScroll = useTabBarScrollHandler();
+  // 首页正文配色（2026-10 视觉改版）：唯一来源 useHomePalette()，日夜两套值已在调色板里定好。
+  // styles 走 makeStyles 也接这份 palette —— 页面正文不再自己挑 semantic（弹层仍用 semantic）。
+  const palette = useHomePalette();
   const styles = useMemo(
-    () => makeStyles(colors, isDark, semantic, spacing, radius, layout, elevation),
-    [colors, isDark, semantic, spacing, radius, layout, elevation]
+    () => makeStyles(colors, isDark, semantic, spacing, radius, layout, elevation, palette),
+    [colors, isDark, semantic, spacing, radius, layout, elevation, palette]
   );
-  // 渐变 / 玻璃上的文字（UI V2.1 §3）：日夜统一 text.primary —— 夜间不再用暗灰，
-  // 日间不再有白字压在浅色渐变上。⚠ 不能退回 onAccent（白）/ glassPill.muted（夜 0.70 透明）：
-  // 夜间 hero 渐变是亮紫（实测底色 ~rgb(100,83,160)），半透明浅字只有 3.7:1，不达 §4 的 4.5；
-  // 层级改由字号 / 字重承担（金额 display、标签 footnote/caption 本身分档）
-  // Hero 上的文字：主渐变日夜两套都是饱和紫（tokens: brand.heroFrom/To），
-  // 因此一律用 text.inverse 白字（深端 5.2:1 / 夜间 4.2:1 且快速变深），不再跟 bg 深浅走
-  const onGradientText = semantic.textInverse;
-  const onGradientMuted = withAlpha(semantic.textInverse, 0.86);
-  const heroShadow = useMemo(
-    () => heroTextShadowStyle(gradients.heroDark.colors[0], isDark),
-    [gradients, isDark]
+  // 资产卡上的文字：卡面日夜两套（日近白 / 夜深蓝），文字色也两套 —— 主文字 cardText、
+  // 次要文字 cardTextMuted。层级靠字号 / 字重承担（金额 display、标签 caption）。
+  const onGradientText = palette.cardText;
+  const onGradientMuted = palette.cardTextMuted;
+  // 卡上文字投影只在夜间给（浅字压深蓝卡）；颜色取调色板的 cardShadow，不写死色值
+  const heroShadow = useMemo<TextStyle>(
+    () =>
+      isDark
+        ? { textShadowColor: palette.cardShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 20 }
+        : {},
+    [isDark, palette.cardShadow]
   );
   // 吸顶日期头的判据仍是「头部区实测高度」（heroHeightRef，见 onLayout）；
   // 渐变高度不再参与计算 —— UI V2.1 §1 的 fill 模式铺满整页
@@ -1394,7 +1555,16 @@ export default function HomeScreen({ navigation }: any) {
   /** 已提交的当前币种（拖动中不变，提交后才变） */
   const curRow = totalsByCurrency[curIdx];
   const curCode = curRow?.[0] ?? activeCurrency;
-  const pillLabelOf = (code: string) => `${t('home.netWorth')} · ${code}`;
+  /** 币种胶囊上的文字：只放币种代码（标题已单独在左侧，不重复文案） */
+  const pillLabelOf = (code: string) => code;
+  /** 分页点的窗口：≤ 7 个币种全画；更多时以当前页为中心开一个 7 格窗口（卡内宽固定，绝不溢出） */
+  const DOT_WINDOW = 7;
+  const dotWindow = useMemo(() => {
+    const n = totalsByCurrency.length;
+    if (n <= DOT_WINDOW) return Array.from({ length: n }, (_, i) => i);
+    const start = Math.min(Math.max(Math.max(0, curIdx) - 3, 0), n - DOT_WINDOW);
+    return Array.from({ length: DOT_WINDOW }, (_, k) => start + k);
+  }, [totalsByCurrency.length, curIdx]);
 
   // 手势回调里要读最新的 totals / activeCurrency：走 ref，手势对象只在「多页 / 减弱动效」变化时重建
   const swipeCommitRef = useRef<string | null>(null);
@@ -1578,45 +1748,49 @@ export default function HomeScreen({ navigation }: any) {
     return m;
   }, [ledgerTransactions, thisMonthKey, txCurrencyOf]);
   const thisExpense = expenseByCurrency.get(activeCurrency) ?? 0;
-  // 4 个快捷方块（设计稿 01 屏）：支出 / 收入 / 转账 / 扫描。
+  // 本月收入按币种一次算出（与 expenseByCurrency 对称的口径：本月 + type === 'income' + 该笔所属币种）。
+  // 转账单拿不到这两档类型，天然不进收支口径；已删除的账单在 context 里是真删（filter 掉，不在 transactions 里），
+  // 所以这里不需要再过滤一次。
+  const incomeByCurrency = useMemo(() => {
+    const m = new Map<string, number>();
+    ledgerTransactions.forEach((t) => {
+      if (t.type !== 'income' || !t.date.startsWith(thisMonthKey)) return;
+      const c = txCurrencyOf(t);
+      m.set(c, (m.get(c) ?? 0) + t.amount);
+    });
+    return m;
+  }, [ledgerTransactions, thisMonthKey, txCurrencyOf]);
+  // 4 个快捷入口（参考图）：支出 / 收入 / 转账 / 扫描 —— 文案沿用 addTx.* 现有 i18n key。
   // 前三档用 ROUTES.ADD_TX 的 presetType 带出各自的初始类型（routes.ts 已声明该参数），
   // 扫描走既有的 autoScan（不带 presetType，落到默认支出档后自动开相机）。
-  const quickActions = useMemo(
-    () => [
-      {
-        key: 'expense',
-        label: t('addTx.expense'),
-        icon: 'arrow-up-outline' as IconName,
-        tileBg: semantic.brandSoft,
-        tint: semantic.accent,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'expense' }),
-      },
-      {
-        key: 'income',
-        label: t('addTx.income'),
-        icon: 'arrow-down-outline' as IconName,
-        tileBg: semantic.tileMint,
-        tint: semantic.textPrimary,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'income' }),
-      },
-      {
-        key: 'transfer',
-        label: t('addTx.transfer'),
-        icon: 'swap-horizontal-outline' as IconName,
-        tileBg: semantic.surfaceSunken,
-        tint: semantic.accent,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX, { presetType: 'transfer' }),
-      },
-      {
-        key: 'scan',
-        label: t('addTx.scanReceipt'),
-        icon: 'scan-outline' as IconName,
-        tileBg: semantic.surfaceSunken,
-        tint: semantic.accent,
-        onPress: () => navigation.navigate(ROUTES.ADD_TX, { autoScan: true }),
-      },
-    ],
-    [navigation, t, semantic]
+  const quickLabels = useMemo<Record<QuickActionKey, string>>(
+    () => ({
+      expense: t('addTx.expense'),
+      income: t('addTx.income'),
+      transfer: t('addTx.transfer'),
+      scan: t('addTx.scanReceipt'),
+    }),
+    [t]
+  );
+  // 动作分档保留原来的 switch 语义：一个入口 → 一条既有的「记一笔」路径，不新增路由
+  const handleQuickAction = useCallback(
+    (key: QuickActionKey) => {
+      switch (key) {
+        case 'expense':
+          navigation.navigate(ROUTES.ADD_TX, { presetType: 'expense' });
+          break;
+        case 'income':
+          navigation.navigate(ROUTES.ADD_TX, { presetType: 'income' });
+          break;
+        case 'transfer':
+          navigation.navigate(ROUTES.ADD_TX, { presetType: 'transfer' });
+          break;
+        case 'scan':
+          navigation.navigate(ROUTES.ADD_TX, { autoScan: true });
+          break;
+      }
+    },
+    [navigation]
   );
   // 搜索 / 全部交易抽屉的行（只读）：备注 / 分类 · 账户 / 金额 / 日期 —— 点击进既有「编辑账单」页。
   // 顺序按日期倒序（= 首页列表的顺序）：接口返回的是写入序，「全部交易」铺开上百条时那个顺序是乱的；
@@ -1957,6 +2131,7 @@ export default function HomeScreen({ navigation }: any) {
         categoryIcon={catIcon}
         categoryColor={catColor}
         accountName={assetName}
+        showDivider={index !== 0}
         amount={item.amount}
         kind={item.type === 'income' ? 'income' : 'expense'}
         flash={flash}
@@ -1979,27 +2154,27 @@ export default function HomeScreen({ navigation }: any) {
   // 右侧「支出 43.60」（caption 次要色，收入仍用收入绿）—— wrap 行：放不下自动换行，不缩字不省略；
   // 跨月时在日期头之上再插一条月份分隔
   const renderDayHeader = useCallback(({ section }: { section: TxDaySection }) => (
-    // 首组的日期头就是列表卡的**顶边**：26 上圆角挂在这一格上（只圆上两角 → 高度够时是真 26 弧，
-    // 不会被 CSS 圆角收缩规则压小）；其余组保持直角，跨组处靠卡内的发丝线/间距区分
-    <View style={[styles.dayHeaderWrap, section.isFirst && styles.dayHeaderWrapFirst]}>
+    // 日期头属于「最近交易」这根统一面板的一段（面板底 + 左右 1px 描边 + 零圆角）：
+    // 面板的上圆角在 RecentHeader 那一格、下圆角在末组最后一行，日期头只做卡身
+    <View style={styles.dayHeaderWrap}>
       {!!section.monthSep && (
-        <AppText variant="caption" color={semantic.textSecondary} style={styles.monthSepText}>
+        <AppText variant="caption" color={palette.textSecondary} style={styles.monthSepText}>
           {section.monthSep}
         </AppText>
       )}
-      {/* 分组头（设计稿 01 屏）：surfaceSunken 圆角 10 药丸、高 32 ——
-          左「10月19日 · 今天」12/500 次级色；右「支出 6.20」12/600（合计口径一字未改） */}
+      {/* 轻量分组头（参考图没有填充色块）：左「10月19日 · 今天」12/500 弱化色；
+          右「支出 6.20」12/500 同一弱化色（合计口径一字未改），同一行两端分开 */}
       <View style={styles.dayGroupPill}>
         <AppText
           variant="caption"
           weight="500"
-          color={semantic.textSecondary}
+          color={palette.textTertiary}
           style={styles.dayHeaderLabelText}
           numberOfLines={1}
         >
           {section.dateSub ? `${section.monthDay} · ${section.label}` : section.label}
         </AppText>
-        <AppText variant="caption" weight="600" color={semantic.textSecondary} numberOfLines={1} style={styles.daySumText}>
+        <AppText variant="caption" weight="500" color={palette.textTertiary} numberOfLines={1} style={styles.daySumText}>
           {`${t(section.expense > 0 ? 'home.expenseShort' : 'home.incomeShort')}${fmtMoney(
             section.expense > 0 ? section.expense : section.income,
             { showCurrency: false }
@@ -2007,7 +2182,7 @@ export default function HomeScreen({ navigation }: any) {
         </AppText>
       </View>
     </View>
-  ), [semantic, styles, t]);
+  ), [palette, styles, t]);
 
   // 列表内的日期头：切币种过渡时跟着列表淡出 / 上滑（吸顶条 / pinnedHeader 仍直接用 renderDayHeader，不动）
   const renderSectionHeaderEntering = useCallback(
@@ -2606,15 +2781,33 @@ export default function HomeScreen({ navigation }: any) {
     {/* 顶部安全区不由 SafeAreaView 让位（全出血）：V2 的品牌渐变通顶连屏、状态栏压在渐变上
         （状态栏=透明，见 android styles.xml）；内容让位由头部区自身 paddingTop=insets.top 承担
         （见样式 heroTopRow 的 paddingTop 用 insets.top + 14 —— 与稿里「顶部 14」对齐） */}
-    <SafeAreaView style={[styles.container, { backgroundColor: semantic.homeBg }]} edges={[]}
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.pageBg }]} edges={[]}
       onTouchStart={() => { Keyboard.dismiss(); }}
     >
-      {/* 设计稿 01 屏：页面底是纯色 semantic.homeBg（token bg.page，日夜两值），品牌渐变只出现在净资产卡里 ——
-          旧的全屏渐变 + 顶部淡出层一并下线（卡片 / 列表因此不再压在任何渐变上） */}
-      {/* 日历抽屉的浅遮罩（过渡提示）：压在页面背景（渐变）之上、列表 / 卡片之下；pointerEvents none，不挡点按 */}
-      <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: semantic.scrim }, calDimStyle]} />
-      {/* C1：顶部安全区挡板 —— 滚动时内容不从状态栏文字下穿过 */}
-      <StatusBarGlass />
+      {/* 页面底 = palette.pageBg（日夜两值：日间冰蓝白、夜间深午夜蓝）。
+          紫色全屏渐变 / 极光 shader / 玻璃 ribbons 只服务旧的紫色净资产卡，已不再渲染（文件保留可恢复） */}
+      {/* 顶部光场：从左下**完全透明**斜升到右上 glowStrong（参考图右上最亮）。
+          ⚠ 起点必须是透明而不是 pageBg：以前的 [pageBg → glowStrong] 在下边缘 alpha 仍为正，
+            320dp 处断成一条水平硬边（夜间最明显）。现在渐变带下缘 alpha 精确为 0，接缝消失。
+          绝对定位 + pointerEvents none：不吃布局、不挡点按；日夜两套值由 palette 给 */}
+      {/* 顶部氛围背景（照片观感）：深蓝 → 亮蓝 → 渐隐到页面底色，另含右上暖光与两条幕墙反光带。
+          它取代了原来那条纯渐变光场 —— 现在深度由背景提供，卡片本身不需要再造层次。 */}
+      <HomeHeroBackdrop height={insets.top + 316} testID="home-hero-backdrop" />
+      {/* 日历抽屉的浅遮罩（过渡提示）：压在页面背景之上、列表 / 卡片之下；pointerEvents none，不挡点按 */}
+      <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: palette.scrim }, calDimStyle]} />
+      {/* 顶部安全区挡板（C1）：滚动时内容不从状态栏文字下穿过。
+          不用 ui/StatusBarGlass —— 它的填充取 semantic.homeBg（紫系），会在这层蓝光上糊一条灰带；
+          这里用同一套「遮罩 + 渐隐」做法，颜色换成 palette.pageBg，行为（高度 / 层级 / 不吃触摸）完全一致 */}
+      {insets.top > 0 ? (
+        <View pointerEvents="none" style={[styles.statusGuard, { height: insets.top + 6 }]}>
+          <LinearGradient
+            colors={[withAlpha(palette.pageBg, 0.55), withAlpha(palette.pageBg, 0)] as const}
+            locations={[0, 1]}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+        </View>
+      ) : null}
       {/* 首页主体 = 一个 SectionList（T09 / H4 / H6）：
           头部（Hero 区 + 日历卡）走 ListHeaderComponent，账单按天分组渲染（吸顶日期头 + 圆形图标行）；
           滚动事件继续透传给 Tab 栏自动隐藏（T07 联动）。
@@ -2639,7 +2832,8 @@ export default function HomeScreen({ navigation }: any) {
         keyExtractor={txKeyExtractor}
         renderItem={renderTxRow}
         renderSectionHeader={renderSectionHeaderEntering}
-        ItemSeparatorComponent={TxSeparatorFaded}
+        /* 分隔线只由每行顶部的发丝线负责（见 TxRow 的 showDivider）：
+           再挂 ItemSeparator 会和它在同一天内的行上叠成两条，看起来忽厚忽薄 */
         // 吸顶（验收定版）：原生用系统吸顶；Web 关掉系统吸顶、改由下面自绘的「吸顶条」承担
         //   —— react-native-web 给每个日期头都套 position:sticky;top:0，包含块是整个内容容器，
         //      所有日期头会永久钉在顶部互相叠着（自检抓到过双头叠影）
@@ -2662,70 +2856,51 @@ export default function HomeScreen({ navigation }: any) {
         {/* pointerEvents="auto"：日历模式下列表内容层被关掉命中测试（见 listContentStyle），
             头部这一层（hero / 开关按钮 / 邻页预览 / 日历弹层）必须显式打开，
             否则日历自己也点不动。列表模式下这里是 no-op（本来就能点） */}
-        {/* ── 头部区（UI V2 稿，不套卡）：渐变本身铺在页面最底层（见根节点 HeroGradient），
-            顶部一行（账本胶囊 + 铃铛/日历 44 圆钮）→ 净资产 + 币种玻璃胶囊 → 大金额 + 眼睛 → 预算玻璃卡。
+        {/* ── 头部区（参考图，不套卡）：顶部柔和光场铺在页面最底层（见根节点 LinearGradient），
+            顶部一行（账本名药丸 + 搜索/通知/日历 44 圆键）→ 文件夹资产卡（金额 + 预算 + 币种分页）
+            → 4 个快捷入口 → 本月收支汇总。
             实测高度写进 heroHeightRef：吸顶日期头据此判断头部区是否已滚出屏幕 */}
         <Reanimated.View
-          style={[styles.heroBlock, { paddingTop: insets.top + 14 }]}
+          style={[styles.heroBlock, { paddingTop: insets.top + 8 }]}
           onLayout={(e) => {
             heroHeightRef.current = e.nativeEvent.layout.height;
             const h = e.nativeEvent.layout.height;
             setHeroH((prev) => (Math.abs(prev - h) >= 1 ? h : prev));
           }}
         >
-          {/* 顶部用户区（设计稿 01 屏）：40 头像 + 用户名（= 账本名）+ 展开箭头；右侧 搜索 / 通知 / 日历切换。
-              账本抽屉入口从旧玻璃胶囊挪到用户名上（同一行为）；日历切换是既有功能，位置右移 */}
-          <View style={styles.userRow}>
-            <PressableScale
+          {/* 顶部用户区：左 = 账本名药丸（打开账本抽屉，原行为），右 = 搜索 / 通知 / 日历切换三枚 44 圆键。
+              日历切换是既有功能，动作与无障碍标签一字未改 */}
+          <View style={[styles.userRow, styles.heroGutter]}>
+            {/* 左：账本名药丸（AccountChip）—— 与原「用户名 + 展开箭头」同一行为（打开账本抽屉） */}
+            <AccountChip
+              label={activeLedger?.name ?? t('home.ledgerName')}
               onPress={() => openSheet('ledger')}
-              activeScale={0.96}
-              hitSlop={8}
-              style={styles.userNamePress}
-              accessibilityRole="button"
-              accessibilityLabel={t('home.selectLedger')}
-              accessibilityState={{ expanded: ledgerPickerOpen }}
+              tone="glass"
               testID="home-ledger-pill"
-            >
-              <AppText
-                variant="title3"
-                weight="600"
-                color={semantic.textPrimary}
-                numberOfLines={1}
-                style={styles.userNameText}
-              >
-                {activeLedger?.name ?? t('home.ledgerName')}
-              </AppText>
-              <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
-            </PressableScale>
+            />
+            {/* 通知：挪到账本名右手边（用户要求），与胶囊同排同高 */}
+            <RoundIconButton
+              kind="bell"
+              tone="glass"
+              onPress={() =>
+                dialog.alert({ title: t('home.notificationTitle'), message: t('home.notificationMsg') })
+              }
+              badge={unreadCount > 0}
+              accessibilityLabel={t('home.notificationTitle')}
+              testID="home-notification"
+            />
             <View style={styles.userRowSpacer} />
             <View style={styles.heroTopActions}>
-              <PressableScale
-                onPress={() => openSheet('search')}
-                activeScale={0.94}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.search')}
-                testID="home-search"
-              >
-                <Ionicons name="search-outline" size={22} color={semantic.textPrimary} />
-              </PressableScale>
-              <View style={styles.heroCtlWrap}>
-                <PressableScale
-                  onPress={() => dialog.alert({ title: t('home.notificationTitle'), message: t('home.notificationMsg') })}
-                  activeScale={0.94}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('home.notificationTitle')}
-                  testID="home-notification"
-                >
-                  <Ionicons name="notifications-outline" size={22} color={semantic.textPrimary} />
-                </PressableScale>
-                {unreadCount > 0 && (
-                  <View style={styles.notifBadge}>
-                    <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-                  </View>
-                )}
-              </View>
+              {/* 右：搜索 / 通知 44 圆键（surface 半透明底 + 描边 + textPrimary 图标） */}
+              {/* 日夜切换（原来的搜索位）：日间显示月亮、夜间显示太阳，点一下切换并写入既有主题偏好 */}
+              <RoundIconButton
+                kind="theme"
+                themeIcon={isDark ? 'sun' : 'moon'}
+                tone="glass"
+                onPress={() => setThemeMode(isDark ? 'light' : 'dark')}
+                accessibilityLabel={isDark ? t('theme.light') : t('theme.dark')}
+                testID="home-theme-toggle"
+              />
               <GlassRoundTapButton
                 iconOff="calendar-outline"
                 iconOn="list-outline"
@@ -2743,89 +2918,191 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           </View>
 
-          {/* 渐变净资产卡（设计稿 01 屏）：标签行（净资产 · 币种 ⌄ + 眼睛）→ 大金额 + 该币种本月预算
-              → 币种小圆点。多币种时**整卡内容**（金额 + 预算）一起跟手分页 ——
-              Pan 挂在卡片外层，命中区域 = 整张卡，不只是金额那一行 */}
+          {/* 资产卡（参考图）：标签行（净资产 · 币种 ⌄ + 眼睛）→ 大金额 + 该币种本月预算 + 分页圆点。
+              多币种时**整卡内容**（金额 + 预算）一起跟手分页 —— Pan 挂在卡片外层，命中区域 = 整张卡。
+              外壳换成「文件夹」造型（FolderAssetCard）：卡内的手势分页 / 金额 / 预算 / 币种胶囊 / 眼睛
+              全部原样保留，只把颜色换成 palette 两套值；圆点也由外壳的 pager prop 画。
+              左右留 8 —— 外壳内部各让 3.5% 给后方底卡，390 屏上主卡净宽约 348dp（参考图 350） */}
           <GestureDetector gesture={pagerPanGesture}>
-            <View>
-              <LinearGradient
-                colors={gradients.hero.colors}
-                start={gradients.hero.start}
-                end={gradients.hero.end}
-                style={styles.heroCard}
-                testID="home-net-worth-card"
-              >
+            <View
+              style={styles.heroCardGutter}
+              onLayout={(e) => {
+                // 拖动 / 翻页动画期间不理会宽度变化（中途改页宽会让金额盒被重新量、挤出省略号）
+                if (pagerBusy.value) return;
+                const w = e.nativeEvent.layout.width;
+                setAmountRowW((prev) => (Math.abs(prev - w) >= 1 ? w : prev));
+              }}
+            >
+              <FolderAssetCard testID="home-net-worth-card">
+                {(cardSize) => (
+                  <>
                 {displayTotal && (
-                  <View style={styles.heroCardHead}>
-                    <PressableScale
-                      onPress={openCurrencyMenu}
-                      disabled={totalsByCurrency.length <= 1}
-                      activeScale={0.94}
-                      hitSlop={0}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('home.selectCurrency')}
-                      accessibilityState={{ disabled: totalsByCurrency.length <= 1 }}
-                      testID="home-currency-pill"
-                      // 胶囊可被挤窄：极端情况下（超长定位文案）先收标签，绝不把右侧眼睛顶出卡片
-                      style={styles.heroCardHeadPill}
+                  /* 第一行（参考图）：左 = 单一币种标题；右 = 「币种 ⌄ + 眼睛」一个紧凑组。
+                     币种胶囊从左侧搬到右组里 —— 眼睛不再孤零零顶到卡片最右缘，而是紧挨币种 */
+                  <View
+                    style={[
+                      styles.heroCardHead,
+                      {
+                        position: 'absolute',
+                        zIndex: 2,
+                        left: cardSize.width * 0.088,
+                        right: cardSize.width * 0.088,
+                        top: cardSize.height * 0.179,
+                        height: cardSize.height * 0.12,
+                      },
+                    ]}
+                  >
+                    <AppText
+                      variant="caption"
+                      weight="500"
+                      color={onGradientMuted}
+                      numberOfLines={1}
+                      style={styles.heroCardHeadTitle}
                     >
-                      <View style={styles.pillStack}>
-                        {/* 不可见占位：把**所有**币种的标签叠在一格里（高度夹成一行、溢出裁掉），格子宽 = 最宽那条的真实像素宽。
-                            之前只放「字符数最多」的一条 —— 三字母代码字数相同，MYR（M 很宽）比 JPY 宽，
-                            占位取到窄的那条时宽的那条就被截成「净资产 · M…」。真正的文字是下面按页距离淡入淡出的几层 */}
-                        <View style={styles.pillSpacer} pointerEvents="none">
-                          {totalsByCurrency.map(([code]) => (
-                            <AppText key={code} variant="caption" weight="600" color={onGradientText} style={styles.budgetText} numberOfLines={1} ellipsizeMode="clip">
-                              {pillLabelOf(code)}
-                            </AppText>
+                      {t('home.netWorth')}
+                    </AppText>
+                    <View style={styles.heroCardHeadActions}>
+                      <PressableScale
+                        onPress={openCurrencyMenu}
+                        disabled={totalsByCurrency.length <= 1}
+                        activeScale={0.94}
+                        hitSlop={0}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('home.selectCurrency')}
+                        accessibilityState={{ disabled: totalsByCurrency.length <= 1 }}
+                        testID="home-currency-pill"
+                        // 胶囊可被挤窄：极端情况下（超长币种代码）先收标签，绝不把右侧眼睛顶出卡片
+                        style={styles.heroCardHeadPill}
+                      >
+                        <View style={styles.pillStack}>
+                          {/* 不可见占位：把**所有**币种的代码叠在一格里（高度夹成一行、溢出裁掉），
+                              格子宽 = 最宽那条的真实像素宽；真正的文字是下面按页距离淡入淡出的几层 */}
+                          <View style={styles.pillSpacer} pointerEvents="none">
+                            {totalsByCurrency.map(([code]) => (
+                              <AppText key={code} variant="caption" weight="600" color={onGradientText} style={styles.pillText} numberOfLines={1} ellipsizeMode="clip">
+                                {pillLabelOf(code)}
+                              </AppText>
+                            ))}
+                          </View>
+                          {totalsByCurrency.map(([code], i) => (
+                            <PillStackLabel
+                              key={code}
+                              index={i}
+                              pos={pagerPos}
+                              text={pillLabelOf(code)}
+                              color={onGradientText}
+                              textStyle={styles.pillText}
+                            />
                           ))}
                         </View>
-                        {totalsByCurrency.map(([code], i) => (
-                          <PillStackLabel
-                            key={code}
-                            index={i}
-                            pos={pagerPos}
-                            text={`${t('home.netWorth')} · ${code}`}
-                            color={onGradientText}
-                            textStyle={styles.budgetText}
-                          />
-                        ))}
-                      </View>
-                    </PressableScale>
-                    <View style={styles.heroCardHeadActions}>
-                      <IconButton
-                        icon={balanceHidden ? 'eye-off-outline' : 'eye-outline'}
-                        size={20}
-                        color={onGradientMuted}
-                        hitSlop={4}
+                        {/* 币种下拉箭头：换成首页图标集（IconChevronDown），卡上弱化色 */}
+                        <IconChevronDown size={16} color={onGradientMuted} />
+                      </PressableScale>
+                      {/* 眼睛：IconEye / IconEyeOff —— 紧挨币种组（间距 spacing.xs）；
+                          hitSlop 6 → 32 + 12 = 44 触控区，视觉盒子不变 */ }
+                      <PressableScale
+                        onPress={toggleBalanceHidden}
+                        activeScale={0.9}
+                        hitSlop={6}
+                        style={[
+                          styles.heroEyeBtn,
+                          { alignItems: 'center', justifyContent: 'center' },
+                        ]}
+                        accessibilityRole="button"
                         accessibilityLabel={t('home.toggleAmount')}
                         accessibilityState={{ checked: !balanceHidden }}
-                        onPress={toggleBalanceHidden}
                         testID="home-toggle-amount"
-                      />
+                      >
+                        {balanceHidden ? (
+                          <IconEyeOff size={20} color={onGradientText} />
+                        ) : (
+                          <IconEye size={20} color={onGradientText} />
+                        )}
+                      </PressableScale>
                     </View>
                   </View>
                 )}
 
                 {totalsByCurrency.length === 0 ? (
-                  /* 无账户（原空状态入口保留）：EmptyState 的文字是深色令牌，直接放渐变上读不了 →
-                     垫一层浅色内衬；按钮仍走现有「添加资产账户」入口 */
-                  <View style={styles.heroEmptyCard}>
-                    <EmptyState
-                      icon="wallet-outline"
-                      title={t('home.noAssetsTitle')}
-                      description={t('home.noAssetsHint')}
-                      actionLabel={t('home.addAccount')}
-                      onAction={() => navigation.navigate(ROUTES.ADD_ASSET)}
-                      testID="home-no-assets"
-                    />
-                  </View>
+                  /* 无账户：卡内**紧凑**空状态（图标 / 标题 / 文字按钮三件，全部定尺）。
+                     旧版把共享 EmptyState 塞进绝对容器 —— 它有 56 圈图标 + 两行标题 + 44 高按钮，
+                     在固定 2:1 画布里必然溢出卡外，压到下面的快捷入口上（用户实测截图）。
+                     这里用 0.26H~0.10H 的盒兜住、每行 numberOfLines=1，任何宽度都不溢出。 */
+                  <PressableScale
+                    onPress={() => navigation.navigate(ROUTES.ADD_ASSET)}
+                    activeScale={0.98}
+                    hitSlop={0}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('home.addAccount')}
+                    testID="home-no-assets"
+                    style={{
+                      position: 'absolute',
+                      left: cardSize.width * 0.088,
+                      right: cardSize.width * 0.088,
+                      top: cardSize.height * 0.16,
+                      height: cardSize.height * 0.7,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 19,
+                        flexShrink: 0,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: palette.brandSoft,
+                      }}
+                    >
+                      <Ionicons name="wallet" size={19} color={palette.brand} />
+                    </View>
+                    <AppText
+                      variant="subhead"
+                      weight="700"
+                      color={palette.textPrimary}
+                      numberOfLines={1}
+                      style={{ marginTop: 8, flexShrink: 0 }}
+                    >
+                      {t('home.noAssetsTitle')}
+                    </AppText>
+                    <AppText
+                      variant="caption2"
+                      color={palette.textSecondary}
+                      numberOfLines={1}
+                      style={{ marginTop: 3, flexShrink: 0 }}
+                    >
+                      {t('home.noAssetsHint')}
+                    </AppText>
+                    {/* 行动按钮：实心胶囊（40 高以内），不再用裸文字链接 —— 空状态需要一个明确的落点 */}
+                    <View
+                      style={{
+                        marginTop: 9,
+                        height: 30,
+                        paddingHorizontal: 15,
+                        borderRadius: 15,
+                        flexShrink: 0,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: palette.brand,
+                      }}
+                    >
+                      <AppText variant="caption2" weight="600" color={palette.fabIcon} numberOfLines={1}>
+                        {t('home.addAccount')}
+                      </AppText>
+                      <IconChevronRight size={13} color={palette.fabIcon} />
+                    </View>
+                  </PressableScale>
                 ) : (
                   displayTotal && (
                     /* 一币种一页的手势分页：拖动实时跟随、按页吸附。页 = 金额 + 该币种本月预算，
                        页宽 = 行实测宽（超长金额按档降级，不溢出）；首尾相邻页由 strip 裁掉 */
                     <View
-                      style={styles.heroAmountRow}
+                      style={[
+                        styles.heroAmountRow,
+                        { position: 'absolute', zIndex: 0, left: 0, top: 0, width: cardSize.width, height: cardSize.height },
+                      ]}
                       onLayout={(e) => {
                         // 拖动 / 翻页动画期间不理会行宽变化（中途改页宽会让金额盒被重新量、挤出省略号）
                         if (pagerBusy.value) return;
@@ -2863,9 +3140,11 @@ export default function HomeScreen({ navigation }: any) {
                                 total={total}
                                 hidden={balanceHidden}
                                 width={amountRowW}
+                                cardW={cardSize.width}
+                                cardH={cardSize.height}
                                 textColor={onGradientText}
                                 mutedColor={onGradientMuted}
-                                decimalColor={withAlpha(semantic.textInverse, 0.82)}
+                                decimalColor={onGradientMuted}
                                 shadow={heroShadow}
                                 styles={styles}
                                 budget={budgetOf(code)}
@@ -2881,44 +3160,34 @@ export default function HomeScreen({ navigation }: any) {
                     </View>
                   )
                 )}
-
-                {/* V3：币种小圆点（5dp，当前 14dp 长条）；只有多于 1 个币种时显示 */}
-                {totalsByCurrency.length > 1 && (
-                  <View style={styles.heroDots} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-                    {totalsByCurrency.map(([code], i) => (
-                      <HeroDotFx key={code} index={i} pos={pagerPos} color={onGradientText} />
-                    ))}
-                  </View>
+                  </>
                 )}
-              </LinearGradient>
+              </FolderAssetCard>
+
+              {/* 分页指示器：卡片**外**的独立布局区（位于所有叠层可见底边下方 12px），
+                  不再画在卡内容里。复用 HeroDotFx：宽度 5→14 / 透明度随 pagerPos 连续插值，
+                  手指拖动过程中就跟着走；> 7 个币种时只渲染当前窗口，不溢出。 */}
+              {totalsByCurrency.length > 1 && (
+                <View style={dotStyles.row} pointerEvents="none" testID="home-pager-dots">
+                  {dotWindow.map((i) => (
+                    <HeroDotFx key={i} index={i} pos={pagerPos} color={palette.brand} testID={`home-dot-${i}`} />
+                  ))}
+                </View>
+              )}
             </View>
           </GestureDetector>
 
-          {/* 4 个快捷方块（设计稿 01 屏）：支出 / 收入 / 转账 / 扫描，各自 tinted 底。
-             数据入口全部走既有「记一笔」（扫描带 autoScan），不新增路由 */}
-          <View style={styles.quickRow}>
-            {quickActions.map((q) => (
-              <PressableScale
-                key={q.key}
-                activeScale={0.94}
-                hitSlop={0}
-                onPress={() => {
-                  hapticLight();
-                  q.onPress();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={q.label}
-                style={styles.quickItem}
-                testID={`home-quick-${q.key}`}
-              >
-                <View style={[styles.quickTile, { backgroundColor: q.tileBg }]}>
-                  <Ionicons name={q.icon} size={20} color={q.tint} />
-                </View>
-                <AppText variant="caption2" color={semantic.textSecondary} numberOfLines={1} style={styles.quickLabel}>
-                  {q.label}
-                </AppText>
-              </PressableScale>
-            ))}
+          {/* 4 个快捷入口（参考图）：支出 / 收入 / 转账 / 扫描 —— 视觉走 QuickActions
+              （双色自绘图标 + 圆形底），动作分发仍是原来的 switch（扫描带 autoScan），
+              数据入口全部走既有「记一笔」，不新增路由 */}
+          <View style={[styles.quickLayer, styles.heroGutter]}>
+            <QuickActions
+              labels={quickLabels}
+              onPress={(key) => {
+                hapticLight();
+                handleQuickAction(key);
+              }}
+            />
           </View>
 
         </Reanimated.View>
@@ -2963,14 +3232,7 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         }
       />
-      {/* 吸顶日期头（自绘，见 pinnedSection 的注释）：钉在列表视口顶部，与内容里的日期头同款；
-          头部区还占着顶部时不显示 —— 只覆盖列表，不盖弹层（zIndex 低于弹层） */}
-      {/* 只在列表视图显示：切到日历视图时列表（含吸顶条）必须完全不显示（验收退回第 2 条） */}
-      {Platform.OS === 'web' && heroPassed && pinnedSection && (
-        <Reanimated.View style={[styles.pinnedHeader, pinnedFadeStyle]} pointerEvents="none" testID="home-pinned-header">
-          {renderDayHeader({ section: pinnedSection })}
-        </Reanimated.View>
-      )}
+      {/* 吸顶日期头已随分组头一起去掉：列表现在是连续行，日期在每行的副标题里 */}
 
       {/* 账本抽屉（T10 / H11）：改用 ui/BottomSheet —— 拖动把手下拉 / 点遮罩 / 关闭键三条路径
           都先播出场动画再卸载，安全区与「打开期间强制收起浮空 Tab 栏」都由组件内部处理；
@@ -3225,58 +3487,62 @@ function makeStyles(
   spacing: Spacing,
   radius: Radius,
   layout: Layout,
-  elevation: Elevation
+  elevation: Elevation,
+  palette: HomePalette
 ) {
   return StyleSheet.create({
     container: { flex: 1 },
-    // ── 头部区（UI V2 稿）：内容不套卡，直接排在页面渐变上；左右 16（heroBlock），
+    // ── 头部区：内容不套卡；左右边距按区块给（heroGutter / heroCardGutter），
     //    顶部 14 + 状态栏让位（JSX 内联给，与全出血口径一致）──
-    heroBlock: { paddingHorizontal: layout.page, paddingBottom: spacing.lg },
-    // ── 设计稿 01 屏：用户区 / 渐变净资产卡 / 快捷方块 ──
+    heroBlock: { paddingHorizontal: 0, paddingBottom: spacing.lg },
+    // 顶部柔和光场（只铺顶部 420dp，从左下透明到右上 glowStrong）
+    topGlow: { position: 'absolute', left: 0, right: 0, top: 0, height: TOP_GLOW_HEIGHT, opacity: TOP_GLOW_OPACITY },
+    // 顶部安全区挡板（替代 ui/StatusBarGlass 的紫系填充，层级与高度沿用 C1：40 / insets.top + 6）
+    statusGuard: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 40 },
+    // 常规区块的左右页边距（顶部用户区 / 快捷入口 / 收支汇总 / 列表标题都吃它）
+    heroGutter: { paddingHorizontal: layout.page },
+    // 资产卡区块：左右只留 8 —— 文件夹外壳左右各 3.5% 让给后方底卡，
+    // 8 的父边距能让主卡净宽在 390 屏约 348dp（参考图 350dp）
+    heroCardGutter: { paddingHorizontal: spacing.sm, marginTop: spacing.sm },
+    // 卡内两行（金额 / 预算）之间与外壳的间距（原 heroCard 的 rowGap 搬进来）
+    heroCardBody: { rowGap: spacing.sm },
+    // ── 用户区 / 资产卡 / 快捷入口 ──
     userRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
-    // 头像 40 圆：brandSoft 底 + accent 图标（稿）
-    userNamePress: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs, flexShrink: 1, minWidth: 0 },
-    userNameText: { flexShrink: 1, minWidth: 0 },
     userRowSpacer: { flexGrow: 1 },
-    // 渐变净资产卡：20 圆角 / 16 内衬，与页边距同一条左右边线
-    heroCard: {
-      marginTop: spacing.md,
-      borderRadius: radius.lg,
-      padding: layout.card,
-      rowGap: spacing.sm,
-    },
     heroCardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.sm },
-    // 头部左胶囊可被挤窄（眼睛是右端定宽项，绝不因为标签太长被顶出卡片）
-    heroCardHeadPill: { flexShrink: 1, minWidth: 0 },
-    heroCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
+    // 头部左标题（参考图 14~15 号弱化色）：可被挤窄，绝不把右侧币种组顶出卡片
+    heroCardHeadTitle: { flexShrink: 1, minWidth: 0, fontSize: 16, lineHeight: 22 },
+    // 右组 = 币种胶囊 + 下拉箭头 + 眼睛（三件紧挨，眼睛不贴卡片最右缘）
+    heroCardHeadPill: { flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    heroCardHeadActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
     // 金额槽（页内第一行）：minHeight 保住金额降档时的行高（HERO_AMOUNT_MIN_H）→ 页高不随字号档变化
     heroAmountSlot: {
       alignSelf: 'stretch',
-      alignItems: 'center',
+      // 参考图：金额左对齐，与第一行标题左缘同一竖线。定高（= 真实金额的行盒高）
+      // 而不是跟着内容走 —— 显隐切换 / 各币种页之间行高恒定，卡片高度一像素不动
+      alignItems: 'flex-start',
       justifyContent: 'center',
-      minHeight: HERO_AMOUNT_MIN_H,
+      height: HERO_AMOUNT_MIN_H,
     },
     // 预算槽（页内第二行）：已设 / 未设两种态等高 → 各币种页等高，横滑落定整卡不跳
-    heroBudgetSlot: { alignSelf: 'stretch', justifyContent: 'center', minHeight: 34, marginTop: spacing.sm },
+    heroBudgetSlot: { alignSelf: 'stretch', justifyContent: 'center', height: HERO_BUDGET_SLOT_H, marginTop: spacing.sm },
     heroBudgetPress: { alignSelf: 'stretch' },
-    // 标题行：左「本月预算」右「已用 / 额度」（基线对齐、两端分开）
+    // 第一行：左「本月预算」+ 金额明细，右「67%」（顶部对齐、两端分开）
     heroBudgetHead: {
       flexDirection: 'row',
-      alignItems: 'baseline',
+      alignItems: 'flex-start',
       justifyContent: 'space-between',
       columnGap: spacing.sm,
     },
-    // 标题行两段文字：横向 flex 里的文本容器一律 flexShrink + minWidth 0；
-    // 左标签收得比右值快（2 : 1）—— 右值「已用 / 额度」里是真金额，尽量最后才收
-    heroBudgetHeadLabel: { flexShrink: 2, minWidth: 0 },
-    heroBudgetHeadValue: { flexShrink: 1, minWidth: 0 },
-    // 进度条行：条吃满剩余宽度、右侧百分比定宽（各页条长一致，切页不跳）
-    heroBudgetBarRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, marginTop: spacing.xs },
-    heroBudgetBarWrap: { flex: 1 },
-    // 条压在品牌渐变上：轨道用半透明白（surface 那套 budgetTrack 在紫底上几乎看不见），填充仍走状态色令牌
-    heroBudgetBar: { backgroundColor: withAlpha(semantic.textInverse, 0.24) },
+    // 左列：标签 + 其下 12 号金额明细（明细不与进度条抢同一行）
+    heroBudgetHeadCol: { flexShrink: 1, minWidth: 0 },
+    heroBudgetHeadLabel: { flexShrink: 1, minWidth: 0 },
+    heroBudgetDetail: { fontSize: 12, lineHeight: 16 },
+    // 预算条：独占整行、左对齐；轨道 palette.trackBg、填充 progressFrom→progressTo
+    heroBudgetTrack: { width: '100%', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: spacing.xs },
+    heroBudgetFill: { height: '100%', borderRadius: 3 },
     heroBudgetPct: { minWidth: 34, textAlign: 'right' },
-    // 未设预算：一行「＋ 设置本月预算」CTA（半透明白底 pill，整行可点）
+    // 未设预算：一行「＋ 设置本月预算」CTA（卡文色的半透明底 pill，两套主题都成立；整行可点）
     heroBudgetCta: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -3285,19 +3551,12 @@ function makeStyles(
       alignSelf: 'stretch',
       minHeight: 32,
       borderRadius: radius.full,
-      backgroundColor: withAlpha(semantic.textInverse, 0.14),
+      backgroundColor: withAlpha(palette.cardText, 0.12),
     },
-    // 快捷方块：4 等分，40 图标块 + 11pt 标签
-    quickRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      marginTop: spacing.md,
-    },
-    quickItem: { alignItems: 'center', rowGap: spacing.xs, flex: 1 },
-    quickTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-    quickLabel: { textAlign: 'center' },
+    // 快捷入口与上方资产卡的间距（四列的排布在 QuickActions 内，父级只给上下留白）
+    quickLayer: { marginTop: spacing.md },
     heroTopRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm },
+
     // 右侧两枚 44 玻璃圆钮（铃铛 / 日历）靠 marginLeft auto 顶到行尾
     heroTopActions: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, marginLeft: 'auto' },
     // 账本胶囊（V2 稿：高 44 · 内边距 16 · 全圆角 · 白字 15/500 + 下拉箭头；名字长时省略号收尾）
@@ -3312,22 +3571,7 @@ function makeStyles(
     heroPillText: { flexShrink: 1 },
     // 胶囊按压缩小（长账本名交给文字省略号），不能被内容撑破顶行
     heroPillPress: { flexShrink: 1 },
-    // 铃铛的红点定位锚（GlassRoundButton 不吃 children，红点单独叠在包装层上）
-    heroCtlWrap: { position: 'relative' },
-    // 未读数字角标（铃铛右上角；有消息才显示，当前无消息源恒不渲染）
-    notifBadge: {
-      position: 'absolute',
-      top: -3,
-      right: -3,
-      minWidth: 16,
-      height: 16,
-      borderRadius: 8,
-      paddingHorizontal: 3,
-      backgroundColor: colors.expenseOver,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    notifBadgeText: { color: semantic.onAccent, fontSize: 10, fontWeight: '700' },
+    // 未读红点由 RoundIconButton 自己画（badge prop），这里不再需要定位锚与数字角标
     // 币种小胶囊（V2 稿：高 26 · 内边距 8 · 白字 12/500 + 12 图标）
     heroCurrencyPill: {
       height: 26,
@@ -3365,35 +3609,33 @@ function makeStyles(
     heroPagerClip: { overflow: 'hidden' },
     heroPagerStrip: { flexDirection: 'row', flexShrink: 0 },
     heroAmountPress: { flexShrink: 1, minWidth: 0 },
-    // 隐藏金额（••••••）：与 hero 整数段同字号同行高，避免显隐切换时行高跳动
-    heroHiddenAmount: { fontSize: HERO_AMOUNT_SIZE, lineHeight: HERO_AMOUNT_LINE },
-    // 眼睛（V2 稿 36 圆、空心无底）：IconButton 默认触控区 44 —— 这里覆盖成 36 并收紧 minHeight，
-    // 外加 hitSlop 4 补回 44 触控
+    // 隐藏金额（••••••）：行高 = hero 整数段真实行盒（round(40 × 1.103) = 44），
+    // 与显示态完全同高 —— 显隐切换时卡片不许长高
+    heroHiddenAmount: { fontSize: HERO_AMOUNT_SIZE, lineHeight: HERO_AMOUNT_MIN_H },
+    // 眼睛（空心无底）：36 见方的视觉盒，外加 hitSlop 4 补回 44 以上的触控区；
+    // 换掉 IconButton 只为用首页图标集（IconEye / IconEyeOff），位置与卡片高度都没变
     heroEyeBtn: { width: 32, height: 32, minHeight: 32, borderRadius: 16 },
     // 无账户空状态：EmptyState 的文字是深色令牌，垫一张玻璃卡才在渐变上读得清
     heroEmptyCard: { marginTop: spacing.xl, paddingHorizontal: spacing.md },
-    // 吸顶日期头（自绘）：钉在列表视口顶部（浮层允许绝对定位）。本体自带 surface 底 + 16 边距
-    // （见 dayHeaderWrap），这里补一条通栏发丝线 + **26 上圆角 + overflow hidden** ——
-    // 钉住时它代表列表卡的顶边，两角必须被圆角裁住（与卡本身的首组日期头同款）
+    // 吸顶日期头（自绘）：钉在列表视口顶部（浮层允许绝对定位）。本体自带面板底 + 16 边距
+    // （见 dayHeaderWrap），这里只补一条通栏发丝线；钉住时它是面板被切开的截面，所以不留圆角
     pinnedHeader: {
       position: 'absolute',
       top: 0,
       left: 0,
       right: 0,
       zIndex: 5,
-      borderTopLeftRadius: LIST_CARD_RADIUS,
-      borderTopRightRadius: LIST_CARD_RADIUS,
       overflow: 'hidden',
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: semantic.homeHairline,
+      // 吸顶时必须实底：分组头已经去掉填充色块，钉住时下面是滚动的账单行
+      backgroundColor: palette.panel,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.hairline,
     },
-    // ── 账单列表（V2 / H4）：日期头 = 卡内的一段（12 上 / 4 下 + 16 边距，无底线 —— 与稿一致）──
-    dayHeaderWrap: { backgroundColor: semantic.homeCard, marginHorizontal: LIST_CARD_MARGIN },
-    // 首组日期头 = 列表卡顶边：26 上圆角（只圆上两角，高度够 → 真 26 弧；不用 4pt 顶帽 ——
-    // 4pt 高的圆角块会被 CSS 圆角收缩规则压成 ~2pt，看上去就是直角）
-    dayHeaderWrapFirst: {
-      borderTopLeftRadius: LIST_CARD_RADIUS,
-      borderTopRightRadius: LIST_CARD_RADIUS,
+    // ── 「最近交易」统一面板：日期头 = 面板内的一段（12 上 / 4 下 + 16 边距，无底线）。
+    //    面板的圆角只在首段（RecentHeader 上两角）与末行（下两角），中间各段一律直角 ──
+    dayHeaderWrap: {
+      backgroundColor: palette.panel,
+      marginHorizontal: LIST_CARD_MARGIN,
     },
     // 跨月月份分隔（只在当月第一次出现时渲染）：caption（12pt，≥ 令牌最小档）
     monthSepText: {
@@ -3401,7 +3643,8 @@ function makeStyles(
       paddingTop: spacing.md,
       paddingBottom: spacing.xs,
     },
-    // 分组头药丸（设计稿 01 屏）：surfaceSunken 底 + 10 圆角，左标签可挤窄、右合计不压缩
+    // 轻量分组头（参考图：列表里没有填充色块）：只留一行 12 号弱化日期 + 右对齐当日合计，
+    // 上下留 spacing.sm~md；文字左缘与账单行图标左缘对齐（= 卡片内边距）
     dayGroupPill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -3409,12 +3652,7 @@ function makeStyles(
       columnGap: spacing.sm,
       marginHorizontal: layout.card,
       marginTop: spacing.md,
-      marginBottom: spacing.xs,
-      paddingHorizontal: spacing.md,
-      // 设计稿：整条高 32 = 12 行高 16 + 上下各 8
-      paddingVertical: spacing.sm,
-      borderRadius: radius.sm,
-      backgroundColor: semantic.surfaceSunken,
+      marginBottom: spacing.sm,
     },
     daySumText: { flexShrink: 0 },
     // 日期标签（今天 / 昨天 / 10月7日 周三）：可被挤窄，合计整块不被挤
@@ -3436,11 +3674,14 @@ function makeStyles(
       fontSize: 15,
     },
     currencyCheck: { marginLeft: spacing.xs },
-    heroDots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', columnGap: 6, marginTop: spacing.xs },
+    // 卡内底部分页点：居中一行，点与点之间 spacing.sm（与 FolderAssetCard 原来的静态点同尺寸/同间距）
+    // 分页点（按 V2 包）：底点 5、选中 11、点与点之间 0 间距（每个点自带 16 宽的命中盒），贴近卡底
     heroDot: { height: 5, width: 5, borderRadius: 3 },
     // 胶囊：所有币种文字叠在同一格里；占位文字不可见
     pillStack: { alignItems: 'center', justifyContent: 'center', flexShrink: 1, minWidth: 0 },
-    pillSpacer: { opacity: 0, height: 17, overflow: 'hidden' },
+    pillSpacer: { opacity: 0, height: 20, overflow: 'hidden' },
+    // 胶囊文字 = 币种代码（参考图 14 号，与左侧标题同档）
+    pillText: { fontSize: 14, lineHeight: 20 },
     heroDotActive: { width: 14, opacity: 1 },
     heroDotIdle: { opacity: 0.3 },
     currencyMenuScroll: { flexGrow: 0, flexShrink: 1 },

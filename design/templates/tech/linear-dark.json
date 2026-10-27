@@ -1,0 +1,44 @@
+{
+  "name": "Linear 深色",
+  "style": "dark-saas",
+  "source": "skills/dark-saas/SKILL.md",
+  "intent": "近黑画布 + 炭黑面板 + hairline，单一高饱和强调色，负字距标题",
+  "layout": {
+    "hero": "panel",
+    "list": "panel",
+    "tab": "flat",
+    "density": "comfortable"
+  },
+  "radius": 14,
+  "color": {
+    "canvas": "#010102",
+    "surface": "#0F1011",
+    "surfaceAlt": "#141516",
+    "ink": "#F7F8F8",
+    "inkMuted": "#D0D6E0",
+    "inkSubtle": "#8A8F98",
+    "hairline": "#23252A",
+    "hairlineStrong": "#34343A",
+    "accent": "#5E6AD2",
+    "accentHover": "#828FFF",
+    "onAccent": "#FFFFFF",
+    "positive": "#27A644",
+    "negative": "#E5484D"
+  },
+  "shadow": {
+    "level1": "0 1px 0 rgba(255,255,255,.04) inset",
+    "level2": "0 12px 32px rgba(0,0,0,.6)"
+  },
+  "typography": {
+    "display": {
+      "size": 40,
+      "weight": 600,
+      "tracking": "-0.035em"
+    },
+    "label": {
+      "size": 11,
+      "tracking": "0.08em",
+      "transform": "uppercase"
+    }
+  }
+}

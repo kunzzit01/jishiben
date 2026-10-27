@@ -69,12 +69,12 @@ const WEB_GLASS_INTENSITY = Platform.OS === 'web' ? 8 : undefined;
  * 未列出的行不传基色 = IconCircle 的中性圆。
  */
 const ICON_TINTS = {
-  darkMode: '#9B5BD6',
+  darkMode: '#1677FF',
   language: '#4379E8',
   finance: '#4ECB8C',
   subscribe: '#7E7A95',
   help: '#FFB06A',
-  about: '#C29BFF',
+  about: '#5AA2FF',
 } as const;
 
 export default function ProfileScreen({ navigation }: any) {

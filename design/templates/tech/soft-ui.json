@@ -1,0 +1,40 @@
+{
+  "name": "软浮雕",
+  "style": "neo-neumorphism",
+  "source": "skills/neo-neumorphism/SKILL.md",
+  "intent": "同色底挤出浮雕：外阴影凸起、内阴影按压，低对比柔和",
+  "layout": {
+    "hero": "raised",
+    "list": "raised",
+    "tab": "raised",
+    "density": "comfortable"
+  },
+  "radius": 20,
+  "color": {
+    "canvas": "#E0E5EC",
+    "surface": "#E0E5EC",
+    "surfacePressed": "#DDE2E9",
+    "ink": "#5F6B7A",
+    "inkMuted": "#8A97A8",
+    "inkSubtle": "#A6B1BF",
+    "accent": "#6C9BD1",
+    "positive": "#4E9A6B",
+    "negative": "#C56A6A",
+    "onAccent": "#FFFFFF"
+  },
+  "shadow": {
+    "raised": "-6px -6px 12px rgba(255,255,255,.8), 6px 6px 12px rgba(0,0,0,.12)",
+    "pressed": "inset 4px 4px 8px rgba(0,0,0,.12), inset -4px -4px 8px rgba(255,255,255,.8)"
+  },
+  "typography": {
+    "display": {
+      "size": 38,
+      "weight": 600,
+      "tracking": "-0.02em"
+    },
+    "label": {
+      "size": 11,
+      "tracking": "0.04em"
+    }
+  }
+}

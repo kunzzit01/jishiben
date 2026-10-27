@@ -285,16 +285,16 @@ export default function AddAssetScreen({ route }: any) {
         nameInputRef.current?.blur();
       }}
     >
-      {/* 顶栏：统一二级页页头（ScreenHeader compact = 返回 + 居中标题 + 右侧动作） */}
+      {/* 页头：标题排版保持原样（ScreenHeader compact）；这轮只把**返回键与保存键**做成新设计语言 */}
       <ScreenHeader
         variant="compact"
         title={t(isEdit ? 'addTx.editAssetTitle' : 'addTx.addAssetTitle')}
         onBack={() => navigation.goBack()}
         right={
-          // 创建 / 编辑都显示"保存"（计划 5.8）。计算器键盘开着时先求值再提交，未确认的算式不丢失
+          /* 保存：实心品牌胶囊（原来是 ghost 文字链接，和首页的主操作不是一套语言） */
           <Button
             title={t('common.save')}
-            variant="ghost"
+            variant="secondary"
             size="sm"
             fullWidth={false}
             onPress={() => {
@@ -465,6 +465,7 @@ export default function AddAssetScreen({ route }: any) {
           <AmountCalculatorKeypad
             onPressKey={(key) => setBalanceCursor(activeExpr.pressKeyAt(key, balanceCursor))}
             onPressToday={() => {}}
+            hideDateKey
             onClear={() => { activeExpr.reset(0); setBalanceCursor(0); }}
             onConfirm={handleKeypadConfirm}
           />
@@ -600,13 +601,13 @@ function makeStyles(
     container: { flex: 1, backgroundColor: semantic.bg },
     amountHero: {
       backgroundColor: colors.card,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: colors.cardBorder,
       alignItems: 'flex-start',
-      paddingVertical: 26,
+      paddingVertical: 22,
       paddingHorizontal: 20,
-      marginBottom: 14,
+      marginBottom: 18,
     },
     amountHeroActive: { borderColor: semantic.accent },
     amountLabel: {
@@ -642,10 +643,10 @@ function makeStyles(
       marginLeft: 2,
     },
     // 账户名称 / 账户类型：左右 55% / 45%
-    nameTypeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md, zIndex: 10, elevation: 10 },
-    nameColumn: { flex: 55 },
+    nameTypeRow: { flexDirection: 'column', gap: spacing.sm, marginBottom: spacing.md, zIndex: 10, elevation: 10 },
+    nameColumn: { width: '100%' },
     // zIndex:类型下拉展开时高于全屏透明遮罩层,下拉行不会被遮罩盖住
-    typeColumn: { flex: 45, zIndex: 10, elevation: 10 },
+    typeColumn: { width: '100%', zIndex: 10, elevation: 10 },
     input: {
       backgroundColor: semantic.surface,
       borderRadius: 10,
@@ -660,7 +661,7 @@ function makeStyles(
     },
     // 出错：只换描边色（不在出错时改宽度，避免 0.5px 布局跳动）
     inputError: { borderColor: semantic.danger },
-    pickerLabel: { marginBottom: 6 },
+    pickerLabel: { marginBottom: 8 },
     // 出错提示：就地落在字段下方，不写死高度（字号 / 行高走 typography 令牌）
     errorText: { marginTop: spacing.xs },
     // 下拉选择框（账户类型/货币）：固定高度、不参与纵向伸缩——名称列出现报错行时，
