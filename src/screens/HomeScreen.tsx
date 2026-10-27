@@ -1847,7 +1847,7 @@ export default function HomeScreen({ navigation }: any) {
           const cat = categories.find((c) => c.id === b.categoryId);
           return {
             categoryId: b.categoryId,
-            name: cat?.name ?? b.categoryId,
+            name: cat ? getCategoryLabel(cat, t) : b.categoryId,
             icon: cat?.icon,
             color: cat?.color,
             limit: b.amount,
@@ -1855,7 +1855,7 @@ export default function HomeScreen({ navigation }: any) {
           };
         })
         .sort((a, b) => b.used / (b.limit || 1) - a.used / (a.limit || 1)),
-    [budgets, categories, currency, activeCurrency, expenseByCategory]
+    [budgets, categories, currency, activeCurrency, expenseByCategory, t]
   );
 
   // 未设额度但本月有支出的支出分类（抽屉里一键加额度，最多 8 条）
@@ -1865,14 +1865,14 @@ export default function HomeScreen({ navigation }: any) {
       .filter((c) => c.type === 'expense' && !withLimit.has(c.id) && (expenseByCategory.get(c.id) ?? 0) > 0)
       .map((c) => ({
         categoryId: c.id,
-        name: c.name,
+        name: getCategoryLabel(c, t),
         icon: c.icon,
         color: c.color,
         used: expenseByCategory.get(c.id) ?? 0,
       }))
       .sort((a, b) => b.used - a.used)
       .slice(0, 8);
-  }, [categories, categoryBudgetRows, expenseByCategory]);
+  }, [categories, categoryBudgetRows, expenseByCategory, t]);
 
   // 账单：按天分组（倒序）→ SectionList 的 sections（T09 / H4 / H6）。
   // 头部合计只算净资产卡当前选中币种；条目本身也只保留该币种（既有行为不变）。

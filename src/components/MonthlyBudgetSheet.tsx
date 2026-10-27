@@ -136,6 +136,20 @@ export function MonthlyBudgetSheet({
     [semantic, spacing, radius, layout]
   );
 
+  // 百分比文字与进度条同色：同一个「状态档」只能有一个颜色，
+  // 否则 67% 会出现「蓝字 + 黄条」这种自相矛盾的画面
+  const toneColor = (tone: ReturnType<typeof formatBudgetPct>['tone']): string => {
+    switch (tone) {
+      case 'danger':
+        return semantic.danger;
+      case 'warning':
+        return semantic.warning;
+      case 'success':
+        return semantic.success;
+      default:
+        return semantic.accent;
+    }
+  };
   const totalPct = formatBudgetPct(totalUsed, totalLimit, t);
 
   return (
@@ -158,7 +172,7 @@ export function MonthlyBudgetSheet({
               <AppText
                 variant="title2"
                 weight="600"
-                color={semantic.accent}
+                color={toneColor(totalPct.tone)}
                 accessibilityLabel={totalPct.a11y}
                 testID="budget-total-pct"
               >
@@ -242,7 +256,7 @@ export function MonthlyBudgetSheet({
                   <AppText
                     variant="title2"
                     weight="600"
-                    color={semantic.textPrimary}
+                    color={toneColor(pct.tone)}
                     style={styles.pctText}
                     accessibilityLabel={pct.a11y}
                     testID={`budget-cat-pct-${row.categoryId}`}
@@ -266,9 +280,16 @@ export function MonthlyBudgetSheet({
         {/* 未设额度的分类：一键加额度 */}
         {unsetRows.length > 0 && (
           <>
-            <AppText variant="footnote" color={semantic.textSecondary} style={styles.emptyHint}>
-              {t('home.budgetAddCategory')}
-            </AppText>
+            {/* 小节标题（与上面「Category budgets」同级）：此前只是一行灰色说明，
+                与空态提示重复表达同一件事 */}
+            <View style={styles.sectionHead}>
+              <AppText variant="caption" weight="600" color={semantic.textSecondary}>
+                {t('home.budgetAddCategory')}
+              </AppText>
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {unsetRows.length}
+              </AppText>
+            </View>
             {unsetRows.map((row) => {
               const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
               const tint = row.color ?? semantic.accent;

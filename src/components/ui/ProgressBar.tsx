@@ -15,12 +15,12 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useTheme } from '../../theme/useTheme';
 
 /** 预算进度的状态阈值（分类预算条与进度文案共用，一处改全局一致） */
-export const BUDGET_DANGER_RATIO = 0.9;
-export const BUDGET_WARNING_RATIO = 0.65;
+export const BUDGET_DANGER_RATIO = 1;
+export const BUDGET_WARNING_RATIO = 0.8;
 
 export type ProgressTone = 'success' | 'warning' | 'danger' | 'accent';
 
-/** 比例 → 状态档（≥90% 危险 / ≥65% 警告 / 其余健康） */
+/** 比例 → 状态档（≥100% 危险 / ≥80% 警告 / 其余健康；与 theme.ts 的 warning/danger 令牌注释一致） */
 export function progressToneOf(ratio: number): ProgressTone {
   if (!Number.isFinite(ratio) || ratio <= 0) return 'success';
   if (ratio >= BUDGET_DANGER_RATIO) return 'danger';
