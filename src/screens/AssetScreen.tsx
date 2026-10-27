@@ -745,8 +745,6 @@ export default function AssetScreen() {
   const [balanceHidden, setBalanceHidden] = useState(false);
   // 卡上的币种切换器：null = 自动（全局币种所在分组，否则第一个分组）；
   // 用户选过币种后，卡片只显示那一种币种的合计（绝不跨币种相加）
-  const [cardCurrency, setCardCurrency] = useState<string | null>(null);
-  const [currencyMenuOpen, setCurrencyMenuOpen] = useState(false);
   /* 大金额的「判档宽度」：取**父级实测宽**（定值），交给 MoneyText 自己降档。
      不能靠 MoneyText 自身盒宽 —— 普通金额的盒子是「宽 = 内容宽」（flexShrink 0），
      量回来的永远是内容宽，长金额永远判成「放得下」→ 直接画到渐变卡外面。 */
@@ -1179,24 +1177,13 @@ export default function AssetScreen() {
       }));
   }, [activeAssets, typeOrder, assetOrder, accountFilter]);
 
-  // ---------- 总资产卡（设计稿 02 屏）：**某一币种**的资产合计，不是一个跨币种的总数 ----------
-  // 口径：同名币种聚合，绝不跨币种相加 —— 卡片币种 = 用户在卡上选的币种（切币种胶囊）；
-  // 没选过 / 选的币种被分段筛选过滤掉时退回自动档：全局设置币种在该分组里时用它，否则取第一个分组
-  const primaryGroup = useMemo(() => {
-    if (groupedAssets.length === 0) return null;
-    const picked = cardCurrency ? groupedAssets.find((g) => g.code === cardCurrency) : null;
-    return picked ?? groupedAssets.find((g) => g.code === currency) ?? groupedAssets[0];
-  }, [groupedAssets, currency, cardCurrency]);
-  const primaryTotal = useMemo(
-    () => (primaryGroup ? primaryGroup.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0) : 0),
-    [primaryGroup, getAssetBalance]
-  );
   // 筛选分段（稿：全部账户 / 现金 / 银行 / 电子钱包）—— 标签取现有 i18n 键（i18n 不在本次改动范围）
   const filterOptions = useMemo(
     () => [
       { label: t('common.all'), value: 'all' },
       { label: t('asset.typeCash'), value: 'cash' },
       { label: t('asset.typeBank'), value: 'bank' },
+      { label: t('asset.typeCredit'), value: 'credit' },
       { label: t('asset.typeEwallet'), value: 'ewallet' },
     ],
     [t]
@@ -1308,98 +1295,23 @@ export default function AssetScreen() {
           </View>
         </View>
 
-        {/* 总资产卡（稿 02 屏）：渐变卡 + 「币种 · 资产」可点胶囊 + 大金额；
-            卡片只代表**一种币种**（绝不跨币种相加），所以币种写在前面、并且可切换；
-            隐私开关沿用首页的眼睛图标语义，只切显示不写数据；本月净变动已下线（余额页只放余额） */}
-        {assets.length > 0 && primaryGroup && (
-          <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.md }}>
-            <LinearGradient
-              colors={gradients.hero.colors}
-              start={gradients.hero.start}
-              end={gradients.hero.end}
-              style={styles.totalCard}
-            >
-              <View style={styles.totalCardHead}>
-                {/* 币种胶囊（与首页净资产卡的币种胶囊同规格：12.5/17 + 600 + 反色 86%）：
-                    点开 = 币种抽屉（现有全部币种 + 各自余额），选一个就把卡片换成那个币种 */}
-                <PressableScale
-                  onPress={() => setCurrencyMenuOpen(true)}
-                  activeScale={0.94}
-                  hitSlop={8}
-                  style={styles.cardPillHit}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('home.currencySheetTitle')}
-                  testID="asset-currency-pill"
-                >
-                  <AppText
-                    variant="caption"
-                    weight="600"
-                    color={withAlpha(semantic.textInverse, 0.86)}
-                    numberOfLines={1}
-                    style={styles.cardPillText}
-                    testID="asset-currency-pill-label"
-                  >
-                    {`${primaryGroup.code} · ${t('asset.summaryAssets')}`}
-                  </AppText>
-                  <Ionicons
-                    name="chevron-down"
-                    size={13}
-                    color={withAlpha(semantic.textInverse, 0.86)}
-                  />
-                </PressableScale>
-                <View style={styles.totalCardHeadActions}>
-                  <PressableScale
-                    activeScale={0.94}
-                    hitSlop={12}
-                    onPress={() => setBalanceHidden((v) => !v)}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('home.toggleAmount')}
-                    accessibilityState={{ checked: !balanceHidden }}
-                    testID="asset-toggle-amount"
-                  >
-                    <Ionicons
-                      name={balanceHidden ? 'eye-off-outline' : 'eye-outline'}
-                      size={16}
-                      color={withAlpha(semantic.textInverse, 0.86)}
-                    />
-                  </PressableScale>
-                </View>
-              </View>
-              {/* 金额槽：判档宽度 = 卡片内实测宽（定值）。320 视口 12 位金额按 40 号要 ~390px，
-                  卡片内只有 256px —— 不给可用宽就只能画到卡外（渐变卡没有 overflow 裁剪） */}
-              <View
-                style={styles.totalAmountSlot}
-                onLayout={(e) => {
-                  const w = Math.round(e.nativeEvent.layout.width);
-                  setTotalAmountW((prev) => (Math.abs(prev - w) >= 1 ? w : prev));
-                }}
-              >
-                <MoneyText
-                  value={primaryTotal}
-                  kind="plain"
-                  variant="display"
-                  color={semantic.textInverse}
-                  hidden={balanceHidden}
-                  availableWidth={totalAmountW || undefined}
-                  // 地板档（18）仍放不下 → 紧凑格式（100.1T）+ 长按看全文，
-                  // 与首页净资产金额槽 / 账户行同一套兜底，不靠裁切掩盖溢出
-                  compactFallback
-                />
-              </View>
-            </LinearGradient>
-          </View>
-        )}
 
         {/* 分段筛选（稿 02 屏）：全部账户 / 现金 / 银行 / 电子钱包 —— 按 assets.type 过滤，纯展示层 */}
         {assets.length > 0 && (
           <View style={[styles.filterWrap, { paddingHorizontal: pagePadding }]} testID="asset-filter">
-            <SegmentedControl
-              options={filterOptions}
-              selected={accountFilter}
-              onSelect={(v) => setAccountFilter(v as typeof accountFilter)}
-              stretch
-              thumb="accent"
-            />
+            {/* 5 个筛选项在 390 下硬撑会截成「Bank …」「Credit…」——改成横向可滚、按内容宽度排，标签完整 */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: 'row', alignItems: 'center' }}
+            >
+              <SegmentedControl
+                options={filterOptions}
+                selected={accountFilter}
+                onSelect={(v) => setAccountFilter(v as typeof accountFilter)}
+                thumb="accent"
+              />
+            </ScrollView>
           </View>
         )}
 
@@ -1474,7 +1386,6 @@ export default function AssetScreen() {
                       total={groupTotal}
                       collapsed={isCollapsed}
                       onToggle={() => toggleCurrencyGroup(group.code)}
-                      active={group.code === primaryGroup?.code}
                       testID={`asset-group-${group.code}`}
                     />
                     {!isCollapsed &&
@@ -1544,58 +1455,6 @@ export default function AssetScreen() {
       {/* S4 账户详情：底部抽屉（替换原来的居中弹窗）；删除走 danger 按钮，"设为默认"是 Switch 行。
           V2.2c：面板改高不透明磨砂（复用 tabBar 填充：夜 .88 / 日 .90），背后是全局 scrim 遮罩；
           标题带上币种（「账户详情 · MYR」）—— 抽屉里的金额因此不再带币种后缀 */}
-      {/* 卡上币种切换器 = 币种抽屉：现有全部币种一行一个（左：币种胶囊，右：该币种资产合计），
-          选中项带 accent 勾；选完只换卡片的币种，不动任何账户数据、也不跨币种相加 */}
-      <BottomSheet
-        visible={currencyMenuOpen}
-        onClose={() => setCurrencyMenuOpen(false)}
-        title={t('home.currencySheetTitle')}
-        fill={semantic.homeCard}
-        maxHeightRatio={0.7}
-        testID="asset-currency-sheet"
-      >
-        <ScrollView
-          style={styles.currencySheetScroll}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: spacing.sm }}
-        >
-          {groupedAssets.map((group) => {
-            const active = group.code === primaryGroup?.code;
-            const total = group.items.reduce((sum, a) => sum + getAssetBalance(a.id), 0);
-            return (
-              <PressableScale
-                key={group.code}
-                style={[styles.currencyOption, active && { backgroundColor: semantic.selectedRow }]}
-                activeScale={0.98}
-                onPress={() => {
-                  setCardCurrency(group.code);
-                  setCurrencyMenuOpen(false);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={group.code}
-                accessibilityState={{ selected: active }}
-                testID={`asset-currency-option-${group.code}`}
-              >
-                <View style={styles.currencyOptionCode}>
-                  <AppText variant="caption" weight="600" color={semantic.accentText}>
-                    {group.code}
-                  </AppText>
-                </View>
-                <MoneyText
-                  value={total}
-                  kind="plain"
-                  currency={group.code}
-                  variant="subhead"
-                  weight="600"
-                  color={active ? semantic.accentText : semantic.textPrimary}
-                  style={styles.currencyOptionAmount}
-                />
-                {active && <Ionicons name="checkmark" size={20} color={semantic.accent} />}
-              </PressableScale>
-            );
-          })}
-        </ScrollView>
-      </BottomSheet>
 
       <BottomSheet
         visible={!!viewingAssetId}

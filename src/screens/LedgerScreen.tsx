@@ -98,23 +98,28 @@ export default function LedgerScreen() {
       onTouchStart={() => { Keyboard.dismiss(); }}
     >
       <HeroGradient fill />
-      <GlassBackHeader title={t('ledger.pageTitle')} onBack={() => navigation.goBack()} />
+      {/* 页头直接用 ScreenHeader：返回键是统一的 40 白玻璃圆（GlassBackHeader 会在它下面再垫一枚 44 圆，两层叠着看） */}
+      <ScreenHeader variant="compact" title={t('ledger.pageTitle')} onBack={() => navigation.goBack()} />
       {/* 键盘弹出时不遮住名称输入框与底部创建键 */}
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ flex: 1, paddingHorizontal: pagePadding }}>
           {/* 自定义账本表单：页面锁死不滚动（Scroll 会遮挡输入区），内容直接平铺 */}
           <View style={[styles.flex, styles.formWrap]}>
-            <AppText variant="footnote" color={semantic.textSecondary} style={styles.sectionTitle}>
-              {t('ledger.customTitle')}
-            </AppText>
-            <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.addCard}>
+            {/* 这里原来用 GlassView：它的 backdrop-filter 会把输入框文字糊掉；表单不需要透出背景
+                → 改普通白卡（面 + 发丝边 + 20 圆角） */}
+            <View
+              style={[
+                styles.addCard,
+                { backgroundColor: semantic.surfaceElevated, borderColor: semantic.hairline },
+              ]}
+            >
               <View style={styles.previewRow}>
                 {/* 中心预览：立体光泽球（§5），创建时用的默认图标 + 当前选中色 */}
                 <IconCircle size={72} color={newColor} icon={DEFAULT_LEDGER_ICON} />
               </View>
 
               <TextInput
-                style={[styles.input, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+                style={[styles.input, { backgroundColor: semantic.surfaceElevated, borderColor: semantic.hairline, color: semantic.textPrimary }]}
                 value={newName}
                 onChangeText={setNewName}
                 placeholder={t('ledger.namePlaceholder')}
@@ -127,8 +132,8 @@ export default function LedgerScreen() {
               {[0, 1, 2, 3, 4].map((row) => (
                 <View key={row} style={styles.colorRow}>
                   {COLOR_OPTIONS.slice(row * 5, row * 5 + 5).map((color) => (
+                    <View key={color} style={styles.colorCell}>
                     <PressableScale
-                      key={color}
                       style={[
                         styles.colorOption,
                         { backgroundColor: color },
@@ -143,10 +148,11 @@ export default function LedgerScreen() {
                       accessibilityState={{ selected: newColor === color }}
                       accessibilityLabel={color}
                     />
+                    </View>
                   ))}
                 </View>
               ))}
-            </GlassView>
+            </View>
           </View>
 
           {/* 创建账本按钮钉在页面最底部（避开浮空Tab栏），不再随内容滚动 */}
@@ -185,24 +191,28 @@ const styles = StyleSheet.create({
   headerGlassInner: { width: 44, height: 44 },
   formWrap: { paddingTop: 6, paddingHorizontal: 6 },
   sectionTitle: { paddingHorizontal: 6, paddingBottom: 10 },
-  addCard: { padding: 16 },
+  addCard: { padding: 20, borderRadius: 20, borderWidth: 1 },
   previewRow: { alignItems: 'center', marginBottom: 12 },
   // 胶囊输入框（稿：高 48 / radius 999 / --chip 底）
   input: {
     height: 48,
-    borderRadius: 999,
-    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    overflow: 'hidden',
     fontSize: 15,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   pickerLabel: { paddingHorizontal: 6, marginBottom: 8 },
   colorRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 12,
   },
+  colorCell: { flex: 1, alignItems: 'center' },
   // 5×5 色格：圆形色点（稿），撑到行宽 17%，固定网格、整页不滚动
-  colorOption: { width: '17%', aspectRatio: 1, borderRadius: 999 },
+  colorOption: { width: 38, height: 38, borderRadius: 19 },
   // 创建账本按钮：全宽、钉在页面底部
   saveBtn: { alignSelf: 'stretch' },
   saveBtnFill: {
