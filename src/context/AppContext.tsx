@@ -247,7 +247,10 @@ interface AppContextValue {
   /** 恢复已归档账户 */
   unarchiveAsset: (id: string) => Promise<void>;
   /** 未归档的账户（净资产/各币种合计/账户选择器用它）。assets 仍是全部账户（含归档） */
+  /** 当前账本下的活跃账户（孤儿账户一律可见，规则见 assetBelongsToActiveLedger） */
   activeAssets: Asset[];
+  /** 账户是否属于当前账本；资产页/归档区共用同一套判定，避免两处规则漂移 */
+  assetBelongsToActiveLedger: (asset: Asset) => boolean;
   /** 引用该账户的交易条数（assetId / fromAssetId / toAssetId 任一命中） */
   assetRecordCount: (id: string) => number;
   assetHasRecords: (id: string) => boolean;
@@ -295,10 +298,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrencyState] = useState<string>('MYR'); // 默认货币：RM（马来西亚林吉特）
   const [periodPreference, setPeriodPreferenceState] = useState<PeriodPreference>(DEFAULT_PERIOD);
   const [assets, setAssets] = useState<Asset[]>([]);
-  // ⚠ 2026-10-27 回滚：曾按 a.ledgerId === activeLedgerId 过滤，但库里的 asset.ledgerId
-  // 与当前 ledgers 的 id 对不上（Supabase 导入后重新生成过 id），结果所有账本都显示「No assets」。
-  // 在确认真实数据归属之前，先恢复「全部未归档资产」的行为。
-  const activeAssets = useMemo(() => assets.filter((a) => !a.archivedAt), [assets]);
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([]);
   const [dateFormat, setDateFormatState] = useState<DateFormat>(DEFAULT_DATE_FORMAT);
   const [weekStartsOn, setWeekStartsOnState] = useState<WeekStartsOn>(DEFAULT_WEEK_STARTS_ON);
@@ -326,6 +325,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       : ledgers.some((l) => l.id === activeLedgerId)
         ? activeLedgerId
         : ledgers[0].id;
+
+  // ── 账户的账本归属 ────────────────────────────────────────────
+  // ⚠ 2026-10-27 曾按 `a.ledgerId === activeLedgerId` 直接过滤，结果**每本账本都显示「No assets」**，
+  // 于是回滚成「全部未归档账户」。回滚是对的，但它只证明了"严格相等"会清空整页，并不等于数据全坏。
+  // 诊断结论（代码位置见汇报）：云端 assets.ledger_id 是 NOT NULL + 外键（V3__create_assets.sql:11,34），
+  // 且接口把 ledger_id 翻译回账本的 client_uid（AssetService.java:172），所以服务端不可能给出"对不上"的账户。
+  // 孤儿只会在客户端出现，真实存在两条路径：
+  //   ① 冷启动/离线期间建账户 → ledgerId = 占位账本 id，仅当拉到真账本时才改挂（见 loadFromStorage）；
+  //   ② reconcileLedgers 会回收"云端没有且无数据"的账本，但**账户不会连带改挂或丢弃**
+  //      （syncService.reconcileLedgers 里 assets 只做占位 id 重映射），其账本一旦被回收就成了孤儿。
+  // 只要库里存在一个孤儿，严格相等就会把整页清空 —— 所以判定必须"认得出孤儿并兜底"，而不是简单地贴 id。
+  const ledgerIdSet = useMemo(() => new Set(ledgers.map((l) => l.id)), [ledgers]);
+
+  /**
+   * 账户是否属于当前账本：
+   *   ① 归属明确且该账本仍存在 → 只在它自己那本账本下出现（用户诉求）；
+   *   ② 孤儿账户（无 ledgerId / 占位账本 id / 指向已不存在的账本）→ **每本账本都可见**。
+   *      宁可多显示也不能凭空消失：孤儿没有可信归属，藏起来等于让用户以为钱没了；
+   *      而它们本来就是今天的行为（回滚后的"全部显示"），兜底不改变现状、只收窄有归属的账户。
+   *   ③ 账本表还没到位（冷启动占位期，ledgers 为空）→ 不过滤，保持全量。
+   */
+  const assetBelongsToActiveLedger = useCallback(
+    (a: Asset): boolean => {
+      if (!a.ledgerId || a.ledgerId === PENDING_LEDGER_ID) return true; // ② 归属缺失
+      if (ledgerIdSet.size === 0) return true; // ③ 占位账本期，没有可比的账本表
+      if (!ledgerIdSet.has(a.ledgerId)) return true; // ② 指向已被回收/删除的账本
+      return a.ledgerId === effectiveActiveLedgerId; // ① 正常归属
+    },
+    [ledgerIdSet, effectiveActiveLedgerId]
+  );
+
+  const activeAssets = useMemo(
+    () => assets.filter((a) => !a.archivedAt && assetBelongsToActiveLedger(a)),
+    [assets, assetBelongsToActiveLedger]
+  );
 
   // 启动时读取本地数据；抽成函数是因为云同步把"云端合并结果"写回 AsyncStorage 后
   // 会回调 onLocalDataReplaced → loadFromStorage，把恢复/换机登录拉回来的数据刷进内存 state
@@ -927,6 +961,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         periodPreference,
         assets,
         activeAssets,
+        assetBelongsToActiveLedger,
         dateFormat,
         weekStartsOn,
         decimalPlaces,

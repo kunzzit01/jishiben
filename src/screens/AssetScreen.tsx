@@ -725,6 +725,7 @@ export default function AssetScreen() {
   const {
     assets,
     activeAssets,
+    assetBelongsToActiveLedger,
     transactions,
     currency,
     categories,
@@ -736,8 +737,18 @@ export default function AssetScreen() {
     setDefaultAsset,
     updateAsset,
   } = useApp();
-  // 已归档账户（底部可折叠分组，默认收起）
-  const archivedAssets = useMemo(() => assets.filter((a) => !!a.archivedAt), [assets]);
+  // 已归档账户（底部可折叠分组，默认收起）。
+  // 归属判定与 activeAssets 共用同一个谓词（含孤儿兜底），否则归档区会把别的账本的归档账户也列出来。
+  const archivedAssets = useMemo(
+    () => assets.filter((a) => !!a.archivedAt && assetBelongsToActiveLedger(a)),
+    [assets, assetBelongsToActiveLedger]
+  );
+  // 本账本是否有账户（含已归档）：决定空状态、类型筛选条、"添加"按钮是否出现。
+  // 用账本口径而不是全局 assets —— 否则切到一本没有账户的账本时，列表分支全被跳过，页面只剩标题（空白页）。
+  const hasLedgerAssets = useMemo(
+    () => assets.some((a) => assetBelongsToActiveLedger(a)),
+    [assets, assetBelongsToActiveLedger]
+  );
   const [archivedOpen, setArchivedOpen] = useState(false);
   // 账户类型筛选（设计稿 02 屏分段 Tab）：只过滤展示，不动 assets / 余额口径
   const [accountFilter, setAccountFilter] = useState<'all' | 'cash' | 'bank' | 'ewallet'>('all');
@@ -1277,7 +1288,7 @@ export default function AssetScreen() {
             >
               {t('asset.title')}
             </AppText>
-            {assets.length > 0 &&
+            {hasLedgerAssets &&
               (reorderMode ? (
                 <GlassPillButton
                   label={t('common.done')}
@@ -1297,7 +1308,7 @@ export default function AssetScreen() {
 
 
         {/* 分段筛选（稿 02 屏）：全部账户 / 现金 / 银行 / 电子钱包 —— 按 assets.type 过滤，纯展示层 */}
-        {assets.length > 0 && (
+        {hasLedgerAssets && (
           <View style={[styles.filterWrap, { paddingHorizontal: pagePadding }]} testID="asset-filter">
             {/* 5 个筛选项在 390 下硬撑会截成「Bank …」「Credit…」——改成横向可滚、按内容宽度排，标签完整 */}
             <ScrollView
@@ -1315,8 +1326,8 @@ export default function AssetScreen() {
           </View>
         )}
 
-        {assets.length === 0 ? (
-          /* S5 空状态：图标 + 一句话 + 一个按钮 */
+        {!hasLedgerAssets ? (
+          /* S5 空状态：图标 + 一句话 + 一个按钮（本账本没有账户也用这个空态，不留空白页） */
           <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.xl }}>
             <Card>
               <EmptyState
