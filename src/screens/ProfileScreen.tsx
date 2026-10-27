@@ -45,7 +45,6 @@ import {
   Card,
   GlassView,
   HeroGradient,
-  IconCircle,
   ListRow,
   ListSection,
   ScreenHeader,
@@ -60,22 +59,6 @@ import {
  * iOS 仍用 GlassView 默认真材质，Android 本来就没有模糊。
  */
 const WEB_GLASS_INTENSITY = Platform.OS === 'web' ? 8 : undefined;
-
-/**
- * 设置各行的图标基色（UI V2 稿取样的行首圆色）。
- * 这些是设置页的装饰色，不是类别 / 账户数据色 —— 统一交给 IconCircle（立体光泽球）。
- * ⚠ 基色深浅是硬指标（UI V2.1 §5）：白图标与球 ≥3:1，本页按 §4 的小字口径取 4.5:1 ——
- *   language / finance / subscribe 三颗是按测量结果加深过的，别再调亮回去。
- * 未列出的行不传基色 = IconCircle 的中性圆。
- */
-const ICON_TINTS = {
-  darkMode: '#1677FF',
-  language: '#4379E8',
-  finance: '#4ECB8C',
-  subscribe: '#7E7A95',
-  help: '#FFB06A',
-  about: '#5AA2FF',
-} as const;
 
 export default function ProfileScreen({ navigation }: any) {
   const { semantic, spacing, layout } = useTheme();
@@ -209,7 +192,7 @@ export default function ProfileScreen({ navigation }: any) {
           paddingBottom: tabClearance + TAB_BAR_RAISE + spacing.huge,
         }}
       >
-        {/* 资料卡（= 账号页入口）：surface 卡 + 令牌圆角/内衬；头像走 IconCircle（同全 App 的圆图标块）；
+        {/* 资料卡（= 账号页入口）：surface 卡 + 令牌圆角/内衬；头像走 RowIcon（下沉蓝圆 + 强调色线条图标）；
             邮箱 + 同步状态两行；点击仍进原账号页（按下反馈由 Card 提供） */}
         <Card
           onPress={authInitializing ? undefined : () => navigation.navigate(ROUTES.AUTH)}
@@ -224,7 +207,7 @@ export default function ProfileScreen({ navigation }: any) {
           testID="profile-account-card"
         >
           <View style={styles.accountRow}>
-            <IconCircle size={48} icon="person" />
+            <RowIcon size={48} icon="person" tone="accent" />
             <View style={styles.accountTextBlock}>
               <AppText variant="headline" numberOfLines={2}>
                 {authInitializing ? tr('auth.busy') : user ? user.email : tr('auth.signInOrUp')}
@@ -254,7 +237,7 @@ export default function ProfileScreen({ navigation }: any) {
               testID="profile-bio-row"
             />
             <ListRow
-              leading={<IconCircle size={ROW_ICON_SIZE} icon="key-outline" />}
+              leading={<RowIcon icon="key-outline" />}
               title={tr('pin.settingsTitle')}
               value={hasPin ? tr('pin.setup') : tr('pin.none')}
               chevron
@@ -284,9 +267,7 @@ export default function ProfileScreen({ navigation }: any) {
         {/* 通用分组：语言（中 / EN 分段在行右侧）+ 财务规划 › + 订阅（灰 + 即将推出） */}
         <ListSection title={tr('profile.general')} style={styles.section} testID="profile-general">
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={ICON_TINTS.language} icon="language-outline" />
-            }
+            leading={<RowIcon icon="language-outline" />}
             title={tr('profile.language')}
             trailing={
               <LanguageSegments
@@ -302,9 +283,7 @@ export default function ProfileScreen({ navigation }: any) {
             testID="profile-language-row"
           />
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={ICON_TINTS.finance} icon="pie-chart-outline" />
-            }
+            leading={<RowIcon icon="pie-chart-outline" />}
             title={tr('finance.title')}
             chevron
             onPress={() => navigation.navigate(ROUTES.FINANCE_PLAN)}
@@ -312,9 +291,7 @@ export default function ProfileScreen({ navigation }: any) {
           />
           {/* 订阅（Premium）：后端还是桩 → 行不可点 + 「即将推出」徽章（语义未变，只换视觉） */}
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={ICON_TINTS.subscribe} icon="star-outline" />
-            }
+            leading={<RowIcon icon="star-outline" />}
             title={tr('profile.subscribe')}
             trailing={<Badge label={tr('profile.subscribeSub')} />}
             disabled
@@ -327,9 +304,7 @@ export default function ProfileScreen({ navigation }: any) {
             这里补上设置页的正式入口。行规格直接复用 ListRow（同高 / 同内衬 / 同 chevron），不另画。 */}
         <ListSection title={tr('profile.features')} style={styles.section} testID="profile-features">
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="sparkles-outline" />
-            }
+            leading={<RowIcon icon="sparkles-outline" tone="accent" />}
             title={tr('profile.aiZone')}
             chevron
             onPress={() => navigation.navigate(ROUTES.AI)}
@@ -339,9 +314,7 @@ export default function ProfileScreen({ navigation }: any) {
               （App.tsx 的 ROUTES.OVERVIEW）。设计稿第 11 屏自身没有入口提示、首页不在本任务可改
               范围内（Boundary），所以入口落在设置项「功能」分组，与 AI 专区同组同规格。 */}
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="grid-outline" />
-            }
+            leading={<RowIcon icon="grid-outline" />}
             title={tr('profile.overview')}
             chevron
             onPress={() => navigation.navigate(ROUTES.OVERVIEW)}
@@ -351,9 +324,7 @@ export default function ProfileScreen({ navigation }: any) {
               任何 navigate(ROUTES.CALCULATOR) —— 功能存在却无法到达（评审实测：设置页与
               财务规划页都没有入口）。入口补在「功能」分组，与 AI 专区 / 概览模式同规格。 */}
           <ListRow
-            leading={
-              <IconCircle size={ROW_ICON_SIZE} color={semantic.accent} icon="calculator-outline" />
-            }
+            leading={<RowIcon icon="calculator-outline" />}
             title={tr('profile.calculators')}
             chevron
             onPress={() => navigation.navigate(ROUTES.CALCULATOR)}
@@ -364,26 +335,14 @@ export default function ProfileScreen({ navigation }: any) {
         {/* 支持：帮助与反馈 / 关于应用 */}
         <ListSection title={tr('profile.support')} style={styles.section} testID="profile-support">
           <ListRow
-            leading={
-              <IconCircle
-                size={ROW_ICON_SIZE}
-                color={ICON_TINTS.help}
-                icon="chatbubble-ellipses-outline"
-              />
-            }
+            leading={<RowIcon icon="chatbubble-ellipses-outline" />}
             title={tr('profile.help')}
             chevron
             onPress={() => navigation.navigate(ROUTES.FEEDBACK)}
             testID="profile-help-row"
           />
           <ListRow
-            leading={
-              <IconCircle
-                size={ROW_ICON_SIZE}
-                color={ICON_TINTS.about}
-                icon="information-circle-outline"
-              />
-            }
+            leading={<RowIcon icon="information-circle-outline" />}
             title={tr('profile.about')}
             chevron
             onPress={() => navigation.navigate(ROUTES.ABOUT)}
@@ -626,11 +585,57 @@ function makeSegStyles(semantic: SemanticColors, radius: Radius) {
   });
 }
 
-/** 设置行左侧圆形图标直径（稿：38 圆 + 18 图标）。
- *  ⚠ 直径与图标尺寸是硬指标（UI V2.1 §4/§5）：球面是高光球，图标正好压在最亮的一档上 ——
- *  34 圆只派生 16pt 图标，白图标对球面的最亮档量出来 3.8–4.4 < 4.5；38 圆派生 18pt 图标，
- *  按 §4 的「大字 3:1」口径达标。改小回去就会让设置行的三个球重新不达标。 */
+/** 设置行左侧圆形图标直径（38 圆 + 18 图标 —— 与首页账单行的行首圆同一套尺寸） */
 const ROW_ICON_SIZE = 38;
+/** 行首圆内的图标直径（38 → 18，同首页账单行） */
+const ROW_ICON_GLYPH = 18;
+
+/** RowIcon 的样式（令牌进、StyleSheet 出）：圆底 = 「下沉底」surfaceSunken，与首页账单行同一档 */
+function makeIconStyles(semantic: SemanticColors, radius: Radius) {
+  return StyleSheet.create({
+    circle: {
+      borderRadius: radius.full,
+      backgroundColor: semantic.surfaceSunken,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+  });
+}
+
+/**
+ * 设置行首的圆形图标（本轮换掉旧的立体光泽球 IconCircle）。
+ * 视觉与首页账单行对齐：**圆底 surfaceSunken（浅蓝下沉档）+ 线条图标**，无渐变 / 无高光 / 无投影。
+ * 颜色只从语义令牌取，本页不写任何裸 hex：
+ *   · 圆底 —— semantic.surfaceSunken（日 #EAF4FF / 夜 #161A27）
+ *   · 图标 —— semantic.textSecondary（中性项）或 semantic.accent（需要强调的少数行）
+ * ⚠ 本页允许的饱和色只有 accent 一个（账号 / 深色模式 / AI 专区三行用它），
+ *   其余行一律 textSecondary —— 别再按旧稿给每行塞一种彩色。
+ * 对比度实测（图标压在圆底上）：夜 accent 4.82:1 / 日 accent 3.69:1（§4 图标 ≥3:1），
+ * 日 textSecondary 5.02:1 / 夜 textSecondary 11.67:1（§3 文字 ≥4.5:1）。改令牌前先复测。
+ */
+function RowIcon({
+  icon,
+  size = ROW_ICON_SIZE,
+  tone = 'neutral',
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  size?: number;
+  /** neutral = textSecondary（默认）；accent = 本页唯一的强调色 */
+  tone?: 'neutral' | 'accent';
+}) {
+  const { semantic, radius } = useTheme();
+  const iconStyles = useMemo(() => makeIconStyles(semantic, radius), [semantic, radius]);
+  return (
+    <View style={[iconStyles.circle, { width: size, height: size }]}>
+      <Ionicons
+        name={icon}
+        size={Math.round((size * ROW_ICON_GLYPH) / ROW_ICON_SIZE)}
+        color={tone === 'accent' ? semantic.accent : semantic.textSecondary}
+      />
+    </View>
+  );
+}
 
 /**
  * 语言中 / EN 二选一（UI V2 稿：**自然宽度**的胶囊，右侧贴在行尾）。
@@ -766,7 +771,7 @@ function AppearanceRow({ label, children }: { label: string; children: React.Rea
           paddingBottom: spacing.sm,
         }}
       >
-        <IconCircle size={ROW_ICON_SIZE} color={ICON_TINTS.darkMode} icon="moon-outline" />
+        <RowIcon icon="moon-outline" tone="accent" />
         <AppText variant="subhead" weight="500">
           {label}
         </AppText>
@@ -807,8 +812,8 @@ function SwitchRow({
   const styles = useMemo(() => makeStyles(semantic, spacing, layout), [semantic, spacing, layout]);
   return (
     <View style={[styles.switchRow, { minHeight: rowMinHeight }]} testID={testID}>
-      {/* 行首：中性档 38 圆（安全组的锁 / 密码不是彩色分类） */}
-      <IconCircle size={ROW_ICON_SIZE} icon={icon} />
+      {/* 行首：中性档 38 圆（安全组的锁 / 密码不是彩色分类 —— 圆底 surfaceSunken、图标 textSecondary） */}
+      <RowIcon icon={icon} />
       <View style={styles.switchRowText}>
         {/* 标题最多 2 行（与 ListRow 同规则），副标题不设上限：宁可行变高也不省略 */}
         <AppText variant="headline" numberOfLines={2}>
