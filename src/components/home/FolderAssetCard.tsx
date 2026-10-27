@@ -13,7 +13,7 @@
 // children 拿到实测尺寸后按包里的百分比（8.8% / 17.9% / 33.5% / 78.6% …）自己摆位。
 
 import React, { useCallback, useState } from 'react';
-import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import { LayoutChangeEvent, Platform, StyleSheet, View } from 'react-native';
 import Svg, { ClipPath, Defs, G, LinearGradient, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { useAssetCardColors, useHomePalette } from '../../theme/homePalette';
 import { useTheme } from '../../theme/useTheme';
@@ -95,9 +95,13 @@ export function FolderAssetCard(props: FolderAssetCardProps): React.ReactElement
             </>
           ) : (
             <G clipPath="url(#acFaceClip)">
-              {ASSET_CARD_MESH.map((cell, i) => (
-                <Rect key={i} x={cell[0]} y={cell[1]} width={cell[2]} height={cell[3]} fill={cell[4]} />
-              ))}
+              {/* Web 用完整 200 格色彩网格；原生端降采样到 50 格 ——
+                  视觉差异极小，但把原生 SVG 的图形数量降到 1/4，规避低端机渲染压力 */}
+              {(Platform.OS === 'web' ? ASSET_CARD_MESH : ASSET_CARD_MESH.filter((_, i) => i % 4 === 0)).map(
+                (cell, i) => (
+                  <Rect key={i} x={cell[0]} y={cell[1]} width={cell[2]} height={cell[3]} fill={cell[4]} />
+                )
+              )}
             </G>
           )}
           <Path d={RIM} fill="none" stroke={colors.shine} strokeOpacity={0.8} strokeWidth={1.5} />

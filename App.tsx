@@ -44,6 +44,7 @@ import {
   useTabBarAutoHide,
 } from './src/context/TabBarAutoHideContext';
 import { useTheme } from './src/theme/useTheme';
+import CrashGuard, { installCrashLogger } from './src/components/CrashGuard';
 // 底栏 / 圆钮的颜色唯一来源（唯一视觉标准：design/reference/home-day.png、home-night.png）
 import { useHomePalette } from './src/theme/homePalette';
 import { TabSceneDisplayGate } from './src/navigation/TabSceneDisplayGate';
@@ -677,6 +678,8 @@ function AppContent() {
   );
 }
 
+installCrashLogger();
+
 export default function App() {
   // ⚠ 组件预览页开关（仅 __DEV__ + web + ?gallery=1；后续批次回归测试用，T32 清理时删）
   const galleryMode =
@@ -731,7 +734,10 @@ export default function App() {
                   <AppProvider>
                     {/* ⚠ 组件预览页（后续批次回归测试用，T32 清理时删）：
                         只在 __DEV__ + web + URL 带 ?gallery=1 时替换真实 App，不进正式导航。 */}
-                    {__DEV__ && galleryMode ? <ComponentGallery /> : <StartupGate>{__DEV__ ? <Profiler id="app" onRender={devOnRender}><AppContent /></Profiler> : <AppContent />}</StartupGate>}
+                    {/* CrashGuard：渲染期异常 → 可读错误屏（release 包不再直接闪退） */}
+                    <CrashGuard>
+                      {__DEV__ && galleryMode ? <ComponentGallery /> : <StartupGate>{__DEV__ ? <Profiler id="app" onRender={devOnRender}><AppContent /></Profiler> : <AppContent />}</StartupGate>}
+                    </CrashGuard>
                     {/* 全局主题化弹窗 Host 已内置于 AppDialogProvider：
                         <AppDialog /> 的 DialogHost 随 Provider 渲染 */}
                   </AppProvider>

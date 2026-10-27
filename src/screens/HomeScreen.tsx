@@ -805,7 +805,7 @@ function GlassRoundTapButton({
   return (
     <GestureDetector gesture={gesture}>
       <Reanimated.View
-        style={[glassRoundStyles.touch, scaleStyle, { boxShadow: '0 2px 8px rgba(3,16,48,0.18)' }]}
+        style={[glassRoundStyles.touch, scaleStyle, { boxShadow: '0px 2px 8px 0px rgba(3,16,48,0.18)' }]}
         accessible
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}

@@ -726,15 +726,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
         groupPressAtRef.current = Date.now();
         return false;
       },
-      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponder: () => !iconDraggingRef.current,
       // 长按满 250ms 后纵向移动 ≥8px → 在 capture 阶段接管（子节点此时抢不走）
-      onMoveShouldSetPanResponderCapture: (_e, g) => {
-        // 互斥：正在拖图标时，组排序一律不接管（否则整卡会跟手位移 + 半透明）
-        if (iconDraggingRef.current) return false;
-        const dy = Math.abs(g.dy);
-        if (dy < GROUP_START_DY || dy <= Math.abs(g.dx)) return false;
-        return Date.now() - groupPressAtRef.current >= GROUP_HOLD_MS;
-      },
+      // 把手是独立小热区：按下即接管（原生 responder 下最可靠；不需要长按闸门）
+      onMoveShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: () => false,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (_e, g) => {
@@ -2195,7 +2190,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                       把手必须是 Pressable 的兄弟节点：嵌套时 Pressable 先成为 responder，
                       PanResponder 拿不到 grant，表现为「拖不动」并把拖动误判成点按（折叠） */}
                   <View style={styles.catGroupHeader}>
-                  <View {...getGroupPanHandlers(group)} style={styles.catGroupHeaderMain}>
+                  <View style={styles.catGroupHeaderMain}>
                   <Pressable
                     style={styles.catGroupHeaderTap}
                     onPress={toggleGroup}
@@ -2210,8 +2205,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   </Pressable>
                     {/* 组排序把手（≡）：唯一入口 */}
                     <View
+                      {...getGroupPanHandlers(group)}
                       style={styles.catGroupDragHandle}
-                      pointerEvents="none"
+                      accessibilityRole="adjustable"
                       accessibilityLabel={`${getGroupLabel(group, t)} reorder`}
                       testID={`group-drag-handle-${group}`}
                     >

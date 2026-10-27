@@ -31,7 +31,7 @@ const GLASS_FILL_OPACITY = 0.3;
 /** 玻璃描边：白色半透明，边缘不会像灰线那样发脏 */
 const GLASS_BORDER_ALPHA = 0.72;
 /** 玻璃键的轻投影：不造层次，只负责把按钮从背景上托起来一点 */
-const GLASS_SHADOW = '0 2px 8px rgba(3,16,48,0.18)';
+const GLASS_SHADOW = '0px 2px 8px 0px rgba(3,16,48,0.18)';
 /** 两种底：surface = 落在普通页面上；glass = 压在照片/渐变背景上 */
 export type HeaderTone = 'surface' | 'glass';
 

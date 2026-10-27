@@ -130,7 +130,7 @@ export function ScreenHeader({
         backgroundColor: semantic.surfaceElevated,
         borderWidth: 1,
         borderColor: semantic.hairline,
-        boxShadow: '0 2px 8px rgba(7,28,73,0.10)',
+        boxShadow: '0px 2px 8px 0px rgba(7,28,73,0.10)',
       }}
     >
       <IconButton
