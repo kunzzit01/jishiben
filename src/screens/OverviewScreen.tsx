@@ -400,7 +400,20 @@ export default function OverviewScreen({ navigation }: any) {
                   {tr('overview.budgetLabel', { m: monthLabel })}
                 </AppText>
                 {totalBudget > 0 ? (
-                  <AppText variant="title2" color={semantic.accent} numberOfLines={1} testID="overview-budget-pct">
+                  <AppText
+                    variant="title2"
+                    color={
+                      budgetPct.tone === 'danger'
+                        ? semantic.danger
+                        : budgetPct.tone === 'warning'
+                          ? semantic.warning
+                          : budgetPct.tone === 'success'
+                            ? semantic.success
+                            : semantic.accent
+                    }
+                    numberOfLines={1}
+                    testID="overview-budget-pct"
+                  >
                     {budgetPct.text}
                   </AppText>
                 ) : (
