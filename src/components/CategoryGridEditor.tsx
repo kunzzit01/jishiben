@@ -16,7 +16,7 @@
 // 其它：删除 = 图标右上角红色角标；末尾虚线「＋」磁贴 = 新增入口（它不属于编辑态，平时常显）；
 //      贴边自动滚动（窗口上下 140px 边缘带，16ms 步进 12px）。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import type { ScrollView, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -196,6 +196,7 @@ function CategoryGridCell({
   onDragMove,
   onDragEnd,
   onDragCancel,
+  onDraggingChange,
 }: {
   item: Category;
   /** 抖动相位偏移用（每格错开，不要整齐划一） */
@@ -222,8 +223,14 @@ function CategoryGridCell({
   onDragMove: (absX: number, absY: number) => void;
   onDragEnd: (from: number, to: number) => void;
   onDragCancel: () => void;
+  onDraggingChange?: (dragging: boolean) => void;
 }) {
   const t = useT();
+  const draggingCbRef = useRef(onDraggingChange);
+  draggingCbRef.current = onDraggingChange;
+  const reportDragging = useCallback((v: boolean) => {
+    draggingCbRef.current?.(v);
+  }, []);
   const { moveX, moveY, scale, slotW, count, from, cur, baseY, transY, cols, slotH, reveal } = drag;
   const { gridLeft, gridTop, scroll0, lastX, lastY } = geometry;
 
@@ -269,6 +276,7 @@ function CategoryGridCell({
           scale.value = withTiming(GRID_DRAG_SCALE, { duration: 130 });
           // 起始槽位交给 JS 用 items 数组算（量出来之前就准），这里只负责抬起
           runOnJS(onDragStart)(item.id, e.absoluteX, e.absoluteY);
+          runOnJS(reportDragging)(true);
         })
         .onUpdate((e) => {
           'worklet';
@@ -320,6 +328,7 @@ function CategoryGridCell({
         })
         .onFinalize((_e, success) => {
           'worklet';
+          runOnJS(reportDragging)(false);
           if (!success) {
             scale.value = withTiming(1, { duration: 120 });
             runOnJS(onDragCancel)();
@@ -384,6 +393,8 @@ export type CategoryGridEditorProps = {
   contentH: { current: number };
   /** 外层 ScrollView 的滚动量（内容坐标换算用，滚动时由页面写） */
   scrollY: SharedValue<number>;
+  /** 图标拖拽开始/结束通告：页面据此锁住外层滚动，拖拽期间组卡保持不动 */
+  onDraggingChange?: (dragging: boolean) => void;
   style?: ViewStyle;
 };
 
@@ -406,6 +417,7 @@ export function CategoryGridEditor({
   contentH,
   scrollY,
   style,
+  onDraggingChange,
 }: CategoryGridEditorProps) {
   const { height: windowH } = useWindowDimensions();
   const { semantic, spacing, glass, motion } = useTheme();
@@ -563,10 +575,20 @@ export function CategoryGridEditor({
     [baseY, cur, from, moveX, moveY, slotW, startLoop, syncRect, clearIdleTimer, columns, slotHeight]
   );
 
-  const handleDragHover = useCallback((index: number, absX: number, absY: number) => {
-    fingerRef.current = { x: absX, y: absY, active: true };
-    setDrag((prev) => (prev && prev.hover !== index ? { ...prev, hover: index } : prev));
+  const clampHover = useCallback((index: number) => {
+    const last = Math.max(0, itemsRef.current.length - 1);
+    if (!Number.isFinite(index)) return 0;
+    return Math.max(0, Math.min(last, Math.trunc(index)));
   }, []);
+
+  const handleDragHover = useCallback(
+    (index: number, absX: number, absY: number) => {
+      fingerRef.current = { x: absX, y: absY, active: true };
+      const safe = clampHover(index);
+      setDrag((prev) => (prev && prev.hover !== safe ? { ...prev, hover: safe } : prev));
+    },
+    [clampHover]
+  );
 
   const handleDragMove = useCallback((absX: number, absY: number) => {
     fingerRef.current = { x: absX, y: absY, active: true };
@@ -649,6 +671,8 @@ export function CategoryGridEditor({
         index: natural,
         isDragged,
         hidden: isDragged,
+        // 让位（手机主屏幕手感）：其余磁贴滑向「腾出来的空位」，被拖的那一枚留在原槽位隐身。
+        // 之前关掉它是因为组卡手势串台导致整卡被拖动；根因修好后由卡片自身承担裁切，不会画到卡外。
         shiftXTarget: ((display % columns) - (natural % columns)) * slotWidth,
         shiftYTarget: (Math.floor(display / columns) - Math.floor(natural / columns)) * slotHeight,
       };
@@ -698,6 +722,7 @@ export function CategoryGridEditor({
           jiggling={editing && !c.isDragged}
           reduceMotion={reduceMotion}
           editing={editing}
+          onDraggingChange={onDraggingChange}
           shiftXTarget={c.shiftXTarget}
           shiftYTarget={c.shiftYTarget}
           draggable={draggable}
@@ -779,7 +804,15 @@ function makeGridStyles(columns: number, slotHeight: number, semantic: SemanticC
     // 内容层（让位/抖动只作用在这一层；父槽位在 DOM 里不动）
     gridContent: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
     // 长按可拖的命中区（铺满内容层，图标/标签在里面居中）
-    gridHit: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
+    gridHit: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      // Web 上必须关掉浏览器的原生手势：否则拖动图标会被浏览器当成页面滚动，
+      // 整张组卡跟着手指走（RN 侧手势也在跑，只是浏览器先滚了）
+      ...(Platform.OS === 'web' ? ({ touchAction: 'none' } as unknown as ViewStyle) : null),
+    },
     // 包住图标+文字的可点区域（覆盖整格宽度，方便点按）
     gridSelectWrap: { alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' },
     gridFace: { alignItems: 'center', justifyContent: 'center' },

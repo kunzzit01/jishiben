@@ -632,6 +632,13 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   /** 拖动中的整组：from=起始位、hover=当前落点、dy=跟手位移 */
   const [gDrag, setGDrag] = useState<{ group: string; from: number; dy: number; hover: number } | null>(null);
   const groupPanCache = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  /** 图标拖拽进行中（CategoryGridEditor 通告）—— 组排序必须让位，两者互斥 */
+  const iconDraggingRef = useRef(false);
+  /** 组拖拽期间 + 结束后 350ms 内，屏蔽组头点击（否则松手会被当成折叠） */
+  const groupTapBlockUntilRef = useRef(0);
+  const handleIconDragging = (v: boolean) => {
+    iconDraggingRef.current = v;
+  };
   const groupPressAtRef = useRef(0);
   /** 每张组卡的布局（相对滚动内容）：拖动时算落点、算其它卡让位、画虚线占位都靠它 */
   const gBoxRef = useRef<Record<string, { y: number; h: number }>>({});
@@ -722,6 +729,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       onStartShouldSetPanResponder: () => false,
       // 长按满 250ms 后纵向移动 ≥8px → 在 capture 阶段接管（子节点此时抢不走）
       onMoveShouldSetPanResponderCapture: (_e, g) => {
+        // 互斥：正在拖图标时，组排序一律不接管（否则整卡会跟手位移 + 半透明）
+        if (iconDraggingRef.current) return false;
         const dy = Math.abs(g.dy);
         if (dy < GROUP_START_DY || dy <= Math.abs(g.dx)) return false;
         return Date.now() - groupPressAtRef.current >= GROUP_HOLD_MS;
@@ -730,6 +739,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (_e, g) => {
         hapticLight();
+        groupTapBlockUntilRef.current = Date.now() + 60000;
         const from = Math.max(0, groupList().indexOf(group));
         gScroll0Ref.current = categoryScrollYSV.value;
         gFingerYRef.current = g.y0;
@@ -746,6 +756,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       },
       onPanResponderRelease: () => {
         stopGroupScrollLoop();
+        groupTapBlockUntilRef.current = Date.now() + 350;
         gFingerYRef.current = -1;
         setGDrag((cur) => {
           if (cur) {
@@ -762,6 +773,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       },
       onPanResponderTerminate: () => {
         stopGroupScrollLoop();
+        groupTapBlockUntilRef.current = Date.now() + 350;
         gFingerYRef.current = -1;
         setGDrag(null);
       },
@@ -2134,6 +2146,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               const expanded = !collapsedGroups.has(group);
               const themeColor = colors.link;
               const toggleGroup = () => {
+                if (Date.now() < groupTapBlockUntilRef.current) return; // 拖拽刚结束的补发点击不算
                 setCollapsedGroups((prev) => {
                   const next = new Set(prev);
                   if (next.has(group)) next.delete(group);
@@ -2160,7 +2173,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               const card = (
                 <View
                   key={group}
-                  {...getGroupPanHandlers(group)}
                   style={[
                     styles.catGroupCard,
                     // 让位：被拖组跨过谁，谁就朝相反方向挪一个"被拖组高度"（与图标磁贴同一手感）
@@ -2179,13 +2191,33 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                   }}
                 >
                   {/* TASK-012②：收起大列表只点头部行（箭头所在行）；点卡片其余区域/空白不收 */}
-                  <Pressable style={styles.catGroupHeader} onPress={toggleGroup} hitSlop={{ top: 6, bottom: 6 }}>
+                  {/* 组头行 = 折叠区（Pressable） + 排序把手（独立 View） + 删除（TouchableOpacity）。
+                      把手必须是 Pressable 的兄弟节点：嵌套时 Pressable 先成为 responder，
+                      PanResponder 拿不到 grant，表现为「拖不动」并把拖动误判成点按（折叠） */}
+                  <View style={styles.catGroupHeader}>
+                  <View {...getGroupPanHandlers(group)} style={styles.catGroupHeaderMain}>
+                  <Pressable
+                    style={styles.catGroupHeaderTap}
+                    onPress={toggleGroup}
+                    hitSlop={{ top: 6, bottom: 6 }}
+                  >
                     <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={themeColor} />
                     <Text style={[styles.catGroupTitle, { color: themeColor }]}>{getGroupLabel(group, t)}</Text>
                     {/* 新增入口只在网格末尾的虚线＋磁贴上（分组头不再挂「＋ 新增」药丸） */}
                     <View style={styles.catGroupCountWrap}>
                       <Text style={styles.catGroupCount}>{t('addTx.itemsCount', { count: items.length })}</Text>
                     </View>
+                  </Pressable>
+                    {/* 组排序把手（≡）：唯一入口 */}
+                    <View
+                      style={styles.catGroupDragHandle}
+                      pointerEvents="none"
+                      accessibilityLabel={`${getGroupLabel(group, t)} reorder`}
+                      testID={`group-drag-handle-${group}`}
+                    >
+                      <Ionicons name="reorder-three-outline" size={17} color={semantic.textTertiary} />
+                    </View>
+                  </View>
                     {/* TASK-016①：整组删除入口（原左滑删除改这里）：垃圾桶贴数量胶囊右侧 */}
                     <TouchableOpacity
                       style={styles.catHeaderDeleteBtn}
@@ -2196,7 +2228,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                     >
                       <Ionicons name="trash-outline" size={15} color={colors.expense} />
                     </TouchableOpacity>
-                  </Pressable>
+                  </View>
                   {/* 分类网格（与管理类别页同一个组件）：虚线占位框 + 长按 200ms 拖拽排序 +
                       虚线＋磁贴；点磁贴仍是"选中并返回"，拖完那一下松手不会被当成点击 */}
                   {expanded && (
@@ -2207,6 +2239,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                       scrollRef={categoryScrollRef}
                       contentH={categoryContentHRef}
                       scrollY={categoryScrollYSV}
+                      onDraggingChange={handleIconDragging}
                       onPick={handlePickCategory}
                       onDelete={(id) => {
                         const target = filteredCategories.find((c) => c.id === id);
@@ -2807,6 +2840,18 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 11,
+  },
+  // 组头左右两槽：整行左侧是「折叠区 + ≡」，右侧是删除
+  catGroupHeaderMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  catGroupHeaderTap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  // 组排序把手：34 视觉 + hitSlop 撑到 44 触控（组长按 ≡ 上下拖 = 整组换位）
+  catGroupDragHandle: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+    marginRight: 2,
   },
   catGroupTitle: { fontSize: 13, fontWeight: '700', color: colors.link, marginLeft: 6 },
   catGroupCountWrap: { marginLeft: 'auto', backgroundColor: colors.bg, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 },

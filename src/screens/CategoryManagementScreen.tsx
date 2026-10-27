@@ -307,6 +307,8 @@ function GroupCardSlot({
 
   return (
     <Animated.View
+      /* 让位动画只由组拖拽驱动（shiftY 在 groupDrag 为空时恒为 0）；
+         拖图标期间 groupDrag 恒为 null，所以组卡不会位移 */
       style={[shiftStyle, dimmed && styles.groupDragging]}
       onLayout={(e) => onCardLayout(group, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
     >
@@ -335,6 +337,14 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
 
   // —— 大分组拖拽状态（长按组头整组移动，落库仍走 GROUP_ORDER_KEY，不新造存储键） ——
   const [groupDrag, setGroupDrag] = useState<{ group: string; from: number; hover: number } | null>(null);
+  // 图标拖拽进行中：锁住外层滚动，组卡必须定住（用户定版）
+  const [gridDragging, setGridDragging] = useState(false);
+  // ref 版本：组把手的 PanResponder 在缓存里持有闭包，读 state 会读到旧值
+  const gridDraggingRef = useRef(false);
+  const handleGridDragging = useCallback((v: boolean) => {
+    gridDraggingRef.current = v;
+    setGridDragging(v);
+  }, []);
   const listRef = useRef<View | null>(null);
   const groupBoxRef = useRef<Map<string, GroupBox>>(new Map());
   const sectionsRef = useRef<CategorySection[]>([]);
@@ -620,8 +630,13 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     const cached = groupPanCache.current[group];
     if (cached) return cached.panHandlers;
     const responder = PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      // 不在一按下就接管：只认「明显的竖直拖动」。
+      // 否则这枚把手的 44×44 绝对定位盒会连同其下方的图标一起被吞掉 ——
+      // 表现就是拖图标时整张组卡被抬起来（用户实测）。
+      // 不在一按下就接管：只认「明显的竖直拖动」，避免与图标的拖拽抢手势
+      // 互斥：正在拖图标时，组把手一律不接管手势
+      onStartShouldSetPanResponder: () => !gridDraggingRef.current,
+      onMoveShouldSetPanResponder: () => !gridDraggingRef.current,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (_e, g) => {
         gScroll0.value = scrollYSV.value;
@@ -677,18 +692,27 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     if (!groupDrag) return map;
     const from = sections.findIndex((s) => s.group === groupDrag.group);
     if (from < 0) return map;
-    const moved = moveInArray(
-      sections.map((_, i) => i),
-      from,
-      groupDrag.hover
-    );
-    const displayOf: number[] = new Array(sections.length).fill(0);
-    moved.forEach((natural, display) => {
-      displayOf[natural] = display;
-    });
-    const tops = sections.map((s) => groupBoxRef.current.get(s.group)?.top ?? 0);
-    sections.forEach((s, natural) => {
-      map.set(s.group, s.group === groupDrag.group ? 0 : tops[displayOf[natural]] - tops[natural]);
+    const last = sections.length - 1;
+    const to = Math.max(0, Math.min(last, Math.trunc(groupDrag.hover) || 0));
+    if (to === from) return map;
+    // 每张卡高度不同（展开的组比收起的组高得多），所以让位量不能用「槽位 top 之差」推，
+    // 那样只对等高卡片成立：收起的卡被拖到展开卡中间时腾不出位置（用户实测）。
+    // 正确做法：把「被拖卡的高度 + 它与下一张之间的间距」整段搬走，按方向推移中间的卡。
+    const boxAt = (i: number) => groupBoxRef.current.get(sections[i]?.group) ?? { top: 0, bottom: 0 };
+    const fromBox = boxAt(from);
+    const draggedH = Math.max(0, fromBox.bottom - fromBox.top);
+    const nextTop = from + 1 <= last ? boxAt(from + 1).top : 0;
+    const gap = nextTop > 0 ? Math.max(0, nextTop - fromBox.bottom) : 0;
+    const span = draggedH + gap;
+    sections.forEach((s, i) => {
+      if (i === from) {
+        map.set(s.group, 0);
+        return;
+      }
+      let delta = 0;
+      if (from < to && i > from && i <= to) delta = -span;
+      else if (from > to && i >= to && i < from) delta = span;
+      map.set(s.group, delta);
     });
     return map;
   }, [sections, groupDrag]);
@@ -798,6 +822,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
       />
       <ScrollView
         ref={scrollRef}
+        scrollEnabled={!gridDragging}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         onContentSizeChange={(_w, h) => {
@@ -925,6 +950,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                     scrollRef={scrollRef}
                     contentH={contentHRef}
                     scrollY={scrollYSV}
+                    onDraggingChange={handleGridDragging}
                     onReorder={(next) => handleCatGroupReorder(group, next)}
                     onDelete={selectMode ? undefined : handleDeleteCategory}
                     onPick={selectMode ? handlePickCategory : undefined}
@@ -1141,7 +1167,9 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
               </GlassView>
             </PressableScale>
           )}
-          {/* 被拖起的整组：跟手的组头胶囊（组名 + 项数），落点槽位上原卡变淡留白 */}
+
+          {/* 被拖起的整组：跟手的组头胶囊（组名 + 项数）。
+              只在 groupDrag 非空时渲染 —— 拖图标时它是 null，不会出现 */}
           {groupDrag && ghostSection && (
             <Animated.View
               pointerEvents="none"
