@@ -149,7 +149,7 @@ function formatDateTs(ts: number) {
 }
 
 // ── 账本抽屉的单行（T10 / H11，UI V2 换圆图标）──
-// 结构：42 圆图标（IconCircle）+ 中间列（名称 ≤2 行 / 分币种结余 / 预设·创建于）+ 右侧「铅笔改名 / 垃圾桶删除」。
+// 结构：42 圆图标（IconCircle）+ 中间列（名称 +（默认那本）小胶囊徽标 / 分币种结余 / 创建于）+ 右侧「设为默认 / 铅笔改名 / 垃圾桶删除」。
 // ⚠ 改名与删除两个 IconButton 必须放在可点主区 **外面**（同级的动作列）：主区是 Pressable
 //   （Web 上是 <button>），按钮放进去会变成 button 套 button（读屏重复 + 控制台 hydration 报错，
 //   此前日历药丸踩过一次）。动作列固定宽 88（两个 44 触控区），各行铅笔左缘对齐；
@@ -238,9 +238,21 @@ function LedgerRow({
           {/* 账本图标：42 圆（V2：列表图标一律圆形；底色/图标色由 IconCircle 从账本色派生） */}
           <IconCircle color={baseColor} icon={ledger.icon as IconName} />
           <View style={styles2.col}>
-            <AppText variant="headline" numberOfLines={2}>
-              {ledger.name}
-            </AppText>
+            {/* 名称行：名称 + （默认账本才有）右侧小胶囊徽标。
+                ⚠ 名称 flexShrink 1 + minWidth 0：长名字先在这一行收（≤2 行），徽标 flexShrink 0
+                  永远留在卡片内，不会被名字顶出去（与下面余额列同一套「先压中间」的规矩）。 */}
+            <View style={styles2.nameRow}>
+              <AppText variant="headline" numberOfLines={2} style={styles2.nameText}>
+                {ledger.name}
+              </AppText>
+              {isDefault && (
+                <View style={styles2.defaultBadge}>
+                  <AppText variant="caption2" numberOfLines={1} color={semantic.textPrimary}>
+                    {t('home.defaultLedger')}
+                  </AppText>
+                </View>
+              )}
+            </View>
             {totals.length === 0 ? (
               <AppText variant="subhead" color={semantic.textSecondary}>
                 {t('home.noAssets')}
@@ -263,11 +275,12 @@ function LedgerRow({
                 {totals.length - 3}
               </AppText>
             )}
-            <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
-              {isDefault
-                ? t('home.defaultLedger')
-                : t('home.createdOn', { date: ledgerCreatedLabel(ledger.createdAt, langMode) })}
-            </AppText>
+            {/* 副标题只剩「创建于」：默认身份已经上移到名称旁的胶囊，不再与 +N 挤成两小行 */}
+            {!isDefault && (
+              <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
+                {t('home.createdOn', { date: ledgerCreatedLabel(ledger.createdAt, langMode) })}
+              </AppText>
+            )}
           </View>
         </PressableScale>
       </View>
@@ -330,9 +343,29 @@ function makeLedgerRowStyles(semantic: SemanticColors, spacing: Spacing, layout:
       alignItems: 'center',
       columnGap: spacing.md,
     },
-    // 中间列：名称（≤2 行）→ 余额（逐币种一行）→ 预设 / 创建于。
+    // 中间列：名称（≤2 行）→ 余额（逐币种一行）→ 创建于。
     // minWidth 0：长名字 / 长余额先压缩这一列，绝不把右侧动作列挤出屏
     col: { flex: 1, minWidth: 0, rowGap: 2 },
+    // 名称行 = 名称 + 默认徽标（横向）。名称先收（flexShrink 1 + minWidth 0），徽标不收（默认 flexShrink 0）
+    nameRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    nameText: { flexShrink: 1, minWidth: 0 },
+    // 默认账本身份徽标：小胶囊。底色 accentSoft + 描边 accent —— 选中行的行底本身就是 accentSoft，
+    // 只有加一圈 accent 描边才能让「深色/浅色 × 选中/未选中」四种组合下都还看得出这是个胶囊。
+    // 字色 textPrimary（11pt 的 accentText 落在淡蓝底上不足 4.5:1；品牌色由描边承担）
+    defaultBadge: {
+      flexShrink: 0,
+      // minHeight + paddingVertical 而不是死高 20：caption2 的 lineHeight 日间 13 / 中文模式 15，
+      // 再叠加 maxFontSizeMultiplier 1.3 也不会被裁字，视觉高度仍是 18~19
+      minHeight: 18,
+      paddingVertical: 2,
+      paddingHorizontal: 7,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: semantic.accent,
+      backgroundColor: semantic.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     balanceLine: { flexDirection: 'row', alignItems: 'baseline', columnGap: spacing.xs },
     // 余额数字可压缩（放不下自动换紧凑格式），保证行右缘 ≤ 页面边距内的 344
     // minWidth 0：账本抽屉里「分币种结余」与币种代码同一行，长金额要能真的收
