@@ -295,6 +295,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrencyState] = useState<string>('MYR'); // 默认货币：RM（马来西亚林吉特）
   const [periodPreference, setPeriodPreferenceState] = useState<PeriodPreference>(DEFAULT_PERIOD);
   const [assets, setAssets] = useState<Asset[]>([]);
+  // ⚠ 2026-10-27 回滚：曾按 a.ledgerId === activeLedgerId 过滤，但库里的 asset.ledgerId
+  // 与当前 ledgers 的 id 对不上（Supabase 导入后重新生成过 id），结果所有账本都显示「No assets」。
+  // 在确认真实数据归属之前，先恢复「全部未归档资产」的行为。
   const activeAssets = useMemo(() => assets.filter((a) => !a.archivedAt), [assets]);
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([]);
   const [dateFormat, setDateFormatState] = useState<DateFormat>(DEFAULT_DATE_FORMAT);
@@ -372,13 +375,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // 界面在 ledgers 为空时用内存占位账本落点；真正建账本只在
         // syncService.reconcileLedgers 里「已登录 + 拉取成功 + 服务端确实 0 本」时发生。
         const resolvedLedgers = migratedLed;
-        // 存档记的当前账本已不存在（含旧的幽灵 'default'）→ 回落到第一本
+        // 启动落在哪本账本（默认账本语义，2026-10-27 接通）：
+        //   ① 「默认账本」有效 → 就用它（这是用户用星标指定的那本，冷启动一律回到它）
+        //   ② 默认无效 → 用上次停留的账本
+        //   ③ 都不行 → 第一本
+        // 以前只认 activeLedgerId，defaultLedgerId 存了却没人消费，标签形同装饰。
+        const hasLedger = (id: string | null): boolean =>
+          !!id && resolvedLedgers.some((l) => l.id === id);
         const primaryLedgerId =
           resolvedLedgers.length === 0
             ? ''
-            : resolvedLedgers.some((l) => l.id === activeLedRaw)
-              ? (activeLedRaw as string)
-              : resolvedLedgers[0].id;
+            : hasLedger(defaultLedRaw)
+              ? (defaultLedRaw as string)
+              : hasLedger(activeLedRaw)
+                ? (activeLedRaw as string)
+                : resolvedLedgers[0].id;
         // 默认账本同理：存档里的默认还在就沿用，否则由当前账本接管 —— 永远恰好一本
         const resolvedDefaultId =
           resolvedLedgers.length === 0
