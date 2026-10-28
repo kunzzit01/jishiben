@@ -2980,12 +2980,13 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   currencyInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   heroChipsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    // 两枚胶囊贴住内容区左右边（与上方账户卡、下方类别网格同一条左右边界）。
+    // 原来 justifyContent:'center' 让它们在中间“浮着”，左右都对不齐上下两块 —— 用户 2026-10-28 反馈。
+    justifyContent: 'space-between',
     alignItems: 'center',
     columnGap: spacing.sm,
     paddingHorizontal: layout.page,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
   // 矮屏：与金额区的间距 4→0、Chip 间距 8→6（三个 Chip 保持一行）
   heroChipsRowShort: { marginTop: 0, columnGap: 6 },
