@@ -2458,6 +2458,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
         {/* 金额 Hero（UI V2 / 稿）：币种小胶囊 → 算式（多项时才出现，14pt 降透明）→ 64pt 金额，
             全部居中直接落在渐变上（不再是卡片）；金额点按打开自绘键盘 / 定位光标 */}
         <View style={[styles.heroArea, isShort && styles.heroAreaShort]}>
+          {/* 金额那一行：左＝币种胶囊，右＝「每月」开关。
+              日期不再单独占一行 —— 键盘上的日期键（今天 / 10月28日）已经覆盖同一功能，
+              两枚胶囊单独排一行会和上下两块边缘都对不齐（用户 2026-10-28 反馈）。 */}
+          <View style={styles.heroTopRow}>
           <PressableScale
             activeScale={0.96}
             hitSlop={0}
@@ -2472,6 +2476,42 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               <Ionicons name="chevron-down" size={12} color={semantic.textPrimary} />
             </GlassView>
           </PressableScale>
+
+          {!isEditing && (
+            <PressableScale
+              activeScale={0.94}
+              hitSlop={6}
+              onPress={() => {
+                hapticLight();
+                setAutoMonthly((v) => !v);
+              }}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: autoMonthly }}
+              accessibilityLabel={t('finance.monthlyLabel')}
+              testID="addtx-monthly-toggle"
+            >
+              <View
+                style={[
+                  styles.monthlyToggle,
+                  autoMonthly && { backgroundColor: semantic.accent, borderColor: semantic.accent },
+                ]}
+              >
+                <Ionicons
+                  name="repeat-outline"
+                  size={13}
+                  color={autoMonthly ? semantic.onAccent : semantic.textSecondary}
+                />
+                <AppText
+                  variant="caption2"
+                  weight="600"
+                  color={autoMonthly ? semantic.onAccent : semantic.textSecondary}
+                >
+                  {t('finance.monthlyLabel')}
+                </AppText>
+              </View>
+            </PressableScale>
+          )}
+          </View>
 
           {/* 算式行：多项（有 +/− 运算符）时才出现；稿里是降透明白 →
               UI V2.1 §3 改 text.primary（13pt 小字需 4.5:1，降透明浅字在浅色渐变上不达标） */}
@@ -2549,31 +2589,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           </View>
           <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
         </PressableScale>
-
-        {/* 日期 / 月度结转：一行 V2 实底 Chip（夜 surfaceSunken / 日白底轻投影，稿），居中排布 */}
-        <View style={[styles.heroChipsRow, isShort && styles.heroChipsRowShort]}>
-          <TransactionChip
-            label={formatDateLabel(date, langMode, { style: 'monthDay' })}
-            trailingIcon="chevron-down"
-            compact={isShort}
-            onPress={() => setDatePickerOpen(true)}
-            accessibilityLabel={formatDateLabel(date, langMode, { style: 'monthDay' })}
-          />
-          {!isEditing && (
-            <TransactionChip
-              /* 文案按 9.2 ④ 长度预算取短档（胶囊 ≤10 字符）：英文 "Monthly expense" 会把整行挤换行，
-                 支出/收入类型由上方分段控件表达，这里只表达「每月一次」 */
-              label={t('finance.monthlyLabel')}
-              icon="repeat-outline"
-              selected={autoMonthly}
-              compact={isShort}
-              onPress={() => {
-                hapticLight();
-                setAutoMonthly((v) => !v);
-              }}
-            />
-          )}
-        </View>
 
         {/* 类别（T15 / V2）：列数取版型；格 = 42 立体球图标 + 12pt 标签；网格区可滚动，「全部」永远殿后。
             定稿里没有「类别：xxx」提示行（选中态由外圈表达）→ 整行删掉，高度让给网格：
@@ -2978,15 +2993,25 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     justifyContent: 'center',
   },
   currencyInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-  heroChipsRow: {
+  // 金额那一行：币种贴左、每月开关贴右（与账户卡 / 类别网格同一条左右边界）
+  heroTopRow: {
     flexDirection: 'row',
-    // 两枚胶囊贴住内容区左右边（与上方账户卡、下方类别网格同一条左右边界）。
-    // 原来 justifyContent:'center' 让它们在中间“浮着”，左右都对不齐上下两块 —— 用户 2026-10-28 反馈。
-    justifyContent: 'space-between',
     alignItems: 'center',
-    columnGap: spacing.sm,
-    paddingHorizontal: layout.page,
-    marginTop: spacing.sm,
+    justifyContent: 'space-between',
+    // 父容器 heroArea 是居中列，不给 stretch 这行就只占内容宽，space-between 等于没生效
+    alignSelf: 'stretch',
+    paddingHorizontal: spacing.sm,
+  },
+  // 「每月」开关：中性态描边胶囊；打开后填充品牌色（与分段控件的选中态同一套语言）
+  monthlyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 4,
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: semantic.hairline,
   },
   // 矮屏：与金额区的间距 4→0、Chip 间距 8→6（三个 Chip 保持一行）
   heroChipsRowShort: { marginTop: 0, columnGap: 6 },
