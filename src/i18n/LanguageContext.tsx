@@ -4,7 +4,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { getLocales } from 'expo-localization';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LangMode, applyLangMode, t as globalT, TranslateFunction } from './index';
+import { DEFAULT_LANG, LangMode, applyLangMode, t as globalT, TranslateFunction } from './index';
 
 export { LangMode } from './index';
 
@@ -46,6 +46,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
           setLangModeState(migrated);
           applyLangMode(migrated);
           AsyncStorage.setItem(LANGUAGE_KEY, migrated).catch(() => {});
+        } else {
+          // 没有任何存档（新装/清缓存）：明确落到默认语言并写回。
+          // 以前这里什么都不做 → 模块级 locale 还是按设备语言算的，界面与设置项对不上。
+          setLangModeState(DEFAULT_LANG);
+          applyLangMode(DEFAULT_LANG);
+          AsyncStorage.setItem(LANGUAGE_KEY, DEFAULT_LANG).catch(() => {});
         }
       } catch (e) {
         console.warn('读取语言设置失败', e);
@@ -61,8 +67,13 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(LANGUAGE_KEY, mode).catch((e) => console.warn('保存语言设置失败', e));
   };
 
-  // t 直接引用全局实例函数（applyLangMode 改的就是实例 locale，重渲染时自然取新语言）
-  const value = useMemo(() => ({ langMode, setLangMode, t: globalT }), [langMode]);
+  // ⚠ t 必须是「每次切语言换一个新身份」的函数：
+  // 以前 t 直接指向模块级 globalT（身份永远不变），于是页面里 useMemo(..., [t]) 的那些
+  // 文案/选项缓存永远不会重算 —— 表现就是「切了语言，其他界面还是旧语言」（用户 2026-10-29 报的 bug）。
+  const value = useMemo(() => {
+    const tForLang: TranslateFunction = (key, params) => globalT(key, params);
+    return { langMode, setLangMode, t: tForLang };
+  }, [langMode]);
 
   // 语言恢复完成前不渲染（避免先以系统语言闪一帧再跳变）
   if (!loaded) return null;

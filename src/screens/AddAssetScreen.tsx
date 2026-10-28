@@ -26,6 +26,8 @@ import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import PressableScale from '../components/PressableScale';
 import { useAmountExpression } from '../hooks/useAmountExpression';
+import { useDialog } from '../components/AppDialog';
+import { formatMoney } from '../utils/formatMoney';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { hapticSuccess } from '../utils/haptics';
@@ -58,7 +60,8 @@ const NAME_PLACEHOLDER_KEY: Record<AssetType, string> = {
 
 // 计算器键盘当前在给哪个金额字段打字；null = 键盘收起
 // （信用卡模式下这个字段就是"信用额度"，现金/银行卡是"起始余额"）
-type AmountField = 'balance';
+/** 金额字段：balance = 起始余额 / 信用额度；available = 信用卡「现在还剩多少额度」 */
+type AmountField = 'balance' | 'available';
 
 // 底部抽屉当前打开的是哪一个；null = 都收起（类型 / 货币都走统一 BottomSheet）
 type SheetKind = 'type' | 'currency' | null;
@@ -70,6 +73,7 @@ export default function AddAssetScreen({ route }: any) {
   const { addAsset, updateAsset, getAssetById, currency } = useApp();
   const { colors, semantic, typography, spacing, motion } = useTheme();
   const { pagePadding } = useLayout();
+  const dialog = useDialog();
   const { height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
@@ -101,6 +105,15 @@ export default function AddAssetScreen({ route }: any) {
   // 金额格自绘光标（距显示串尾部的偏移，0=最末尾）：按键在光标处生效
   const [balanceCursor, setBalanceCursor] = useState(0);
 
+  // 信用卡第二个数值（用户 2026-10-29）：银行给的初始额度 与 现在还剩下多少额度。
+  // 存法不变：creditLimit = 初始额度；initialBalance = 现有额度 − 初始额度（负数=已用掉的额度），
+  // 于是「可用额度」= creditLimit + balance，和 utils/creditCard 的既有口径完全一致。
+  const availableExpr = useAmountExpression();
+  const [availableValue, setAvailableValue] = useState(
+    editAsset && editAsset.type === 'credit' ? (editAsset.creditLimit ?? 0) + editAsset.initialBalance : 0,
+  );
+  const [availableCursor, setAvailableCursor] = useState(0);
+
   // ---------- 自绘键盘与系统键盘的协调 ----------
   // 系统键盘（如账户名称输入框）出现时，自绘键盘让位收起；
   // 系统键盘收起后，只要金额编辑模式还开着（amountField 未清空），自绘键盘自动回到原位。
@@ -120,6 +133,15 @@ export default function AddAssetScreen({ route }: any) {
       hide2.remove();
     };
   }, []);
+
+  const openAvailableField = () => {
+    Keyboard.dismiss();
+    nameInputRef.current?.blur();
+    if (amountField === 'available') return;
+    availableExpr.reset();
+    setAvailableCursor(0);
+    setAmountField('available');
+  };
 
   const openAmountField = () => {
     // 系统键盘可能开着（名称框聚焦中）：无论如何都收掉，并让名称框失焦——
@@ -151,7 +173,10 @@ export default function AddAssetScreen({ route }: any) {
   // 计算器键盘上的 Enter（下一项）箭头已由小数点键取代（标准金额录入）
   const nameInputRef = useRef<TextInput>(null);
 
-  const activeExpr = balanceExpr;
+  // 键盘当前作用在哪个金额字段上
+  const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
+  const activeCursor = amountField === 'available' ? availableCursor : balanceCursor;
+  const setActiveCursor = amountField === 'available' ? setAvailableCursor : setBalanceCursor;
 
   // ---------- 底部上拉菜单：货币选择用弹层；账户类型用行下内联下拉 ----------
   const [sheetOpen, setSheetOpen] = useState<SheetKind>(null);
@@ -233,6 +258,15 @@ export default function AddAssetScreen({ route }: any) {
     // 信用卡只填"信用额度"：初始余额从 0 开始，填的数字存成 creditLimit；
     // 现金/银行卡填的数字就是初始余额。账单日/还款日/年利率不在此填写
     const bal = overrideBalance ?? balanceValue;
+    // 信用卡两个数值 → 既有模型：creditLimit 存「银行给的初始额度」，
+    // initialBalance 存「现有额度 − 初始额度」（负数 = 已用掉多少），
+    // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
+    if (isCredit && bal > 0 && availableValue > bal) {
+      dialog.alert({ title: t('addTx.creditAvailableTooHigh'), message: t('addTx.creditAvailableTooHighMsg') });
+      return;
+    }
+    const available = Math.max(availableValue, 0);
+    const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
 
     if (isEdit && editAsset) {
       await updateAsset(editAsset.id, {
@@ -241,7 +275,7 @@ export default function AddAssetScreen({ route }: any) {
         color: typeInfo?.color ?? editAsset.color,
         type: selectedType,
         currency: selectedCurrency,
-        initialBalance: isCredit ? 0 : bal,
+        initialBalance: isCredit ? creditInitial : bal,
         // 信用额度只属于信用卡：类型从信用卡切走时显式清掉，防止残留
         creditLimit: isCredit ? bal : undefined,
       });
@@ -252,7 +286,7 @@ export default function AddAssetScreen({ route }: any) {
         color: typeInfo!.color,
         type: selectedType,
         currency: selectedCurrency,
-        initialBalance: isCredit ? 0 : bal,
+        initialBalance: isCredit ? creditInitial : bal,
         ...(isCredit ? { creditLimit: bal } : {}),
       });
     }
@@ -262,9 +296,19 @@ export default function AddAssetScreen({ route }: any) {
 
   // 键盘上的「完成」＝先把当前算式求值落进字段，再直接保存（新增＝创建账户，编辑＝更新账户，与"记一笔"的完成语义一致）
   const handleKeypadConfirm = () => {
+    if (amountField === 'available') {
+      // 只提交「现有额度」这一格，不触发保存（保存仍走右上角「保存」/额度格的完成）
+      const val = availableExpr.confirm();
+      setAvailableValue(val);
+      setAmountField(null);
+      return;
+    }
     const bal = balanceExpr.confirm();
     setBalanceValue(bal);
     setAmountField(null);
+    // 信用卡要填两个数（初始额度 + 现有额度）：这里只落值，保存交给右上角「保存」，
+    // 否则额度一格按「完成」就把还没填的现有额度当成 0 存进去了。
+    if (selectedType === 'credit') return;
     handleSave(bal);
   };
 
@@ -332,6 +376,7 @@ export default function AddAssetScreen({ route }: any) {
           style={[styles.amountHero, amountField === 'balance' && styles.amountHeroActive]}
           activeScale={0.98}
           onPress={openAmountField}
+          testID="add-asset-limit"
         >
           <Text style={styles.amountLabel}>
             {selectedType === 'credit' ? t('addTx.creditLimitLabel') : t('addTx.balanceLabel')}
@@ -351,6 +396,36 @@ export default function AddAssetScreen({ route }: any) {
             />
           </View>
         </PressableScale>
+
+        {/* 信用卡第二个数值（用户 2026-10-29）：现在还剩下多少额度。
+            初始额度 − 现有额度 = 已用，保存时折算成 initialBalance，模型不变。 */}
+        {selectedType === 'credit' && (
+          <PressableScale
+            style={[styles.amountHero, styles.amountHeroSecondary, amountField === 'available' && styles.amountHeroActive]}
+            activeScale={0.98}
+            onPress={openAvailableField}
+            testID="add-asset-available"
+          >
+            <Text style={styles.amountLabel}>{t('addTx.creditAvailableLabel')}</Text>
+            <View style={styles.amountRow}>
+              <CursorAmountText
+                containerStyle={styles.amountTextContainer}
+                style={[styles.amountText, ...(availableExpr.isMulti ? [styles.amountTextSmall] : [])]}
+                cursorStyle={styles.amountCursor}
+                display={amountField === 'available' ? availableExpr.displayValue : availableValue.toFixed(2)}
+                enabled={amountField === 'available' && !sysKeyboardVisible}
+                cursorFromEnd={availableCursor}
+                onCursorChange={setAvailableCursor}
+                onPress={openAvailableField}
+              />
+            </View>
+            <AppText variant="caption" color={semantic.textTertiary} style={{ marginTop: 4 }}>
+              {t('addTx.creditAvailableHint', {
+                used: formatMoney(Math.max(0, balanceValue - availableValue)),
+              })}
+            </AppText>
+          </PressableScale>
+        )}
 
         {/* 账户名称 / 账户类型：左右 60% / 40%，类型是下拉选择框 */}
         <View style={styles.nameTypeRow}>
@@ -463,10 +538,10 @@ export default function AddAssetScreen({ route }: any) {
           ]}
         >
           <AmountCalculatorKeypad
-            onPressKey={(key) => setBalanceCursor(activeExpr.pressKeyAt(key, balanceCursor))}
+            onPressKey={(key) => setActiveCursor(activeExpr.pressKeyAt(key, activeCursor))}
             onPressToday={() => {}}
             hideDateKey
-            onClear={() => { activeExpr.reset(0); setBalanceCursor(0); }}
+            onClear={() => { activeExpr.reset(0); setActiveCursor(0); }}
             onConfirm={handleKeypadConfirm}
           />
         </View>
@@ -610,6 +685,8 @@ function makeStyles(
       marginBottom: 18,
     },
     amountHeroActive: { borderColor: semantic.accent },
+    // 信用卡第二格：同款卡片但矮一档，视觉上仍以初始额度为主
+    amountHeroSecondary: { marginTop: 12, paddingVertical: 12 },
     amountLabel: {
       fontSize: 14,
       fontWeight: '700',

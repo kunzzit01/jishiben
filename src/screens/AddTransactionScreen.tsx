@@ -413,7 +413,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 用户手动选过账户后就不再自动跟随"默认账户"变化；保存后重置（resetAll）恢复自动跟随。
   // 编辑已有账单时初始值来自账单本身，视为已手动确定
   const userPickedAssetRef = useRef(!!editTransaction?.assetId);
-  const userPickedFromRef = useRef(false);
+  // 编辑既有转账时，「转出账户」已经是确定的：必须一开始就当作“用户已选”，
+  // 否则下面那个「跟随默认账户」的 effect 会在数据落地前把回填的转出账户冲成 null
+  // （表现：编辑页转出显示 Not selected、汇率格整块消失、到账额算成等于转出额 —— 用户 2026-10-28 截图）。
+  const userPickedFromRef = useRef(editTransaction?.type === 'transfer');
 
   // "默认账户"实时联动：在资产页勾选/取消"设为默认账户"后，只要用户没在本页手动选过账户，
   // 这里的预选账户立刻跟着变（取消勾选→回到未选择；勾选别的→换成新的默认账户）。
@@ -433,7 +436,25 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const editTransfer = editTransaction?.type === 'transfer' ? editTransaction : undefined;
   const [fromAssetId, setFromAssetId] = useState<string | null>(editTransfer?.fromAssetId ?? defaultAsset?.id ?? null);
   const [toAssetId, setToAssetId] = useState<string | null>(editTransfer?.toAssetId ?? null);
-  const [exchangeRate, setExchangeRate] = useState(editTransfer?.exchangeRate ? String(editTransfer.exchangeRate) : '');
+  const [exchangeRate, setExchangeRate] = useState(() => {
+    const f = editTransfer?.exchangeRate ?? 0;
+    if (!f) return '';
+    // 与上面的方向保持一致：÷ 档显示倒数（0.625 → 1.6）
+    return String(f > 0 && f < 1 ? Number((1 / f).toFixed(6)) : f);
+  });
+  // 汇率方向：'mul' = 1 转出币 = rate 转入币（转出 × rate）；'div' = rate 转出币 = 1 转入币（转出 ÷ rate）。
+  // 用户 2026-10-28：人民币换马币，输入 1.60 意思通常是「1 MYR = 1.60 CNY」，到账要除，不能乘。
+  /**
+   * 汇率方向 + 输入框里的数字：
+   * - 新建：默认 ÷（用户输 1.6 一般指「1 MYR = 1.6 CNY」）
+   * - 编辑：库里存的是「相乘系数」。系数 < 1（如 0.625）时用 ÷ 并把数字取倒数（1.6）——
+   *   这正是用户当初输入的那个数，改起来不用心算；系数 ≥ 1 时用 × 原样显示。
+   * 两种写法数学等价，保存时都折算回同一个系数，不改任何既有数据。
+   */
+  const editRateFactor = editTransfer?.exchangeRate ?? 0;
+  const [rateMode, setRateMode] = useState<'mul' | 'div'>(
+    editTransfer ? (editRateFactor > 0 && editRateFactor < 1 ? 'div' : 'mul') : 'div'
+  );
   const [fee, setFee] = useState(editTransfer?.fee ? String(editTransfer.fee) : '');
   // 转账/兑换的所有金额字段统一使用自绘计算器：金额、汇率、手续费。
   // 汇率跟手续费一样默认空（显示 0.00），不预填 1.00——不然每次都要先删掉默认值才能输入
@@ -1542,11 +1563,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       dialog.alert({ title: t('addTx.sameAccount') });
       return;
     }
-    const rate = showRateField ? (options?.rateOverride ?? parseFloat(exchangeRate)) : 1;
-    if (showRateField && (!rate || rate <= 0)) {
+    const typedRate = showRateField ? (options?.rateOverride ?? parseFloat(exchangeRate)) : 1;
+    if (showRateField && (!typedRate || typedRate <= 0)) {
       dialog.alert({ title: t('addTx.rateInvalid') });
       return;
     }
+    // 界面上的 ÷ 档只是输入方式：入库/计算一律用「转出 × rate = 转入」的系数，
+    // 余额、详情页、统计都按这一套算，不用跟着改。
+    const rate = !showRateField ? 1 : rateMode === 'div' ? 1 / typedRate : typedRate;
     const feeValue = options?.feeOverride ?? (parseFloat(fee) || 0);
     // 备注同下面这行一起搬进了键盘面板，小票(收据)现在转账/兑换也能附了——
     // 如果 addTransfer 的类型定义里还没有 receiptUri 字段，需要先在那边补上
@@ -1713,7 +1737,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     const liveFeeNum = calculatorTarget === 'fee' && amountKeypadOpen ? parseFloat(feeExpr.displayValue) || 0 : feeNum;
     // 手续费从转出金额里先扣掉，剩下的部分才拿去换算成到账金额（普通转账没有汇率，等于 rate=1）
     const netAmount = Math.max(0, liveAmountNum - liveFeeNum);
-    const converted = formatMoney(showRateField ? netAmount * liveRateNum : netAmount, { decimals: 2 });
+    // ÷ 档：到账 = 净额 ÷ 汇率（汇率为 0 时先按 0 算，避免 Infinity）
+    const liveConverted = showRateField
+      ? rateMode === 'div'
+        ? liveRateNum > 0
+          ? netAmount / liveRateNum
+          : 0
+        : netAmount * liveRateNum
+      : netAmount;
+    const converted = formatMoney(liveConverted, { decimals: 2 });
 
     return (
       <EdgeBackSwipe onBack={edgeBackHome}>
@@ -1726,12 +1758,18 @@ export default function AddTransactionScreen({ navigation, route }: any) {
         <TransactionTypeHeader
           uiType={uiType}
           onBack={() => navigation?.goBack()}
+          /* 编辑既有转账时锁住类型：转账/兑换在数据层都是 transfer，切到「支出」会把这笔
+             转账改写成支出、账户与汇率全部丢失（用户 2026-10-28 指出的风险）。
+             新建态照旧可选；编辑态分段也隐藏。 */
+          showTypeSwitch={!isEditing}
+          onDeletePress={isEditing ? handleDeleteTransaction : undefined}
           onSelectType={(nextType) => {
+            if (isEditing) return;
             setUiType(nextType);
             setCategoryId(null);
             setStep(stepForType(nextType));
           }}
-          title={t('nav.add')}
+          title={isEditing ? t('addTx.editTitle') : t('nav.add')}
         />
 
         <ScrollView
@@ -1804,6 +1842,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                     userPickedFromRef.current = true;
                     setFromAssetId(toAssetId);
                     setToAssetId(fromAssetId);
+                    // 互换后报价方向跟着换，否则同一个数字会算反
+                    setRateMode((m) => (m === 'mul' ? 'div' : 'mul'));
                   }}
                 />
               </View>
@@ -1926,7 +1966,19 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                           {t('addTx.rate')}
                         </AppText>
                         <View style={styles.rateGridValueRow}>
-                          <Text style={styles.rateFieldValue}>×</Text>
+                          <PressableScale
+                            activeScale={0.9}
+                            hitSlop={8}
+                            onPress={() => {
+                              hapticLight();
+                              setRateMode((m) => (m === 'mul' ? 'div' : 'mul'));
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={rateMode === 'mul' ? 'rate multiply' : 'rate divide'}
+                            testID="addtx-rate-mode"
+                          >
+                            <Text style={styles.rateFieldValue}>{rateMode === 'mul' ? '×' : '÷'}</Text>
+                          </PressableScale>
                           <CursorAmountText
                             display={calculatorTarget === 'rate' && amountKeypadOpen ? rateExpr.displayValue : exchangeRate || '0.00'}
                             enabled={calculatorTarget === 'rate' && amountKeypadOpen}
@@ -1937,6 +1989,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
                           />
                           <Ionicons name="calculator-outline" size={16} color={semantic.accentText} style={styles.rateGridCalcIcon} />
                         </View>
+
                       </PressableScale>
                     </View>
                     <View style={styles.rateGridDividerVertical} />
@@ -3133,6 +3186,10 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   // 汇率数值：accentText 强调色，保持"这里能点"的视觉权重
   rateFieldValue: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'], color: semantic.accentText },
   exchangeRateDivider: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline, marginTop: spacing.md },
+  // 汇率格下方的一行含义说明（不占交互，只是把方向讲清楚）
+  rateCenterHint: { marginTop: 2, textAlign: 'center' },
+  // 汇率格下方：÷ / × 两个候选结果并排，当前档加重
+  rateModeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: 10, marginTop: 2 },
   transferMetaNoteRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
   transferMetaLeft: { flexDirection: 'row', alignItems: 'center' },
   transferMetaLabel: { marginLeft: spacing.sm },

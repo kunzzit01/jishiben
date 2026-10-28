@@ -14,6 +14,7 @@
 import React, { useMemo } from 'react';
 import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import type { Category, Transaction } from '../types';
+import type { MoneyKind } from '../utils/formatMoney';
 import { useTheme } from '../theme/useTheme';
 import { useT } from '../i18n/LanguageContext';
 import AppText from './ui/AppText';
@@ -33,6 +34,15 @@ function rowDateLabel(date: string): string {
 export interface AccountTransactionListProps {
   /** 已按账户筛好的交易（新的在前） */
   transactions: Transaction[];
+  /**
+   * 正在查看的账户 id。必需：转账要判断「本账户是转出方还是转入方」——
+   * 转出方显示 −(amount+fee)，转入方显示 +(convertedAmount)，两边金额本来就不一样。
+   */
+  assetId?: string;
+  /** 本账户币种（转账明细里跟金额一起显示，避免两个币种的数字看起来一样） */
+  currency?: string;
+  /** 点某一行（传出去跳账单详情；不传则整行不可点，行为与以前一致） */
+  onPressTx?: (tx: Transaction) => void;
   categories: Category[];
   /** 最多显示多少条（其余只报数量，不做分页——账户详情是抽屉，不是流水页面） */
   limit?: number;
@@ -51,6 +61,9 @@ const FEE_LABEL_KEY = 'asset.txFee';
 export function AccountTransactionList({
   transactions,
   categories,
+  assetId,
+  currency,
+  onPressTx,
   limit = 8,
   hideAmount,
   hideHeader,
@@ -104,10 +117,24 @@ export function AccountTransactionList({
       ) : (
         shown.map((tx) => {
           const cat = tx.categoryId ? categoryById.get(tx.categoryId) : undefined;
-          const kind = tx.type === 'expense' ? 'expense' : tx.type === 'income' ? 'income' : 'transfer';
-          // 转账：转出计 amount + fee（与 computeAssetFlowStats 的流出口径一致）
-          const amount =
-            tx.type === 'transfer' ? (tx.convertedAmount ?? tx.amount) + (tx.fee ?? 0) : tx.amount;
+          // 转账按「本账户是哪一侧」来算：
+          //   转出方 → −(amount + fee)（与 computeAssetFlowStats 的流出口径一致）
+          //   转入方 → +(convertedAmount)
+          // 以前一律取 convertedAmount，导致转出账户的明细里显示的是到账额（用户 2026-10-28 反馈）。
+          const isTransfer = tx.type === 'transfer';
+          const isOutgoing = isTransfer && !!assetId && tx.fromAssetId === assetId;
+          const kind: MoneyKind = !isTransfer
+            ? tx.type === 'expense'
+              ? 'expense'
+              : 'income'
+            : isOutgoing
+              ? 'expense'
+              : 'income';
+          const amount = !isTransfer
+            ? tx.amount
+            : isOutgoing
+              ? tx.amount + (tx.fee ?? 0)
+              : (tx.convertedAmount ?? tx.amount);
           return (
             <TransactionRow
               key={tx.id}
@@ -120,8 +147,12 @@ export function AccountTransactionList({
               categoryColor={cat?.color}
               amount={amount}
               kind={kind}
+              currency={isTransfer ? currency : undefined}
+              showCurrency={!!currency && isTransfer}
+              currencyPosition="suffix"
               meta={rowDateLabel(tx.date)}
               hideAmount={hideAmount}
+              onPress={onPressTx ? () => onPressTx(tx) : undefined}
               testID={`asset-tx-${tx.id}`}
             />
           );

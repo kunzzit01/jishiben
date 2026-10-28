@@ -33,6 +33,7 @@ import { UNCATEGORIZED_ICON, UNCATEGORIZED_NAME, UNCATEGORIZED_COLOR } from '../
 import PressableScale from '../components/PressableScale';
 import { AppText, BottomSheet, Button, EmptyState, GlassView, HeroGradient, IconButton, IconCircle, ListSection, MoneyText, StatusBarGlass } from '../components/ui';
 import { MonthlyBudgetSheet } from '../components/MonthlyBudgetSheet';
+import { BudgetRenameSheet } from '../components/BudgetRenameSheet';
 import { TransactionSearchSheet, type SearchRow } from '../components/TransactionSearchSheet';
 import { withAlpha } from '../components/ui/color';
 import { FolderAssetCard } from '../components/home/FolderAssetCard';
@@ -528,6 +529,8 @@ type TxRowProps = {
   /** 行顶发丝线：分组头去掉后，跨天相邻的行也要有分隔（整列表第一行除外） */
   showDivider?: boolean;
   amount: number;
+
+
   /** 'plain' = 转账这类「只是搬钱」的行：不带正负号、用中性主文字色 */
   kind: 'expense' | 'income' | 'plain';
   /** 命中「新增后闪一下」：淡紫底 */
@@ -1391,6 +1394,7 @@ export default function HomeScreen({ navigation }: any) {
     activeAssets,
     paymentPlans,
     getAssetBalance,
+    renameBudget,
   } = useApp();
   // 查表函数：context 里的 getCategoryById / getAssetById 每次渲染都是新函数（只是 find 一下），
   // 拿它们进依赖数组会让 dayGroups / 列表渲染器在每次 context 更新时整体失效（切币种卡顿的一个来源）。
@@ -1780,6 +1784,24 @@ export default function HomeScreen({ navigation }: any) {
     },
     [getAssetById, currency]
   );
+  /**
+   * 转账在「当前币种视图」里的口径：返回要显示的金额和方向，不属于该币种则返回 null。
+   * - 当前币种 = 转出币种 → 显示转出额（direction: 'out'）
+   * - 当前币种 = 转入币种 → 显示到账额 convertedAmount（direction: 'in'）
+   * 同币种转账（rate=1）两边都会命中，按转出处理，避免同一笔在列表里出现两次。
+   */
+  const transferView = useCallback(
+    (t: Transaction, code: string): { amount: number; direction: 'out' | 'in' } | null => {
+      if (t.type !== 'transfer') return null;
+      const fromCur = t.fromAssetId ? getAssetById(t.fromAssetId)?.currency : undefined;
+      const toCur = t.toAssetId ? getAssetById(t.toAssetId)?.currency : undefined;
+      if (fromCur === code) return { amount: t.amount, direction: 'out' };
+      if (toCur === code) return { amount: t.convertedAmount ?? t.amount, direction: 'in' };
+      return null;
+    },
+    [getAssetById]
+  );
+
   // 本月支出按币种一次算出（真列表头、预算卡各页、邻页预览共用；每笔账单只走一遍）
   const expenseByCurrency = useMemo(() => {
     const m = new Map<string, number>();
@@ -1843,6 +1865,29 @@ export default function HomeScreen({ navigation }: any) {
       [...ledgerTransactions]
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
         .map((tx) => {
+          // 转账没有分类：原来会显示成「未分类 + 红色 −30」，和首页那一行完全不一致
+          // （用户 2026-10-29 在「全部交易」里发现）。这里与首页同一套口径：
+          // 标题「转账」（或备注），副标题「账户 A → 账户 B」，金额按当前币种视角取转出/转入侧。
+          if (tx.type === 'transfer') {
+            const tf = transferView(tx, activeCurrency);
+            const fromName = tx.fromAssetId ? getAssetById(tx.fromAssetId)?.name : undefined;
+            const toName = tx.toAssetId ? getAssetById(tx.toAssetId)?.name : undefined;
+            const counterpart =
+              tf?.direction === 'in'
+                ? (tx.fromAssetId ? getAssetById(tx.fromAssetId)?.currency : undefined)
+                : (tx.toAssetId ? getAssetById(tx.toAssetId)?.currency : undefined);
+            const flow = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
+            return {
+              id: tx.id,
+              title: tx.note?.trim() || t('txDetail.typeTransfer'),
+              subtitle: counterpart ? `${flow} · ${counterpart}` : flow,
+              amount: tf?.amount ?? tx.amount,
+              kind: (tf?.direction === 'in' ? 'income' : 'expense') as 'income' | 'expense',
+              dateText: tx.date,
+              icon: 'swap-horizontal' as IconName,
+              color: palette.brand,
+            };
+          }
           const cat = getCategoryById(tx.categoryId);
           const asset = tx.assetId ? getAssetById(tx.assetId) : undefined;
           const catName = cat ? getCategoryLabel(cat, t) : UNCATEGORIZED_NAME;
@@ -1857,7 +1902,7 @@ export default function HomeScreen({ navigation }: any) {
             color: cat?.color ?? UNCATEGORIZED_COLOR,
           };
         }),
-    [ledgerTransactions, getCategoryById, getAssetById, t]
+    [ledgerTransactions, getCategoryById, getAssetById, t, transferView, activeCurrency, palette.brand]
   );
   // 某币种的预算：每个币种各存一条；老数据没有 currency 字段的条目跟随全局设置货币
   const budgetOf = useCallback(
@@ -1890,7 +1935,8 @@ export default function HomeScreen({ navigation }: any) {
           const cat = categories.find((c) => c.id === b.categoryId);
           return {
             categoryId: b.categoryId,
-            name: cat ? getCategoryLabel(cat, t) : b.categoryId,
+            // 有别名用别名（用户 2026-10-29），否则回到分类名
+            name: b.name?.trim() || (cat ? getCategoryLabel(cat, t) : b.categoryId),
             icon: cat?.icon,
             color: cat?.color,
             limit: b.amount,
@@ -1905,7 +1951,8 @@ export default function HomeScreen({ navigation }: any) {
   const unsetCategoryRows = useMemo(() => {
     const withLimit = new Set(categoryBudgetRows.map((r) => r.categoryId));
     return categories
-      .filter((c) => c.type === 'expense' && !withLimit.has(c.id) && (expenseByCategory.get(c.id) ?? 0) > 0)
+      // 不再要求「本月有支出」：否则想给还没花过钱的分类（房租/宠物…）设预算时列表是空的
+      .filter((c) => c.type === 'expense' && !withLimit.has(c.id))
       .map((c) => ({
         categoryId: c.id,
         name: getCategoryLabel(c, t),
@@ -1937,7 +1984,11 @@ export default function HomeScreen({ navigation }: any) {
     // 否则被剔掉的那天会白白吃掉 prevMonth 的更新，导致后面同月的组拿不到分隔标签
     const groups = txByDate
       .map(([date, allItems]) => {
-        const items = allItems.filter((t) => txCurrencyOf(t) === activeCode);
+        // 转账跨币种时两边都要能查到：转出币种视图显示转出额，转入币种视图显示到账额。
+        // 只按转出币种归类的话，钱进了 MYR 账户却在 MYR 视图里完全查不到（用户 2026-10-28 反馈）。
+        const items = allItems.filter((t) =>
+          t.type === 'transfer' ? transferView(t, activeCode) !== null : txCurrencyOf(t) === activeCode
+        );
         const expense = items
           .filter((t) => t.type === 'expense')
           .reduce((s, t) => s + t.amount, 0);
@@ -2161,7 +2212,16 @@ export default function HomeScreen({ navigation }: any) {
     const catColor = cat?.color ?? UNCATEGORIZED_COLOR;
     const assetName = item.assetId ? getAssetById(item.assetId)?.name : undefined;
     // 点一条账 → 先看只读详情；要改再在详情页点「编辑这笔」
-    const openDetail = () => navigation.navigate(ROUTES.TX_DETAIL, { transactionId: item.id });
+    // 转账要带上「当前这一行属于哪个钱包」：首页按币种视图展示，详情页跟着同一视角走，
+    // 否则详情会按全局币种猜，和列表里看到的数字打架（用户 2026-10-28 反馈）。
+    const rowPerspective =
+      item.type === 'transfer'
+        ? transferView(item, activeCurrency)?.direction === 'in'
+          ? item.toAssetId
+          : item.fromAssetId
+        : undefined;
+    const openDetail = () =>
+      navigation.navigate(ROUTES.TX_DETAIL, { transactionId: item.id, perspectiveAssetId: rowPerspective });
     // 标题 = 备注（计划付款的 displayName 也当备注用）；两者都没有时标题落到类别名，
     // 这时副标题只显示账户、不再把类别写第二遍（验收小修：原来是「Dining / Dining · Maybank 储蓄」）。
     // 副标题固定是「类别 · 账户」拼接，把 categoryName 传空串即只剩账户
@@ -2169,29 +2229,47 @@ export default function HomeScreen({ navigation }: any) {
     const hasOwnTitle = ownTitle.length > 0;
     // 列表卡底边 = 末组最后一行：26 下圆角 + 4pt 卡底边（稿里卡内 padding 下 4）
     const isCardBottom = !!section.isLast && index === (section.data?.length ?? 0) - 1;
-    // 转账：取「转出 → 转入」两个账户名做副标题，图标用换向箭头，金额走中性色（不带正负号）
+    // 转账：取「转出 → 转入」两个账户名做副标题；金额按当前币种视图口径（转出额 / 到账额），
+    // 并带币种代码，避免「3.00 到底是 CNY 还是 MYR」的歧义（用户 2026-10-28 反馈）
     const isTransfer = item.type === 'transfer';
+    const tfView = isTransfer ? transferView(item, activeCurrency) : null;
     const fromName = item.fromAssetId ? getAssetById(item.fromAssetId)?.name : undefined;
     const toName = item.toAssetId ? getAssetById(item.toAssetId)?.name : undefined;
-    const transferSub = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
+    // 副标题上的币种 = 「另一侧」的币种（用户 2026-10-28 定版）：
+    // 金额本身已经是本钱包币种，这里要说明它来自/去往哪个币种 ——
+    // MYR 钱包看到 +18.75，标注 CNY（来自人民币）；CNY 钱包看到 −30.00，标注 MYR。
+    const transferFlow = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
+    const counterpartCurrency =
+      tfView?.direction === 'in'
+        ? (item.fromAssetId ? getAssetById(item.fromAssetId)?.currency : undefined)
+        : (item.toAssetId ? getAssetById(item.toAssetId)?.currency : undefined);
+    const transferSub = transferFlow
+      ? counterpartCurrency
+        ? `${transferFlow} · ${counterpartCurrency}`
+        : transferFlow
+      : '';
 
     return (
       <TxRowMemo
         title={isTransfer ? ownTitle || t('txDetail.typeTransfer') : hasOwnTitle ? ownTitle : catName}
         categoryName={isTransfer ? '' : hasOwnTitle ? catName : ''}
-        categoryIcon={isTransfer ? 'swap-horizontal' : catIcon}
+        categoryIcon={
+          isTransfer ? (tfView?.direction === 'in' ? 'arrow-down-circle-outline' : 'arrow-up-circle-outline') : catIcon
+        }
         categoryColor={isTransfer ? palette.brand : catColor}
         accountName={isTransfer ? transferSub : assetName}
         showDivider={index !== 0}
-        amount={item.amount}
-        kind={isTransfer ? 'plain' : item.type === 'income' ? 'income' : 'expense'}
+        amount={isTransfer ? (tfView?.amount ?? item.amount) : item.amount}
+        // 转账按方向复用收支两档：转出走 expense（红 −），转入走 income（绿 +）——
+        // 用户定版：左边 CNY 就该像 expenses 那样显示 −30，右边 MYR 像 income 那样 +18.75
+        kind={isTransfer ? (tfView?.direction === 'in' ? 'income' : 'expense') : item.type === 'income' ? 'income' : 'expense'}
         flash={flash}
         isCardBottom={isCardBottom}
         onPress={openDetail}
         testID={`tx-row-${item.id}`}
       />
     );
-  }, [t, getCategoryById, getAssetById, navigation]);
+  }, [t, getCategoryById, getAssetById, navigation, activeCurrency, transferView]);
 
   const renderTxRow = useCallback(({ item, index, section }: { item: Transaction; index: number; section: TxDaySection }) => (
     <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX}>
@@ -2226,10 +2304,15 @@ export default function HomeScreen({ navigation }: any) {
           {section.dateSub ? `${section.monthDay} · ${section.label}` : section.label}
         </AppText>
         <AppText variant="caption" weight="500" color={palette.textTertiary} numberOfLines={1} style={styles.daySumText}>
-          {`${t(section.expense > 0 ? 'home.expenseShort' : 'home.incomeShort')}${fmtMoney(
-            section.expense > 0 ? section.expense : section.income,
-            { showCurrency: false }
-          )}`}
+          {section.expense === 0 && section.income === 0
+            ? // 当天只有转账：既不是支出也不是收入，写「支出/收入 0.00」只会让人以为漏记
+              t('txDetail.transferCount', {
+                count: section.items.filter((it) => it.type === 'transfer').length,
+              })
+            : `${t(section.expense > 0 ? 'home.expenseShort' : 'home.incomeShort')}${fmtMoney(
+                section.expense > 0 ? section.expense : section.income,
+                { showCurrency: false }
+              )}`}
         </AppText>
       </View>
     </View>
@@ -2674,6 +2757,8 @@ export default function HomeScreen({ navigation }: any) {
 
   // 月度预算抽屉（总预算 + 分类额度进度条）：预算卡的整卡点按入口
   const budgetPlanOpen = activeSheet === 'budget';
+  // 预算改名面板的目标（null = 关闭）
+  const [budgetRename, setBudgetRename] = useState<{ categoryId: string; name: string; fallback: string } | null>(null);
   // 顶栏「搜索」抽屉（设计稿 01 屏头部动作）：只读检索，点结果进既有编辑页
   const searchOpen = activeSheet === 'search';
   // 「最近交易」标题行「查看全部」→ 全量交易抽屉（与搜索共用组件、mode='all'）。
@@ -3400,7 +3485,36 @@ export default function HomeScreen({ navigation }: any) {
         onEditTotal={editTotalBudgetFromPlan}
         onEditCategory={editCategoryBudgetFromPlan}
         onClearCategory={handleClearCategoryBudget}
+        onRenameCategory={(categoryId, currentName) => {
+          const cat = categories.find((c) => c.id === categoryId);
+          setBudgetRename({
+            categoryId,
+            name: budgets.find((b) => b.categoryId === categoryId && (b.currency ?? currency) === activeCurrency)?.name ?? '',
+            fallback: cat ? getCategoryLabel(cat, t) : currentName,
+          });
+        }}
         testID="home-budget-plan"
+      />
+      {/* 预算改名 / 清除（长按分类预算行进入）：只改显示名，不动分类与统计 */}
+      <BudgetRenameSheet
+        visible={!!budgetRename}
+        initialName={budgetRename?.name ?? ''}
+        fallbackName={budgetRename?.fallback ?? ''}
+        onClose={() => setBudgetRename(null)}
+        onSubmit={async (name) => {
+          const target = budgetRename;
+          setBudgetRename(null);
+          if (!target) return;
+          await renameBudget(target.categoryId, name, activeCurrency);
+          hapticSuccess();
+        }}
+        onClear={() => {
+          const target = budgetRename;
+          setBudgetRename(null);
+          if (!target) return;
+          setBudget(target.categoryId, 0, activeCurrency);
+          hapticSuccess();
+        }}
       />
       {/* 搜索抽屉（设计稿 01 屏头部动作）：点结果 → 既有「编辑账单」页，不新增写入路径 */}
       <TransactionSearchSheet

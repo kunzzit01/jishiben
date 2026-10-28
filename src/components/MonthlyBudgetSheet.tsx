@@ -73,6 +73,8 @@ export interface MonthlyBudgetSheetProps {
   onEditTotal: () => void;
   onEditCategory: (categoryId: string) => void;
   onClearCategory: (categoryId: string) => void;
+  /** 长按预算行 → 改名/清除面板（不传则长按无反应） */
+  onRenameCategory?: (categoryId: string, currentName: string) => void;
   testID?: string;
 }
 
@@ -90,6 +92,7 @@ export function MonthlyBudgetSheet({
   onEditTotal,
   onEditCategory,
   onClearCategory,
+  onRenameCategory,
   testID,
 }: MonthlyBudgetSheetProps) {
   const { semantic, spacing, radius, layout } = useTheme();
@@ -132,6 +135,18 @@ export function MonthlyBudgetSheet({
         rowAmountText: { marginTop: 2 },
         emptyHint: { paddingVertical: spacing.sm },
         unsetRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+        // 「新增预算」行：整行可点 + 右侧 ＋（不是编辑图标，是“加”的语义）
+        unsetRowPress: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.sm,
+          minHeight: 44,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.xs,
+          borderRadius: 14,
+          backgroundColor: semantic.surfaceSunken,
+        },
+        unsetName: { flex: 1 },
       }),
     [semantic, spacing, radius, layout]
   );
@@ -163,7 +178,15 @@ export function MonthlyBudgetSheet({
     >
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* 总预算卡：左标签 + 右百分比 → 大金额 → 10 高轨道（稿） */}
-        <View style={styles.card} testID="budget-total-block">
+        {/* 整张总预算卡可点 = 打开额度计算器（铅笔之外多一个更大的目标） */}
+        <PressableScale
+          activeScale={0.99}
+          onPress={onEditTotal}
+          accessibilityRole="button"
+          accessibilityLabel={t('home.budgetEdit')}
+          style={styles.card}
+          testID="budget-total-block"
+        >
           <View style={styles.totalHead}>
             <AppText variant="caption" color={semantic.textTertiary}>
               {t('home.budgetTotalRow')}
@@ -178,20 +201,7 @@ export function MonthlyBudgetSheet({
               >
                 {totalPct.text}
               </AppText>
-            ) : (
-              <PressableScale
-                activeScale={0.94}
-                onPress={onEditTotal}
-                accessibilityRole="button"
-                accessibilityLabel={t('home.budgetEdit')}
-                style={styles.editChip}
-                testID="budget-total-edit"
-              >
-                <AppText variant="caption" weight="600" color={semantic.accentText}>
-                  {t('home.budgetEdit')}
-                </AppText>
-              </PressableScale>
-            )}
+            ) : null}
           </View>
           {totalLimit > 0 ? (
             <>
@@ -209,7 +219,46 @@ export function MonthlyBudgetSheet({
               {t('home.budgetEmpty')}
             </AppText>
           )}
-        </View>
+        </PressableScale>
+
+        {/* 新增预算：原来藏在面板最底部 → 提到分类预算上方（用户 2026-10-29） */}
+        {unsetRows.length > 0 && (
+          <>
+            <View style={styles.sectionHead}>
+              <AppText variant="caption" weight="600" color={semantic.textSecondary}>
+                {t('home.budgetAddCategory')}
+              </AppText>
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {unsetRows.length}
+              </AppText>
+            </View>
+            <View style={styles.rowList}>
+              {unsetRows.map((row) => {
+                const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
+                const tint = row.color ?? semantic.accent;
+                return (
+                  <PressableScale
+                    key={row.categoryId}
+                    activeScale={0.98}
+                    onPress={() => onEditCategory(row.categoryId)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${row.name} ${t('home.budgetAddCategory')}`}
+                    style={styles.unsetRowPress}
+                    testID={`budget-unset-${row.categoryId}`}
+                  >
+                    <View style={[styles.iconBox, { backgroundColor: withAlpha(tint, 0.12) }]}>
+                      <Ionicons name={iconName} size={16} color={tint} />
+                    </View>
+                    <AppText variant="subhead" color={semantic.textPrimary} numberOfLines={1} style={styles.unsetName}>
+                      {row.name}
+                    </AppText>
+                    <Ionicons name="add-circle-outline" size={20} color={semantic.accentText} />
+                  </PressableScale>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {/* 分类预算 */}
         <View style={styles.sectionHead}>
@@ -226,6 +275,11 @@ export function MonthlyBudgetSheet({
             {t('home.budgetCategoryEmpty')}
           </AppText>
         )}
+        {rows.length > 0 && (
+          <AppText variant="caption2" color={semantic.textTertiary} style={styles.emptyHint}>
+            {t('home.budgetLongPressHint')}
+          </AppText>
+        )}
 
         <View style={styles.rowList}>
           {rows.map((row) => {
@@ -237,7 +291,7 @@ export function MonthlyBudgetSheet({
                 key={row.categoryId}
                 activeScale={0.98}
                 onPress={() => onEditCategory(row.categoryId)}
-                onLongPress={() => onClearCategory(row.categoryId)}
+                onLongPress={() => onRenameCategory?.(row.categoryId, row.name)}
                 accessibilityRole="button"
                 accessibilityLabel={`${row.name} ${pct.a11y}`}
                 style={styles.card}
@@ -277,49 +331,6 @@ export function MonthlyBudgetSheet({
           })}
         </View>
 
-        {/* 未设额度的分类：一键加额度 */}
-        {unsetRows.length > 0 && (
-          <>
-            {/* 小节标题（与上面「Category budgets」同级）：此前只是一行灰色说明，
-                与空态提示重复表达同一件事 */}
-            <View style={styles.sectionHead}>
-              <AppText variant="caption" weight="600" color={semantic.textSecondary}>
-                {t('home.budgetAddCategory')}
-              </AppText>
-              <AppText variant="caption" color={semantic.textTertiary}>
-                {unsetRows.length}
-              </AppText>
-            </View>
-            {unsetRows.map((row) => {
-              const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
-              const tint = row.color ?? semantic.accent;
-              return (
-                <PressableScale
-                  key={row.categoryId}
-                  activeScale={0.98}
-                  onPress={() => onEditCategory(row.categoryId)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${row.name} ${t('home.budgetNoLimit')}`}
-                  style={styles.unsetRow}
-                  testID={`budget-unset-${row.categoryId}`}
-                >
-                  <View style={[styles.iconBox, { backgroundColor: withAlpha(tint, 0.12) }]}>
-                    <Ionicons name={iconName} size={16} color={tint} />
-                  </View>
-                  <View style={styles.rowTitleWrap}>
-                    <AppText variant="subhead" color={semantic.textSecondary} numberOfLines={1}>
-                      {row.name}
-                    </AppText>
-                  </View>
-                  <AppText variant="caption" color={semantic.textTertiary}>
-                    {t('home.budgetNoLimit')}
-                  </AppText>
-                  <Ionicons name="chevron-forward" size={16} color={semantic.textTertiary} />
-                </PressableScale>
-              );
-            })}
-          </>
-        )}
       </ScrollView>
     </BottomSheet>
   );

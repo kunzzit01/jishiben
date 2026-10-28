@@ -59,7 +59,11 @@ export type TransactionLike = {
 export type HomeStackParamList = {
   首页主页: undefined;
   // 账单详情（只读）：只带 id，详情页自己从 context 取最新数据，编辑后返回自动同步
-  账单详情: { transactionId: string };
+  账单详情: {
+    transactionId: string;
+    /** 从某个钱包流水点进来时带上，详情页据此决定显示「转出 −」还是「转入 +」 */
+    perspectiveAssetId?: string;
+  };
   记一笔: {
     editTransaction?: TransactionLike;
     presetCategoryId?: string;
@@ -122,6 +126,8 @@ export type ProfileStackParamList = {
 /** AssetStack */
 export type AssetStackParamList = {
   资产主页: undefined;
+  // 账户流水里的行也能进账单详情（同一组件双注册，带钱包视角，goBack 回账户详情）
+  账单详情: { transactionId: string; perspectiveAssetId?: string };
   添加资产账户: { assetId?: string } | undefined;
   // 账户详情的"转账" push 本栈的"记一笔"（与 HomeStack / ProfileStack 同一组件三注册）：
   // goBack 天然回账户详情。签名与另两处保持一致，presetType='transfer' 预选转账档

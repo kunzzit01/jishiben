@@ -207,6 +207,8 @@ interface AppContextValue {
   updateCategory: (id: string, updates: Partial<Omit<Category, 'id'>>) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
   setBudget: (categoryId: string, amount: number, currency?: string) => Promise<void>;
+  /** 改某条预算的显示名（空串 = 恢复分类名）；只影响本地，不入云端 */
+  renameBudget: (categoryId: string, name: string, currency?: string) => Promise<void>;
   getCategoryById: (id: string) => Category | undefined;
   addLedger: (name: string, icon: string, color?: string) => Promise<void>;
   renameLedger: (id: string, name: string) => Promise<void>;
@@ -486,7 +488,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const parsedGroups: CategoryGroup[] = JSON.parse(catGroupRaw);
           if (Array.isArray(parsedGroups)) setCategoryGroups(parsedGroups);
         }
-        if (budRaw) setBudgets(JSON.parse(budRaw));
+        if (budRaw) {
+          const fromCloud: Budget[] = JSON.parse(budRaw);
+          // 云端没有 name：把本机别名按 (categoryId|currency) 贴回去，否则每次同步都被抹掉
+          setBudgets((prev) => {
+            const alias = new Map<string, string>();
+            prev.forEach((b) => {
+              if (b.name) alias.set(b.categoryId + '|' + (b.currency ?? ''), b.name);
+            });
+            if (alias.size === 0) return fromCloud;
+            return fromCloud.map((b) => {
+              const hit = alias.get(b.categoryId + '|' + (b.currency ?? ''));
+              return hit ? { ...b, name: hit } : b;
+            });
+          });
+        }
         if (currRaw) setCurrencyState(currRaw);
         if (periodRaw) setPeriodPreferenceState(JSON.parse(periodRaw));
         if (assetRaw) {
@@ -676,6 +692,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return true;
       });
     });
+  };
+
+  const renameBudget: AppContextValue['renameBudget'] = async (categoryId, name, currency) => {
+    const trimmed = name.trim();
+    setBudgets((prev) =>
+      prev.map((b) =>
+        b.categoryId === categoryId && (b.currency ?? currency) === (currency ?? b.currency)
+          ? { ...b, name: trimmed || undefined }
+          : b
+      )
+    );
   };
 
   const getCategoryById = (id: string) => categories.find((c) => c.id === id);
@@ -1050,6 +1077,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         categoryGroups,
         deleteCategory,
         setBudget,
+        renameBudget,
         getCategoryById,
         addLedger,
         renameLedger,

@@ -53,6 +53,12 @@ export interface Budget {
   clientUid?: string;
   /** 预算所属币种（'total' 总预算按币种各存一条）；老数据没有该字段 = 跟随全局设置货币 */
   currency?: string;
+  /**
+   * 预算自定义显示名（用户 2026-10-29：想给预算单独起名，不影响分类）。
+   * 只存本地：云端 budgets 表只有 (categoryUid, amount, currency)，同步回来按
+   * (categoryId|currency) 把别名贴回去；换设备后名字会丢，额度不受影响。
+   */
+  name?: string;
 }
 
 export interface Ledger {

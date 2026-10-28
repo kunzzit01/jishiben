@@ -1191,11 +1191,13 @@ export default function AssetScreen() {
   // 筛选分段（稿：全部账户 / 现金 / 银行 / 电子钱包）—— 标签取现有 i18n 键（i18n 不在本次改动范围）
   const filterOptions = useMemo(
     () => [
-      { label: t('common.all'), value: 'all' },
-      { label: t('asset.typeCash'), value: 'cash' },
-      { label: t('asset.typeBank'), value: 'bank' },
-      { label: t('asset.typeCredit'), value: 'credit' },
-      { label: t('asset.typeEwallet'), value: 'ewallet' },
+      // 五个按钮等分整行宽度（390 屏每格 ≈67px）：这里必须用短标签，
+      // 原来的「Bank Card / Credit Card / E-Wallet」会被省略号截断（用户 2026-10-29：不许截断）
+      { label: t('asset.filterShortAll'), value: 'all' },
+      { label: t('asset.filterShortCash'), value: 'cash' },
+      { label: t('asset.filterShortBank'), value: 'bank' },
+      { label: t('asset.filterShortCredit'), value: 'credit' },
+      { label: t('asset.filterShortWallet'), value: 'ewallet' },
     ],
     [t]
   );
@@ -1310,19 +1312,38 @@ export default function AssetScreen() {
         {/* 分段筛选（稿 02 屏）：全部账户 / 现金 / 银行 / 电子钱包 —— 按 assets.type 过滤，纯展示层 */}
         {hasLedgerAssets && (
           <View style={[styles.filterWrap, { paddingHorizontal: pagePadding }]} testID="asset-filter">
-            {/* 5 个筛选项在 390 下硬撑会截成「Bank …」「Credit…」——改成横向可滚、按内容宽度排，标签完整 */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row', alignItems: 'center' }}
-            >
-              <SegmentedControl
-                options={filterOptions}
-                selected={accountFilter}
-                onSelect={(v) => setAccountFilter(v as typeof accountFilter)}
-                thumb="accent"
-              />
-            </ScrollView>
+            {/* 用户 2026-10-29：五个按钮要拉匀、居中撑满宽度，不许换行、不许截断。
+                做法 = 等分 flex:1 + 短标签（电子钱包 → 钱包），而不是横向滚动。 */}
+            <View style={styles.filterBar} testID="asset-filter-bar">
+              {filterOptions.map((opt) => {
+                const active = accountFilter === opt.value;
+                // ⚠ 等分宽度必须由外层普通 View 承担：PressableScale 内部还有一层，
+                // 直接把 flex:1 写在它身上时，实测宽度仍按文字内容算（2026-10-29）。
+                return (
+                  <View key={opt.value} style={styles.filterSlot}>
+                  <PressableScale
+                    activeScale={0.96}
+                    onPress={() => setAccountFilter(opt.value as typeof accountFilter)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={opt.label}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    testID={`asset-filter-${opt.value}`}
+                  >
+                    <AppText
+                      variant="caption"
+                      weight={active ? '600' : '400'}
+                      color={active ? semantic.onAccent : semantic.textSecondary}
+                      numberOfLines={1}
+                      style={styles.filterChipText}
+                    >
+                      {opt.label}
+                    </AppText>
+                  </PressableScale>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         )}
 
@@ -1655,6 +1676,15 @@ export default function AssetScreen() {
                   <AccountTransactionList
                     transactions={accountTransactions}
                     categories={categories}
+                    assetId={sheetAsset.id}
+                    currency={sheetAsset.currency}
+                    // 点行 → 账单详情（带上「这个钱包」视角：转出钱包看 −，转入钱包看 +）
+                    onPressTx={(tx) =>
+                      navigation.navigate(ROUTES.TX_DETAIL, {
+                        transactionId: tx.id,
+                        perspectiveAssetId: sheetAsset.id,
+                      })
+                    }
                     hideHeader
                     testID="asset-detail-transactions"
                   />
@@ -1926,6 +1956,26 @@ function makeStyles(
     },
     // 分段筛选与总资产卡之间 12、与列表之间 24
     filterWrap: { marginTop: spacing.md },
+    // 五个筛选按钮：整行等分撑满内容宽，胶囊底 + 选中填充品牌色（不换行、不截断）
+    filterBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      columnGap: 4,
+      padding: 4,
+      borderRadius: 999,
+      backgroundColor: semantic.surfaceSunken,
+    },
+    filterSlot: { flex: 1, minWidth: 0 },
+    filterChip: {
+      alignSelf: 'stretch',
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+      borderRadius: 999,
+    },
+    filterChipActive: { backgroundColor: semantic.accent },
+    filterChipText: { textAlign: 'center' },
     // V2.2c：所有币种组共用一张玻璃卡（卡内小节头 + hairline 分组），卡与页头之间 24
     groupsCardWrap: { marginTop: 24 },
     // overflow hidden：行 / 小节头的 hairline 与按压高光不越出 26 圆角

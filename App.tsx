@@ -200,6 +200,11 @@ function AssetStack() {
     >
       <AssetStackNav.Screen name="资产主页" component={AssetScreen} />
       <AssetStackNav.Screen name="添加资产账户" component={AddAssetScreen} />
+      <AssetStackNav.Screen
+        name="账单详情"
+        component={TransactionDetailScreen}
+        options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }}
+      />
       {/* 记一笔三注册（HomeStack / ProfileStack / 本栈同一组件）：账户详情的"转账"从本栈 push，
           goBack 天然回账户详情（而不是切去首页 Tab 的长驻实例）；三处各自注册同一组件、
           互不共享导航栈，是"返回回到来源页"这一条体验的统一做法 */}

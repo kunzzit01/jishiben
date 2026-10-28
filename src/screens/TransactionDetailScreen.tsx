@@ -13,10 +13,16 @@ import { useTheme } from '../theme/useTheme';
 import { useLayout } from '../theme/useLayout';
 import { useT } from '../i18n/LanguageContext';
 import { getCategoryLabel } from '../i18n/categories';
+import { formatMoney } from '../utils/formatMoney';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useDialog } from '../components/AppDialog';
 import { AppText, Button, Card, HeroGradient, IconButton, ListRow, ListSection, MoneyText, ScreenHeader } from '../components/ui';
 import { ROUTES } from '../navigation/routes';
+
+/** 汇率反向写法用：1.6000 → 1.6（最多 4 位小数，去掉尾零） */
+function trimZeros(n: number): string {
+  return String(Number(n.toFixed(4)));
+}
 
 const CATEGORY_ICON_SIZE = 56;
 const CATEGORY_GLYPH_SIZE = 26;
@@ -27,7 +33,7 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
   const t = useT();
   const dialog = useDialog();
   const tabClearance = useTabClearance();
-  const { transactions, categories, ledgers, getAssetById, currencySymbol, deleteTransaction } = useApp();
+  const { transactions, categories, ledgers, getAssetById, currencySymbol, deleteTransaction, currency: activeCurrency } = useApp();
 
   const transactionId: string | undefined = route?.params?.transactionId;
   const tx = useMemo(() => transactions.find((item) => item.id === transactionId), [transactions, transactionId]);
@@ -69,6 +75,32 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
   const categoryColor = isTransfer ? semantic.accent : category?.color ?? semantic.accent;
 
   const typeLabel = isTransfer ? t('txDetail.typeTransfer') : isIncome ? t('txDetail.typeIncome') : t('txDetail.typeExpense');
+
+  /**
+   * 转账的「本钱包视角」：
+   * - 从某个钱包的流水点进来 → 路由带 perspectiveAssetId，直接用它
+   * - 从首页点进来 → 看当前币种视图：命中转出币种就是转出视角，否则转入视角
+   * 决定 hero 显示 −30（红）还是 +18.75（绿）——与首页那一行完全同一套口径。
+   */
+  const perspective: 'out' | 'in' = (() => {
+    if (!isTransfer) return 'out';
+    const pid: string | undefined = route?.params?.perspectiveAssetId;
+    if (pid) return pid === tx.fromAssetId ? 'out' : 'in';
+    const code = fromAsset?.currency;
+    return activeCurrency && code && activeCurrency !== code ? 'in' : 'out';
+  })();
+
+  const heroTitle = isTransfer ? (perspective === 'in' ? toAsset?.name ?? t('txDetail.typeTransfer') : fromAsset?.name ?? t('txDetail.typeTransfer')) : categoryName;
+  const heroAmount = isTransfer
+    ? perspective === 'in'
+      ? tx.convertedAmount ?? tx.amount
+      : tx.amount + (tx.fee ?? 0)
+    : tx.amount;
+  const heroKind = isTransfer ? (perspective === 'in' ? 'income' : 'expense') : kind;
+  // 与首页行一致：金额是本钱包币种，标注「另一侧」的币种（转入视角标转出币种，反之亦然）
+  const heroCurrency = isTransfer
+    ? `${t('txDetail.typeTransfer')} · ${perspective === 'in' ? fromAsset?.currency ?? '' : toAsset?.currency ?? ''}`
+    : '';
   const feeText = currencySymbol + String(tx.fee);
 
   const openEdit = () => navigation.navigate(ROUTES.ADD_TX, { editTransaction: tx });
@@ -108,35 +140,45 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
         contentContainerStyle={{ paddingHorizontal: pagePadding, paddingBottom: tabClearance + 24 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* hero 与其它交易完全同构：圆图标 + 名称 + 一个金额。
+            转账只换「金额取哪一侧」：转出钱包 −30（红），转入钱包 +18.75（绿）。 */}
         <Card style={{ marginTop: spacing.sm }}>
           <View style={styles.heroBox}>
             <View style={[styles.catCircle, { backgroundColor: categoryColor + '22', borderRadius: radius.full }]}>
               <Ionicons name={categoryIcon} size={CATEGORY_GLYPH_SIZE} color={categoryColor} />
             </View>
             <AppText variant="subhead" weight="600" color={semantic.textSecondary} style={styles.catName}>
-              {categoryName}
+              {heroTitle}
             </AppText>
             <View style={styles.amountRow}>
-              <MoneyText value={tx.amount} kind={kind} variant="title1" />
+              <MoneyText value={heroAmount} kind={heroKind} variant="title1" />
             </View>
-            <View style={styles.metaRow}>
-              <AppText variant="caption" color={semantic.textTertiary}>{typeLabel}</AppText>
-              <AppText variant="caption" color={semantic.textTertiary}>{'·'}</AppText>
-              <AppText variant="caption" color={semantic.textTertiary}>{tx.date}</AppText>
-            </View>
+            {isTransfer ? (
+              <AppText variant="caption" color={semantic.textTertiary} style={styles.heroSub}>
+                {heroCurrency}
+              </AppText>
+            ) : null}
           </View>
         </Card>
 
         <ListSection title={t('txDetail.sectionDetail')} style={{ marginTop: spacing.md }}>
           {isTransfer ? (
             <>
-              <ListRow icon="arrow-up-circle-outline" title={t('txDetail.fromAccount')} value={fromAsset?.name ?? '-'} />
-              <ListRow icon="arrow-down-circle-outline" title={t('txDetail.toAccount')} value={toAsset?.name ?? '-'} />
               {typeof tx.fee === 'number' && tx.fee > 0 ? (
                 <ListRow icon="pricetag-outline" title={t('txDetail.fee')} value={feeText} />
               ) : null}
               {typeof tx.exchangeRate === 'number' && tx.exchangeRate > 0 ? (
-                <ListRow icon="swap-horizontal-outline" title={t('txDetail.rate')} value={String(tx.exchangeRate)} />
+                <ListRow
+                  icon="swap-horizontal-outline"
+                  title={t('txDetail.rate')}
+                  value={`1 ${fromAsset ? String(fromAsset.currency) : ''} = ${tx.exchangeRate} ${toAsset ? String(toAsset.currency) : ''}`}
+                  // 反向写法一起给：用户心里的报价常常是「1 MYR = 1.60 CNY」那种
+                  subtitle={
+                    tx.exchangeRate && tx.exchangeRate > 0
+                      ? `1 ${toAsset ? String(toAsset.currency) : ''} = ${trimZeros(1 / tx.exchangeRate)} ${fromAsset ? String(fromAsset.currency) : ''}`
+                      : undefined
+                  }
+                />
               ) : null}
             </>
           ) : (
@@ -170,6 +212,17 @@ const styles = StyleSheet.create({
   catCircle: { width: CATEGORY_ICON_SIZE, height: CATEGORY_ICON_SIZE, alignItems: 'center', justifyContent: 'center' },
   catName: { marginTop: 10 },
   amountRow: { marginTop: 6 },
+  heroSub: { marginTop: 2 },
+  // 转账 hero：左「谁扣钱 + 扣多少」、右「谁收钱 + 收多少」，中间箭头表示方向。
+  // 账户名紧贴自己的金额（不再分居卡片两端），两列等宽，金额用 tabular 数字。
+  flowGrid: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 8 },
+  flowCol: { flex: 1, rowGap: 2 },
+  flowColRight: { alignItems: 'flex-end' },
+  flowAccount: { flexDirection: 'row', alignItems: 'center', columnGap: 6, maxWidth: '100%' },
+  flowAccountRight: { flexDirection: 'row-reverse' },
+  flowDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  flowName: { flexShrink: 1 },
+  flowMidArrow: { marginTop: 6 },
   metaRow: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginTop: 4 },
   actions: { marginTop: 20, rowGap: 10 },
 });
