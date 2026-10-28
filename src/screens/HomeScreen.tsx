@@ -1205,6 +1205,11 @@ const HeroCardPage = React.memo(function HeroCardPage({
   testID?: string;
 }) {
   const palette = useHomePalette();
+  // ⚠ cardW 来自 onLayout 实测宽度，首帧是 0；直接乘比例会把 fontSize 传成 0，
+  // 安卓原生抛 `IllegalArgumentException: FontSize should be a positive value` → App 直接闪退
+  // （Web 上 0 只是不显示，所以浏览器永远复现不出来）。统一夹下限。
+  const safeW = Number.isFinite(cardW) && cardW > 0 ? cardW : 0;
+  const scaled = (ratio: number, min: number): number => Math.max(min, Math.round(safeW * ratio));
   const t = useT();
   // 金额区自己的 tap：**只包金额槽，不含预算槽**。以前这颗 tap 挂在整条金额行上，
   // 预算槽（RN Pressable）和它同时响应 → 点预算槽会开两个抽屉（币种 + 月度预算）
@@ -1259,9 +1264,9 @@ const HeroCardPage = React.memo(function HeroCardPage({
               // 小数点后两位照常保留，读屏标签仍带币种
               variant="display"
               hero
-              heroSize={cardW * 0.126}
+              heroSize={scaled(0.126, 28)}
               weight="700"
-              heroDecimalSize={cardW * 0.063}
+              heroDecimalSize={scaled(0.063, 15)}
               heroDecimalWeight="600"
               heroDecimalColor={decimalColor}
               heroLetterRatio={-0.03}
@@ -1302,10 +1307,10 @@ const HeroCardPage = React.memo(function HeroCardPage({
                   百分比用卡上主文字色，**只有超支**才换 palette.expense */}
               <View style={styles.heroBudgetHead}>
                 <View style={styles.heroBudgetHeadCol}>
-                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadLabel, { fontSize: cardW * 0.0365 }]}>
+                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.budgetText, styles.heroBudgetHeadLabel, { fontSize: scaled(0.0365, 11) }]}>
                     {t('home.budgetLabel')}
                   </AppText>
-                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.heroBudgetDetail, { fontSize: cardW * 0.0296 }]}>
+                  <AppText variant="caption" weight="500" color={mutedColor} numberOfLines={1} style={[styles.heroBudgetDetail, { fontSize: scaled(0.0296, 10) }]}>
                     {hidden
                       ? HIDDEN_AMOUNT
                       : `${fmtMoney(expense, { showCurrency: false })} / ${fmtMoney(budget, { showCurrency: false })}`}
@@ -1315,7 +1320,7 @@ const HeroCardPage = React.memo(function HeroCardPage({
                   variant="caption"
                   weight="600"
                   color={pct.over ? palette.expense : textColor}
-                  style={[styles.budgetText, styles.heroBudgetPct, { fontSize: cardW * 0.032 }]}
+                  style={[styles.budgetText, styles.heroBudgetPct, { fontSize: scaled(0.032, 11) }]}
                   accessibilityLabel={pct.a11y}
                   testID={testID ? `${testID}-pct` : undefined}
                 >
