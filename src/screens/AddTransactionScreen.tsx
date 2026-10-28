@@ -2066,12 +2066,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             excludeId={accountPickerRole === 'from' ? toAssetId : fromAssetId}
             currencyCode={amountCurrencyCode}
             onPickAsset={(id) => {
-              // 手动选择/取消，之后不再自动跟随"默认账户"变化；再点一次已选＝取消选择
+              // 手动选过之后不再自动跟随"默认账户"变化。
+              // 注意：这里**不能**做成「再点一次＝取消选择」——转账的转出/转入都是必填项，
+              // 用户点了一下当前已选的账户就变成「未选择」，保存时直接报
+              // 「请选择转出与转入账户」，转账压根没记进去（2026-10-28 录屏反馈的根因）。
               userPickedFromRef.current = true;
               if (accountPickerRole === 'from') {
-                setFromAssetId((prev) => (prev === id ? null : id));
+                setFromAssetId(id);
               } else {
-                setToAssetId((prev) => (prev === id ? null : id));
+                setToAssetId(id);
               }
               setAccountPickerOpen(false);
             }}

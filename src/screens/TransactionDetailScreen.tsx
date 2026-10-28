@@ -57,9 +57,16 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
   const toAsset = tx.toAssetId ? getAssetById(tx.toAssetId) : undefined;
   const ledger = ledgers.find((l) => l.id === tx.ledgerId);
 
-  const categoryName = category ? getCategoryLabel(category, t) : tx.displayName || t('txDetail.uncategorized');
-  const categoryIcon = (category?.icon ?? 'apps-outline') as React.ComponentProps<typeof Ionicons>['name'];
-  const categoryColor = category?.color ?? semantic.accent;
+  // 转账没有类别：这里直接显示「转账」+ 换向箭头，不再落到「未分类」（用户 2026-10-28 反馈）
+  const categoryName = isTransfer
+    ? t('txDetail.typeTransfer')
+    : category
+      ? getCategoryLabel(category, t)
+      : tx.displayName || t('txDetail.uncategorized');
+  const categoryIcon = (isTransfer
+    ? 'swap-horizontal'
+    : category?.icon ?? 'apps-outline') as React.ComponentProps<typeof Ionicons>['name'];
+  const categoryColor = isTransfer ? semantic.accent : category?.color ?? semantic.accent;
 
   const typeLabel = isTransfer ? t('txDetail.typeTransfer') : isIncome ? t('txDetail.typeIncome') : t('txDetail.typeExpense');
   const feeText = currencySymbol + String(tx.fee);
