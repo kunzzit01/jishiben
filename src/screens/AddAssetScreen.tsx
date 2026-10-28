@@ -94,6 +94,17 @@ export default function AddAssetScreen({ route }: any) {
   const [selectedType, setSelectedType] = useState<AssetType>(editAsset?.type ?? 'cash');
   const [selectedCurrency, setSelectedCurrency] = useState(editAsset?.currency ?? currency);
 
+  // 账单日 / 还款日（仅信用卡）：原来这两个值只能靠默认值写进数据，界面无处可改
+  // （用户 2026-10-29：「我要怎么设置还款日期？」）。取值 1–28，避免小月不存在 29/30/31。
+  const [statementDay, setStatementDay] = useState<number>(editAsset?.statementDay ?? 1);
+  const [dueDay, setDueDay] = useState<number>(editAsset?.dueDay ?? 5);
+  const [daySheet, setDaySheet] = useState<'statement' | 'due' | null>(null);
+  // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
+  const [keypadHeight, setKeypadHeight] = useState(0);
+  const scrollRef = useRef<any>(null);
+  const limitYRef = useRef(0);
+  const availYRef = useRef(0);
+
   // ---------- 金额字段：点一下调出计算器键盘（跟"记一笔"同一套），键盘上直接算 ----------
   // 现金/银行卡填"起始余额"；信用卡填"信用额度"。点"完成"把求值结果落到提交值里并收起键盘
   const balanceExpr = useAmountExpression();
@@ -270,6 +281,9 @@ export default function AddAssetScreen({ route }: any) {
 
     if (isEdit && editAsset) {
       await updateAsset(editAsset.id, {
+        // 仅信用卡带账单日/还款日；类型切走后清空，避免残留
+        statementDay: isCredit ? statementDay : undefined,
+        dueDay: isCredit ? dueDay : undefined,
         name: name.trim(),
         icon: typeInfo?.icon ?? editAsset.icon,
         color: typeInfo?.color ?? editAsset.color,
@@ -281,6 +295,7 @@ export default function AddAssetScreen({ route }: any) {
       });
     } else {
       await addAsset({
+        ...(isCredit ? { statementDay, dueDay } : {}),
         name: name.trim(),
         icon: typeInfo!.icon,
         color: typeInfo!.color,
@@ -370,61 +385,150 @@ export default function AddAssetScreen({ route }: any) {
             paddingBottom: spacing.xxl,
           }}
         >
-        {/* 起始金额：第一焦点。整张卡片都是点按热区（标签、留白也包含在内），
-            点一下调出计算器键盘；键盘已开着时再点不会清掉未提交的算式（见 openAmountField 守卫） */}
-        <PressableScale
-          style={[styles.amountHero, amountField === 'balance' && styles.amountHeroActive]}
-          activeScale={0.98}
-          onPress={openAmountField}
-          testID="add-asset-limit"
-        >
-          <Text style={styles.amountLabel}>
-            {selectedType === 'credit' ? t('addTx.creditLimitLabel') : t('addTx.balanceLabel')}
-          </Text>
-          <View style={styles.amountRow}>
-            {/* 金额是主角（计划 A1 / 验收退回第 6 条）：amountEntry 档、右对齐、位数多时按档位降级；
-                币种只在下方"选择货币"框上显示，金额这里不再重复写一遍 */}
-            <CursorAmountText
-              containerStyle={styles.amountTextContainer}
-              style={[styles.amountText, ...(balanceIsMulti ? [styles.amountTextSmall] : [])]}
-              cursorStyle={styles.amountCursor}
-              display={amountField === 'balance' ? balanceExpr.displayValue : balanceValue.toFixed(2)}
-              enabled={amountField === 'balance' && !sysKeyboardVisible}
-              cursorFromEnd={balanceCursor}
-              onCursorChange={setBalanceCursor}
+        {/* 金额区（用户 2026-10-29 重排：原来信用卡是上下两张巨型卡，占满一屏且第二张抢主角）
+              信用卡 → 一张卡里并排两列「初始额度 / 现有可用」，点哪列编哪列，下面直接给「已用」，
+                       不用先填 A 再回想 B 是多少；其它类型保持原来的单张「起始余额」。 */}
+        {selectedType === 'credit' ? (
+          /* 信用卡金额区：**一张统一外框**，内部上下两个独立金额输入区。
+             样式全部复用原版「起始余额」：白底 + 1px hairline + 20 圆角 + 16 内边距、
+             标签 14/700 次要色在左上、金额 44/600 右对齐（右边缘 = 卡片内边距，不贴边）、
+             键盘绑定沿用同一套 CursorAmountText / amountField。
+             焦点只落在当前编辑的那一行（极浅主色底），不叠下划线、不加第二个选中效果。 */
+          <View style={styles.creditFrame}>
+            <PressableScale
+              style={styles.creditRow}
+              activeScale={0.99}
               onPress={openAmountField}
-            />
-          </View>
-        </PressableScale>
+              testID="add-asset-limit"
+            >
+              <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
+                {t('addTx.creditTotalLabel')}
+              </AppText>
+              <View style={styles.amountRow}>
+                <CursorAmountText
+                  containerStyle={styles.amountTextContainer}
+                  style={[styles.amountText, ...(balanceIsMulti ? [styles.amountTextSmall] : [])]}
+                  cursorStyle={styles.amountCursor}
+                  display={amountField === 'balance' ? balanceExpr.displayValue : formatMoney(balanceValue)}
+                  enabled={amountField === 'balance' && !sysKeyboardVisible}
+                  cursorFromEnd={balanceCursor}
+                  onCursorChange={setBalanceCursor}
+                  onPress={openAmountField}
+                />
+              </View>
+            </PressableScale>
 
-        {/* 信用卡第二个数值（用户 2026-10-29）：现在还剩下多少额度。
-            初始额度 − 现有额度 = 已用，保存时折算成 initialBalance，模型不变。 */}
-        {selectedType === 'credit' && (
+            <View style={styles.creditRowSeparator} />
+
+            <PressableScale
+              style={styles.creditRow}
+              activeScale={0.99}
+              onPress={openAvailableField}
+              testID="add-asset-available"
+            >
+              <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
+                {t('addTx.creditAvailableLabel')}
+              </AppText>
+              <View style={styles.amountRow}>
+                <CursorAmountText
+                  containerStyle={styles.amountTextContainer}
+                  style={styles.amountText}
+                  cursorStyle={styles.amountCursor}
+                  display={amountField === 'available' ? availableExpr.displayValue : formatMoney(availableValue)}
+                  enabled={amountField === 'available' && !sysKeyboardVisible}
+                  cursorFromEnd={availableCursor}
+                  onCursorChange={setAvailableCursor}
+                  onPress={openAvailableField}
+                />
+              </View>
+            </PressableScale>
+
+            <View style={styles.creditRowSeparator} />
+
+            {/* 底部辅助信息：已用额度（公式收进 ⓘ） */}
+            <View style={styles.creditUsedRow}>
+              <View style={styles.creditUsedLeft}>
+                <AppText variant="caption" color={semantic.textTertiary}>
+                  {t('addTx.creditUsedLabel')}
+                </AppText>
+                <PressableScale
+                  activeScale={0.9}
+                  hitSlop={8}
+                  onPress={() => dialog.alert({ title: t('addTx.creditUsedLabel'), message: t('addTx.creditUsedHint') })}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addTx.creditUsedLabel')}
+                  testID="add-asset-credit-used-info"
+                >
+                  <Ionicons name="information-circle-outline" size={16} color={semantic.textTertiary} />
+                </PressableScale>
+              </View>
+              <AppText variant="caption" color={semantic.textSecondary}>
+                {formatMoney(Math.max(0, balanceValue - availableValue))}
+              </AppText>
+            </View>
+          </View>
+        ) : (
           <PressableScale
-            style={[styles.amountHero, styles.amountHeroSecondary, amountField === 'available' && styles.amountHeroActive]}
+            style={[styles.amountHero, amountField === 'balance' && styles.amountHeroActive]}
             activeScale={0.98}
-            onPress={openAvailableField}
-            testID="add-asset-available"
+            onPress={openAmountField}
           >
-            <Text style={styles.amountLabel}>{t('addTx.creditAvailableLabel')}</Text>
+            <Text style={styles.amountLabel}>{t('addTx.balanceLabel')}</Text>
             <View style={styles.amountRow}>
               <CursorAmountText
                 containerStyle={styles.amountTextContainer}
-                style={[styles.amountText, ...(availableExpr.isMulti ? [styles.amountTextSmall] : [])]}
+                style={[styles.amountText, ...(balanceIsMulti ? [styles.amountTextSmall] : [])]}
                 cursorStyle={styles.amountCursor}
-                display={amountField === 'available' ? availableExpr.displayValue : availableValue.toFixed(2)}
-                enabled={amountField === 'available' && !sysKeyboardVisible}
-                cursorFromEnd={availableCursor}
-                onCursorChange={setAvailableCursor}
-                onPress={openAvailableField}
+                display={amountField === 'balance' ? balanceExpr.displayValue : balanceValue.toFixed(2)}
+                enabled={amountField === 'balance' && !sysKeyboardVisible}
+                cursorFromEnd={balanceCursor}
+                onCursorChange={setBalanceCursor}
+                onPress={openAmountField}
               />
             </View>
-            <AppText variant="caption" color={semantic.textTertiary} style={{ marginTop: 4 }}>
-              {t('addTx.creditAvailableHint', {
-                used: formatMoney(Math.max(0, balanceValue - availableValue)),
-              })}
-            </AppText>
           </PressableScale>
+        )}
+
+        {/* 账单日 / 还款日：两个等宽字段占满内容区，标签各自在上；选择器规格与「账户类型」完全一致 */}
+        {selectedType === 'credit' && (
+          <View style={styles.dayRows}>
+            <View style={styles.dayRowInner}>
+              <View style={styles.dayCol}>
+                <AppText variant="footnote" color={semantic.textSecondary} weight="600" style={styles.pickerLabel}>
+                  {t('asset.statementDayLabel')}
+                </AppText>
+                <PressableScale
+                  style={[styles.selectBox, daySheet === 'statement' && { borderColor: semantic.accentText }]}
+                  activeScale={0.98}
+                  onPress={() => setDaySheet('statement')}
+                  accessibilityRole="button"
+                  testID="add-asset-statement-day"
+                >
+                  <AppText variant="subhead" color={semantic.textPrimary} style={styles.selectBoxText}>
+                    {t('asset.perMonthDay', { day: statementDay })}
+                  </AppText>
+                  <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                </PressableScale>
+              </View>
+              <View style={styles.dayCol}>
+                <AppText variant="footnote" color={semantic.textSecondary} weight="600" style={styles.pickerLabel}>
+                  {t('asset.dueDayLabel')}
+                </AppText>
+                <PressableScale
+                  style={[styles.selectBox, daySheet === 'due' && { borderColor: semantic.accentText }]}
+                  activeScale={0.98}
+                  onPress={() => setDaySheet('due')}
+                  accessibilityRole="button"
+                  testID="add-asset-due-day"
+                >
+                  <AppText variant="subhead" color={semantic.textPrimary} style={styles.selectBoxText}>
+                    {t('asset.perMonthDay', { day: dueDay })}
+                  </AppText>
+                  <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                </PressableScale>
+              </View>
+            </View>
+          </View>
         )}
 
         {/* 账户名称 / 账户类型：左右 60% / 40%，类型是下拉选择框 */}
@@ -550,6 +654,33 @@ export default function AddAssetScreen({ route }: any) {
       {/* 币种抽屉：统一 BottomSheet（把手 + 遮罩 + 下拉收起 + 安全区都由组件负责）。
           ⚠ 挂在页面根（SafeAreaView）的最后一个子节点上，不能放进 ScrollView —— 组件按 absoluteFill
           铺满父容器，放进滚动容器里会跟着内容滚走 */}
+      {/* 账单日 / 还款日选择：1–28（避开小月没有 29–31 的坑） */}
+      <BottomSheet
+        visible={daySheet !== null}
+        onClose={() => setDaySheet(null)}
+        title={daySheet === 'due' ? t('asset.dueDayLabel') : t('asset.statementDayLabel')}
+        testID="add-asset-day-sheet"
+      >
+        <ScrollView style={{ maxHeight: sheetListMaxHeight }} showsVerticalScrollIndicator={false}>
+          {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => {
+            const active = (daySheet === 'due' ? dueDay : statementDay) === day;
+            return (
+              <ListRow
+                key={day}
+                title={t('asset.dayValue', { day })}
+                trailing={active ? <Ionicons name="checkmark" size={18} color={semantic.accentText} /> : undefined}
+                onPress={() => {
+                  if (daySheet === 'due') setDueDay(day);
+                  else setStatementDay(day);
+                  setDaySheet(null);
+                }}
+                testID={`add-asset-day-${day}`}
+              />
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
       {/* 类型抽屉：高度随内容自适应（BottomSheet 最高 85% 屏），列表超长时在抽屉内滚动，
           底部留「安全区 + 16」——6 档在 360×640 也能全部选到（验收退回 · 严重项） */}
       <BottomSheet
@@ -687,6 +818,92 @@ function makeStyles(
     amountHeroActive: { borderColor: semantic.accent },
     // 信用卡第二格：同款卡片但矮一档，视觉上仍以初始额度为主
     amountHeroSecondary: { marginTop: 12, paddingVertical: 12 },
+    // 信用卡金额卡：一张卡两列（初始额度 / 现有可用），比原来上下两张巨型卡省一屏
+    // 信用卡金额卡：白底 + 极浅蓝灰细边框（hairline）+ 20 圆角 + 极轻阴影；
+    // 焦点不用整卡描边，交给「当前列蓝色下划线」，避免整卡发亮。
+    creditCard: {
+      marginTop: spacing.md,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: semantic.hairline,
+      backgroundColor: semantic.surface,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.md,
+      shadowColor: '#000000',
+      shadowOpacity: 0.04,
+      shadowRadius: 2,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+    // 卡头：小图标 + 标题
+    creditCardHead: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, marginBottom: spacing.md },
+    // ==== 信用卡金额卡（上下两行）====
+    // 每一行：标签在上、输入区独占整行（左对齐），焦点只体现在该行的蓝色下划线。
+    // 卡内边距 16，两行之间 spacing.md，底部信息用 hairline 分隔，整卡随内容自然增高。
+    // 第二张金额卡与第一张之间留 12（与其它字段间距一致）
+    // 信用卡金额区：一张统一外框（与「起始余额」同色同圆角同内边距），内部两行独立输入
+    creditFrame: {
+      backgroundColor: colors.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    // 每行：标签在上、金额整行右对齐；焦点只用极浅主色底（不再叠加下划线/描边）
+    // 行内不加水平内边距：数字右边缘 = 卡片左右内边距（20），与图二的大留白一致
+    creditRow: { paddingVertical: spacing.md },
+    creditRowSeparator: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline },
+    creditField: { alignSelf: 'stretch' },
+    creditFieldGap: { marginTop: spacing.md },
+    // 金额输入框：与「账户类型 / 账户名称」同一族的框（1px hairline、10 圆角），
+    // 金额行：与钱包/现金那张「起始余额」完全同款 —— 无内框、大字号右对齐，
+    // 聚焦时只有闪烁光标，不再画任何下划线或描边（用户 2026-10-29 定版：信用卡要跟钱包一致）
+    creditValueRow: { alignSelf: 'stretch', alignItems: 'flex-end', paddingTop: spacing.xs },
+    creditValueUnderline: { paddingBottom: 2 },
+    creditFieldValue: { alignSelf: 'stretch', alignItems: 'flex-end' },
+    // 26–28 档：12,345,678.90 在 390 屏（内容宽 326）下仍完整可见（≈208px）
+    creditFieldText: {
+      fontSize: typography.amountEntry.fontSize,
+      lineHeight: typography.amountEntry.lineHeight,
+      fontWeight: typography.amountEntry.fontWeight,
+      letterSpacing: typography.amountEntry.letterSpacing,
+      fontVariant: ['tabular-nums'],
+      textAlign: 'right',
+    },
+    creditFieldCursor: { width: 2, height: typography.amountEntry.lineHeight, backgroundColor: semantic.accentText, marginLeft: 1 },
+    // 已用额度行：**不带任何上边框**（上方已有 creditRowSeparator，两条会叠成双线）
+    creditUsedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xs,
+    },
+    creditUsedLeft: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    // 账单日 / 还款日：两个等宽列，标签各自在控件上方
+    dayCol: { flex: 1, minWidth: 0 },
+    creditColLabel: { marginBottom: spacing.xs },
+    creditColLabelRight: { textAlign: 'right' },
+    creditValueBox: { alignSelf: 'stretch', paddingBottom: spacing.xs },
+    creditValueBoxActive: { borderBottomWidth: 2, borderBottomColor: semantic.accent },
+    creditAmountContainer: { alignSelf: 'stretch' },
+    creditAmountContainerRight: { alignSelf: 'stretch', alignItems: 'flex-end' },
+    // 字号走 typography.title1（28/700，数字用 lineHeight 而非 CJK 版），与「两列并列」的宽度兼容
+    creditAmountText: {
+      fontSize: typography.title1.fontSize,
+      lineHeight: typography.title1.lineHeight,
+      fontWeight: typography.title1.fontWeight,
+      letterSpacing: typography.title1.letterSpacing,
+      fontVariant: ['tabular-nums'],
+    },
+    creditAmountTextRight: { textAlign: 'right' },
+    creditAmountCursor: { width: 2, height: typography.title1.lineHeight, backgroundColor: semantic.accentText, marginLeft: 1 },
+    creditUsedLine: { marginTop: spacing.md },
+    // 账单日 / 还款日两行
+    dayRows: { marginTop: spacing.md, marginBottom: spacing.lg },
+    dayRowInner: { flexDirection: 'row', columnGap: 10 },
+    daySelect: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
     amountLabel: {
       fontSize: 14,
       fontWeight: '700',
@@ -720,10 +937,18 @@ function makeStyles(
       marginLeft: 2,
     },
     // 账户名称 / 账户类型：左右 55% / 45%
-    nameTypeRow: { flexDirection: 'column', gap: spacing.sm, marginBottom: spacing.md, zIndex: 10, elevation: 10 },
-    nameColumn: { width: '100%' },
+    // 账户名称 + 账户类型同一排（60% / 40%），与最初设计稿一致
+    nameTypeRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      columnGap: spacing.md,
+      marginBottom: spacing.md,
+      zIndex: 10,
+      elevation: 10,
+    },
+    nameColumn: { flex: 3, minWidth: 0 },
     // zIndex:类型下拉展开时高于全屏透明遮罩层,下拉行不会被遮罩盖住
-    typeColumn: { width: '100%', zIndex: 10, elevation: 10 },
+    typeColumn: { flex: 2, minWidth: 0, zIndex: 10, elevation: 10 },
     input: {
       backgroundColor: semantic.surface,
       borderRadius: 10,
