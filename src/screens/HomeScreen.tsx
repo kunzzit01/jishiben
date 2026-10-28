@@ -2154,7 +2154,8 @@ export default function HomeScreen({ navigation }: any) {
     const catIcon = (cat?.icon ?? UNCATEGORIZED_ICON) as IconName;
     const catColor = cat?.color ?? UNCATEGORIZED_COLOR;
     const assetName = item.assetId ? getAssetById(item.assetId)?.name : undefined;
-    const openEdit = () => navigation.navigate(ROUTES.ADD_TX, { editTransaction: item });
+    // 点一条账 → 先看只读详情；要改再在详情页点「编辑这笔」
+    const openDetail = () => navigation.navigate(ROUTES.TX_DETAIL, { transactionId: item.id });
     // 标题 = 备注（计划付款的 displayName 也当备注用）；两者都没有时标题落到类别名，
     // 这时副标题只显示账户、不再把类别写第二遍（验收小修：原来是「Dining / Dining · Maybank 储蓄」）。
     // 副标题固定是「类别 · 账户」拼接，把 categoryName 传空串即只剩账户
@@ -2174,7 +2175,7 @@ export default function HomeScreen({ navigation }: any) {
         kind={item.type === 'income' ? 'income' : 'expense'}
         flash={flash}
         isCardBottom={isCardBottom}
-        onPress={openEdit}
+        onPress={openDetail}
         testID={`tx-row-${item.id}`}
       />
     );
@@ -2542,7 +2543,7 @@ export default function HomeScreen({ navigation }: any) {
     (id: string) => {
       // 日历明细点一行 = 进编辑（与首页列表行同一个现有入口）
       const tx = ledgerTransactionsRef.current.find((x) => x.id === id);
-      if (tx) navigation.navigate(ROUTES.ADD_TX, { editTransaction: tx });
+      if (tx) navigation.navigate(ROUTES.TX_DETAIL, { transactionId: tx.id });
     },
     [navigation]
   );
@@ -3398,7 +3399,7 @@ export default function HomeScreen({ navigation }: any) {
         onPick={(id) => {
           closeSheet();
           const tx = transactions.find((item) => item.id === id);
-          if (tx) navigation.navigate(ROUTES.ADD_TX, { editTransaction: tx });
+          if (tx) navigation.navigate(ROUTES.TX_DETAIL, { transactionId: tx.id });
         }}
         testID="home-search-sheet"
       />
@@ -3413,7 +3414,7 @@ export default function HomeScreen({ navigation }: any) {
         onPick={(id) => {
           closeSheet();
           const tx = transactions.find((item) => item.id === id);
-          if (tx) navigation.navigate(ROUTES.ADD_TX, { editTransaction: tx });
+          if (tx) navigation.navigate(ROUTES.TX_DETAIL, { transactionId: tx.id });
         }}
         testID="home-all-tx-sheet"
       />

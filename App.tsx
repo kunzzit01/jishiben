@@ -70,6 +70,7 @@ import { lightColors, darkColors } from './src/theme/theme';
 import { hapticLight, hapticSelection } from './src/utils/haptics';
 import HomeScreen from './src/screens/HomeScreen';
 import AddTransactionScreen from './src/screens/AddTransactionScreen';
+import TransactionDetailScreen from './src/screens/TransactionDetailScreen';
 import ReportScreen from './src/screens/ReportScreen';
 import AssetScreen from './src/screens/AssetScreen';
 import AddAssetScreen from './src/screens/AddAssetScreen';
@@ -114,6 +115,7 @@ function HomeStack() {
     >
       <HomeStackNav.Screen name="首页主页" component={HomeScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="记一笔" component={AddTransactionScreen} options={{ headerShown: false }} />
+      <HomeStackNav.Screen name="账单详情" component={TransactionDetailScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
       <HomeStackNav.Screen name="类别分类" component={CategoryManagementScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }} />
       {/* 跟 ProfileStack 里的"开设账本"是同一个组件注册两次：这样从首页进来 push 到的是
           HomeStack 自己的栈，系统返回箭头 goBack() 天然回首页；从设置项进来同理天然回设置 */}

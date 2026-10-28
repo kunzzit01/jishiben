@@ -16,6 +16,8 @@ export const ROUTES = {
   // HomeStack
   HOME: '首页主页',
   ADD_TX: '记一笔',
+  /** 账单详情（只读）：点列表里的一条账先进这里，再决定要不要编辑 */
+  TX_DETAIL: '账单详情',
   CATEGORY_MGMT: '类别分类',
   LEDGER: '开设账本',
   ABOUT: '关于应用',
@@ -56,6 +58,8 @@ export type TransactionLike = {
 /** HomeStack：首页 Tab 里的堆栈 */
 export type HomeStackParamList = {
   首页主页: undefined;
+  // 账单详情（只读）：只带 id，详情页自己从 context 取最新数据，编辑后返回自动同步
+  账单详情: { transactionId: string };
   记一笔: {
     editTransaction?: TransactionLike;
     presetCategoryId?: string;
