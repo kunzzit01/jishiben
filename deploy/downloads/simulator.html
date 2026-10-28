@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>记账 · 手机模拟器</title>
+<style>
+  :root{--bg:#0b1220;--panel:#121b2c;--line:#22304a;--fg:#e9eef7;--dim:#93a3bd;--acc:#1677ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#16233a,transparent),var(--bg);color:var(--fg);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+       min-height:100vh;padding:26px 30px 44px}
+  header{display:flex;gap:20px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;margin-bottom:22px}
+  h1{margin:0 0 6px;font-size:21px;letter-spacing:-.01em}
+  p{margin:0;color:var(--dim);max-width:62ch;font-size:13px}
+  .ctl{display:flex;gap:8px;flex-wrap:wrap}
+  button,a.btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px;
+               padding:8px 14px;border-radius:999px;cursor:pointer;text-decoration:none;transition:.18s}
+  button:hover,a.btn:hover{border-color:var(--acc);transform:translateY(-1px)}
+  button.pri{background:var(--acc);border-color:transparent;color:#fff}
+  .stage{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:44px;justify-items:center}
+  .cap{display:flex;align-items:center;gap:9px;font-size:13px;margin-bottom:12px}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .dot.ios{background:var(--acc)} .dot.and{background:#34a853}
+  .cap b{font-weight:600}
+  .meta{color:var(--dim);font-variant-numeric:tabular-nums}
+  .shell{position:relative;background:linear-gradient(160deg,#2b303a,#14161c 45%,#23262e);box-shadow:0 28px 64px -28px rgba(0,0,0,.8)}
+  .shell.ios{border-radius:58px;padding:12px;padding-top:42px}
+  .shell.and{border-radius:44px;padding:10px}
+  .screen{position:relative;overflow:hidden;background:#000}
+  .ios .screen{border-radius:48px}
+  .and .screen{border-radius:36px}
+  iframe{display:block;border:0;transform-origin:top left;background:#000}
+  .island{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:96px;height:20px;border-radius:11px;background:#05070c;z-index:3}
+  .punch{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:11px;height:11px;border-radius:50%;background:#05070c;z-index:3}
+  footer{margin-top:26px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--dim);font-size:12px}
+  code{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:1px 5px;font-size:12px}
+  @media(max-width:980px){.stage{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>记账 · 手机模拟器</h1>
+    <p>两个机身壳里跑的是<b>同一份线上 App</b>（React Native Web 构建）：左边 iPhone 15 视口 390×844，右边 Pixel 7 视口 412×915。
+       可以直接点、滚、登录、切账本 —— 里面的数据和正式版完全一致。原生安卓请装 APK。</p>
+  </div>
+  <div class="ctl">
+    <button class="pri" id="reload">重新加载两屏</button>
+    <button id="zoom">缩放：82%</button>
+    <a class="btn" href="https://187.127.125.136/" target="_blank" rel="noreferrer">新标签打开</a>
+  </div>
+</header>
+
+<div class="stage">
+  <section>
+    <div class="cap"><span class="dot ios"></span><b>iPhone 15</b><span class="meta">390 × 844 · iOS 视口</span></div>
+    <div class="shell ios" data-p="ios"><div class="island"></div>
+      <div class="screen"><iframe title="iPhone" src="https://187.127.125.136/"></iframe></div>
+    </div>
+  </section>
+  <section>
+    <div class="cap"><span class="dot and"></span><b>Pixel 7</b><span class="meta">412 × 915 · Android 视口</span></div>
+    <div class="shell and" data-p="and"><div class="punch"></div>
+      <div class="screen"><iframe title="Pixel" src="https://187.127.125.136/"></iframe></div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <span id="st">就绪</span><span>·</span>
+  <span>两屏独立会话，可以一屏登录 A 账本、另一屏切到 B 账本做对比。</span>
+</footer>
+
+<script>
+(function(){
+  const S = { ios:{w:390,h:844,pad:12}, and:{w:412,h:915,pad:10} };
+  const Z = [0.7,0.82,0.94,1];
+  let zi = 1;
+  function apply(){
+    const z = Z[zi];
+    document.querySelectorAll('.shell').forEach(sh=>{
+      const k = sh.dataset.p, d = S[k];
+      const f = sh.querySelector('iframe'), sc = sh.querySelector('.screen');
+      f.style.width = d.w+'px'; f.style.height = d.h+'px'; f.style.transform = 'scale('+z+')';
+      sc.style.width = Math.round(d.w*z)+'px'; sc.style.height = Math.round(d.h*z)+'px';
+      sh.style.width = Math.round(d.w*z + d.pad*2)+'px';
+    });
+    document.getElementById('zoom').textContent = '缩放：'+Math.round(z*100)+'%';
+  }
+  document.getElementById('zoom').onclick = ()=>{ zi=(zi+1)%Z.length; apply(); };
+  document.getElementById('reload').onclick = ()=>{
+    const t = Date.now();
+    document.querySelectorAll('iframe').forEach((f,i)=>{ f.src='https://187.127.125.136/?r='+t+i; });
+    document.getElementById('st').textContent = '已重新加载 · '+new Date().toLocaleTimeString();
+  };
+  apply();
+  document.getElementById('st').textContent = '两屏均加载 https://187.127.125.136/';
+})();
+</script>
+</body>
+</html>
