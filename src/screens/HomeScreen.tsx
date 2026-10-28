@@ -528,7 +528,8 @@ type TxRowProps = {
   /** 行顶发丝线：分组头去掉后，跨天相邻的行也要有分隔（整列表第一行除外） */
   showDivider?: boolean;
   amount: number;
-  kind: 'expense' | 'income';
+  /** 'plain' = 转账这类「只是搬钱」的行：不带正负号、用中性主文字色 */
+  kind: 'expense' | 'income' | 'plain';
   /** 命中「新增后闪一下」：淡紫底 */
   flash?: boolean;
   /** 列表卡的最后一行：26 下圆角 + 4pt 卡底边 */
@@ -613,7 +614,7 @@ function TxRow({
         <AppText
           variant="body"
           weight="700"
-          color={kind === 'income' ? palette.income : palette.expense}
+          color={kind === 'income' ? palette.income : kind === 'plain' ? palette.textPrimary : palette.expense}
           numberOfLines={1}
           ellipsizeMode="clip"
           style={rowStyles.amountText}
@@ -1772,7 +1773,11 @@ export default function HomeScreen({ navigation }: any) {
   // 所以这个回调只在资产 / 全局货币真变时才换身份 —— 它进 dayGroups 的依赖数组，
   // 身份乱换会让 sections 重建、列表整表重渲染（验收退回的性能项：切 Tab / 切币种卡）
   const txCurrencyOf = useCallback(
-    (t: { assetId?: string }) => (t.assetId ? getAssetById(t.assetId)?.currency : undefined) ?? currency,
+    (t: { assetId?: string; fromAssetId?: string }) => {
+      // 转账没有 assetId，归属币种看「转出账户」；都没有才回落到全局币种
+      const assetId = t.assetId ?? t.fromAssetId;
+      return (assetId ? getAssetById(assetId)?.currency : undefined) ?? currency;
+    },
     [getAssetById, currency]
   );
   // 本月支出按币种一次算出（真列表头、预算卡各页、邻页预览共用；每笔账单只走一遍）
@@ -1918,8 +1923,9 @@ export default function HomeScreen({ navigation }: any) {
   // 先按天分好（倒序、剔转账），各币种只在这上面再过滤，不再每个币种重扫全部账单。
   const txByDate = useMemo(() => {
     const byDate = new Map<string, typeof ledgerTransactions>();
+    // 转账也要进列表（用户 2026-10-28 反馈「转账的账目不显示」）：
+    // 它只影响「显示」，不影响当日合计 —— 下面的支出/收入合计本来就按 type 过滤，不会被转账污染。
     ledgerTransactions.forEach((t) => {
-      if (t.type === 'transfer') return;
       const list = byDate.get(t.date) ?? [];
       list.push(t);
       byDate.set(t.date, list);
@@ -2163,16 +2169,22 @@ export default function HomeScreen({ navigation }: any) {
     const hasOwnTitle = ownTitle.length > 0;
     // 列表卡底边 = 末组最后一行：26 下圆角 + 4pt 卡底边（稿里卡内 padding 下 4）
     const isCardBottom = !!section.isLast && index === (section.data?.length ?? 0) - 1;
+    // 转账：取「转出 → 转入」两个账户名做副标题，图标用换向箭头，金额走中性色（不带正负号）
+    const isTransfer = item.type === 'transfer';
+    const fromName = item.fromAssetId ? getAssetById(item.fromAssetId)?.name : undefined;
+    const toName = item.toAssetId ? getAssetById(item.toAssetId)?.name : undefined;
+    const transferSub = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
+
     return (
       <TxRowMemo
-        title={hasOwnTitle ? ownTitle : catName}
-        categoryName={hasOwnTitle ? catName : ''}
-        categoryIcon={catIcon}
-        categoryColor={catColor}
-        accountName={assetName}
+        title={isTransfer ? ownTitle || t('txDetail.typeTransfer') : hasOwnTitle ? ownTitle : catName}
+        categoryName={isTransfer ? '' : hasOwnTitle ? catName : ''}
+        categoryIcon={isTransfer ? 'swap-horizontal' : catIcon}
+        categoryColor={isTransfer ? palette.brand : catColor}
+        accountName={isTransfer ? transferSub : assetName}
         showDivider={index !== 0}
         amount={item.amount}
-        kind={item.type === 'income' ? 'income' : 'expense'}
+        kind={isTransfer ? 'plain' : item.type === 'income' ? 'income' : 'expense'}
         flash={flash}
         isCardBottom={isCardBottom}
         onPress={openDetail}

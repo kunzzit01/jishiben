@@ -320,7 +320,7 @@ const CATEGORY_ORDER_KEY = '@jizhang/categoryOrder';
 const RECENT_CATEGORY_HISTORY_LIMIT = Infinity;
 
 export default function AddTransactionScreen({ navigation, route }: any) {
-  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan } =
+  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan } =
     useApp();
   const insets = useSafeAreaInsets();
   const { colors, isDark, semantic, spacing, layout, radius } = useTheme();
@@ -429,10 +429,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   }, [defaultAsset?.id]);
 
   // 转账/兑换专用状态——"转出"账户也带默认值（通常就是平时最常用那张），"转入"留给用户自己选
-  const [fromAssetId, setFromAssetId] = useState<string | null>(defaultAsset?.id ?? null);
-  const [toAssetId, setToAssetId] = useState<string | null>(null);
-  const [exchangeRate, setExchangeRate] = useState('');
-  const [fee, setFee] = useState('');
+  // 转账编辑：账户 / 汇率 / 手续费从这笔记录回填（用户 2026-10-28：转账也要能编辑，不再「删了重记」）
+  const editTransfer = editTransaction?.type === 'transfer' ? editTransaction : undefined;
+  const [fromAssetId, setFromAssetId] = useState<string | null>(editTransfer?.fromAssetId ?? defaultAsset?.id ?? null);
+  const [toAssetId, setToAssetId] = useState<string | null>(editTransfer?.toAssetId ?? null);
+  const [exchangeRate, setExchangeRate] = useState(editTransfer?.exchangeRate ? String(editTransfer.exchangeRate) : '');
+  const [fee, setFee] = useState(editTransfer?.fee ? String(editTransfer.fee) : '');
   // 转账/兑换的所有金额字段统一使用自绘计算器：金额、汇率、手续费。
   // 汇率跟手续费一样默认空（显示 0.00），不预填 1.00——不然每次都要先删掉默认值才能输入
   const rateExpr = useAmountExpression(undefined);
@@ -972,10 +974,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const showRateField = isExchange || isCrossCurrency;
 
   useEffect(() => {
-    if (isEditing && editTransaction?.type === 'transfer') {
-      dialog.alert({ title: t('addTx.transferEditUnsupported'), message: t('addTx.transferEditUnsupportedMsg') });
-      navigation?.goBack();
-    }
     if (presetCategoryId) {
       setCategoryId(presetCategoryId);
       setStep('detail');
@@ -1552,23 +1550,40 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     const feeValue = options?.feeOverride ?? (parseFloat(fee) || 0);
     // 备注同下面这行一起搬进了键盘面板，小票(收据)现在转账/兑换也能附了——
     // 如果 addTransfer 的类型定义里还没有 receiptUri 字段，需要先在那边补上
-    await addTransfer({
-      fromAssetId,
-      toAssetId,
-      amount: value,
-      exchangeRate: rate,
-      fee: feeValue,
-      date,
-      note,
-      receiptUri: receiptUri ?? undefined,
-    });
+    if (editTransfer) {
+      // 编辑既有转账：原地更新（含手续费伴随行），不再新增一笔
+      await updateTransfer({
+        id: editTransfer.id,
+        fromAssetId,
+        toAssetId,
+        amount: value,
+        exchangeRate: rate,
+        fee: feeValue,
+        date,
+        note,
+        receiptUri: receiptUri ?? undefined,
+      });
+    } else {
+      await addTransfer({
+        fromAssetId,
+        toAssetId,
+        amount: value,
+        exchangeRate: rate,
+        fee: feeValue,
+        date,
+        note,
+        receiptUri: receiptUri ?? undefined,
+      });
+    }
     // T17：success 震动 + 300ms 勾选动画，然后照原逻辑（清表单；非长按再回首页）
     hapticSuccess();
     playSaveFlashThen(() => {
       resetAll();
-      // 长按"完成"＝保存后继续记下一笔，留在本页；普通点击才退出到首页
+      // 长按"完成"＝保存后继续记下一笔，留在本页；普通点击才退出
       if (!options?.continueRecording) {
-        navigation?.navigate(ROUTES.TAB_HOME);
+        // 编辑态：回上一页（账单详情），那里会读到更新后的数据；新建态才回首页
+        if (editTransfer) navigation?.goBack();
+        else navigation?.navigate(ROUTES.TAB_HOME);
       }
     });
     return true;

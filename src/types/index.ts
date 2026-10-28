@@ -38,6 +38,8 @@ export interface Transaction {
   exchangeRate?: number;
   convertedAmount?: number;
   fee?: number;
+  /** 手续费伴随行指回主转账的 id（转账编辑时用它精确找到并重建这条手续费） */
+  feeForTxId?: string;
 }
 
 export interface Budget {

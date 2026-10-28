@@ -269,6 +269,21 @@ interface AppContextValue {
     note: string;
     receiptUri?: string;
   }) => Promise<void>;
+  /**
+   * 编辑既有转账（用户 2026-10-28 反馈「转账记录不能编辑，只能删了重记」）。
+   * 只改这一笔转账本体 + 它的手续费伴随行，账户余额由 getAssetBalance 现算，不用手工调。
+   */
+  updateTransfer: (p: {
+    id: string;
+    fromAssetId: string;
+    toAssetId: string;
+    amount: number;
+    exchangeRate: number;
+    fee: number;
+    date: string;
+    note: string;
+    receiptUri?: string;
+  }) => Promise<void>;
   /** 重新从 AsyncStorage 读取全部本地数据（云同步写回后自动调用；也可手动刷新） */
   reloadFromStorage: () => Promise<void>;
 }
@@ -852,10 +867,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
         note: `转账手续费${fromAsset ? `（${fromAsset.name}）` : ''}`,
         createdAt: Date.now() + 1,
         ledgerId: effectiveActiveLedgerId,
+        feeForTxId: transferTx.id,
       });
     }
 
     setTransactions((prev) => [...newTxs, ...prev]);
+  };
+
+  const updateTransfer: AppContextValue['updateTransfer'] = async ({
+    id,
+    fromAssetId,
+    toAssetId,
+    amount,
+    exchangeRate,
+    fee,
+    date,
+    note,
+    receiptUri,
+  }) => {
+    const convertedAmount = amount * exchangeRate;
+    setTransactions((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (!target) return prev;
+      // 1) 转账本体：字段原样覆盖（id / type / ledgerId / createdAt 不动）
+      const next = prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              fromAssetId,
+              toAssetId,
+              amount,
+              exchangeRate,
+              convertedAmount,
+              fee,
+              date,
+              note,
+              receiptUri,
+            }
+          : t
+      );
+      // 2) 手续费伴随行：先按 feeForTxId 精确删掉旧的，再按新手续费重建一条
+      const withoutOldFee = next.filter((t) => t.feeForTxId !== id);
+      if (fee <= 0) return withoutOldFee;
+      const fromAsset = assets.find((a) => a.id === fromAssetId);
+      return [
+        {
+          id: genId(),
+          amount: fee,
+          categoryId: FEE_CATEGORY_ID,
+          type: 'expense' as const,
+          date,
+          note: `转账手续费${fromAsset ? `（${fromAsset.name}）` : ''}`,
+          createdAt: Date.now(),
+          ledgerId: target.ledgerId,
+          feeForTxId: id,
+        },
+        ...withoutOldFee,
+      ];
+    });
   };
 
   // ── 财务规划:计划付款 CRUD ──
@@ -973,6 +1042,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        updateTransfer,
         addCategory,
         addCategoryGroup,
         deleteCategoryGroup,
