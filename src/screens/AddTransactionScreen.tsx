@@ -898,7 +898,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
    *  （顶距 8 = 选中两层外圈向外溢出的 8，外圈不占布局但必须有地方露出来；
    *   与 catCell / catCellLabel / catGridContent 样式同步；两行标签的格子自然变高，网格可滚动） */
   const CAT_CELL_ROW_HEIGHT = 74;
-  const gridVisibleRows = gridH == null ? null : Math.max(2, Math.floor(gridH / CAT_CELL_ROW_HEIGHT));
+  // 只铺「完整放得下」的行数：以前 Math.max(2, …) 在小屏/矮屏上会强行塞两行，
+  // 那两行塞不进可见高度 → 网格出现可滚动溢出（用户反馈看到 overflow 迹象）。
+  // 现在最少 1 行，剩下的类别由末尾「全部」磁贴进完整列表，功能不丢。
+  const gridVisibleRows =
+    gridH == null ? null : Math.max(1, Math.min(3, Math.floor(gridH / CAT_CELL_ROW_HEIGHT)));
   const gridMaxCount = gridVisibleRows == null ? null : gridVisibleRows * gridColumns - 1;
   // ---------- 网格顺序冻结（T15 修正）----------
   // 进入页面 / 切换支出·收入 / 列表数据落地（catListsGen）/ 保存后重进页面（resetAll）时重建一次；

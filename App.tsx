@@ -682,6 +682,22 @@ function AppContent() {
 
 installCrashLogger();
 
+// Web 构建里滚动条一律隐藏：这是手机 App 的界面，出现滚动条就是「有内容溢出」的暗示
+// （用户 2026-10-28 反馈类别网格区域看到 overflow 迹象）。
+// react-native-web 的 showsVerticalScrollIndicator={false} 只写 scrollbar-width，
+// WebKit/Chrome 的 ::-webkit-scrollbar 不会跟着消失，所以这里补一条全局样式。
+function installWebScrollbarHiding(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('jz-hide-scrollbars')) return;
+  const style = document.createElement('style');
+  style.id = 'jz-hide-scrollbars';
+  style.textContent =
+    '*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}' +
+    '*{scrollbar-width:none!important;-ms-overflow-style:none!important}';
+  document.head.appendChild(style);
+}
+installWebScrollbarHiding();
+
 export default function App() {
   // ⚠ 组件预览页开关（仅 __DEV__ + web + ?gallery=1；后续批次回归测试用，T32 清理时删）
   const galleryMode =
