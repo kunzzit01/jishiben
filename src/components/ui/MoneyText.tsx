@@ -72,6 +72,8 @@ const HERO_PREFIX_RATIO = 0.414;
 // 尾数（小数段）与整数段同大小（2026-10-29 用户要求「尾数的大小要和前面的数字一样」）。
 // 原值 0.483（整数 40 配小数 22）；改成 1 后小数段直接沿用当前档的字号、行高与字距。
 const HERO_DECIMALS_RATIO = 1;
+/** Hero 等比缩小的下限（dp）：19 位金额在 360 屏约剩 26dp，此下限只为拦数据异常值 */
+const HERO_MIN_FIT_SIZE = 14;
 const HERO_LINE_RATIO = 1.103;
 const HERO_LETTER_RATIO = -0.0414;
 /** RM 与整数之间的间距（稿：4） */
@@ -535,15 +537,32 @@ export function MoneyText({
   // ⚠ 换文本时**不清空**基准宽：清空会让 heroTier 在重测到之前恒为 0（掉回最大档），
   //   而金额滚动 / 逐位滚动每帧都在换文本 → 档位逐帧 0 → 1 → 0 来回跳，行高跟着跳。
   //   隐藏测量层随文本重渲、同一帧就会把新基准宽量回来，保留旧值只是「最多一帧略偏」。
-  const heroTier = useMemo(() => {
+  /* Hero 连续等比缩放（2026-10-29 用户规格）：
+     以「heroSize 下整串的实测自然宽」为基准，可用宽不足时**整串一起**按比例缩，
+     不是分段降档、不单独缩小数、不转 K/M。同一比例作用于整数 / 小数点 / 小数 / 后缀，
+     字号、字重、颜色、基线因此天然一致；行高固定用 heroSize 的档位 → 金额行高度稳定。
+     还没量到自然宽时先用 em 估算兜底，避免「先按最大字号画出去、下一帧再跳小」。 */
+  const heroEstNaturalWidth = useMemo(() => {
     if (!hero) return 0;
-    if (heroBaseWidth === null || availableWidth <= 0 || heroSize <= 0) return 0;
-    for (let i = 0; i < ladder.length; i++) {
-      const size = ladder[i] ?? heroSize;
-      if (heroBaseWidth * (size / heroSize) <= availableWidth + 0.5) return i;
-    }
-    return -1; // 四档全部放不下 → 才走紧凑格式
-  }, [hero, heroBaseWidth, availableWidth, ladder, heroSize]);
+    const parts = splitHeroParts(fullText);
+    const em =
+      estimateEm(parts.prefix) * HERO_PREFIX_RATIO +
+      estimateEm(parts.int) +
+      (estimateEm(parts.decimals) + estimateEm(parts.suffix)) * HERO_DECIMALS_RATIO;
+    return Math.ceil(em * heroSize * 1.06);
+  }, [hero, fullText, heroSize]);
+  const heroNaturalWidth = heroBaseWidth ?? heroEstNaturalWidth;
+  const heroFitSize = useMemo(() => {
+    if (!hero || heroSize <= 0) return heroSize;
+    if (heroNaturalWidth <= 0 || availableWidth <= 0) return heroSize;
+    const scale = availableWidth / heroNaturalWidth;
+    // 放得下：沿用默认字号，绝不缩
+    if (scale >= 1) return heroSize;
+    // 缩放态：向下取整 + 0.99 余量。线性等比模型忽略了「逐字取整」误差，
+    // 长串累计约 1% —— 实测 700,030,000.00 @412 会稳定溢 4px（330.1 vs 326），
+    // 两者一起扣掉后落在槽内且不引入可见跳变。
+    return Math.max(HERO_MIN_FIT_SIZE, Math.floor(heroSize * scale * 0.99));
+  }, [hero, heroSize, heroNaturalWidth, availableWidth]);
 
   // ── 选文本 + 选档（顺序很重要：先按完整金额选，放不下才退紧凑格式） ──
   // 字距总贡献（px，与字号无关）：display 档 −0.8 × 26 字符 ≈ −21px，不能忽略
@@ -568,7 +587,7 @@ export function MoneyText({
   // 用户验收退回「全 App 金额一律两位小数」（日历除外，它是显式传 compact 的那一个）。
   const compactWorthwhile = Math.abs(value) >= 1000;
   const useCompact = hero
-    ? compactFallback && !hidden && compactWorthwhile && heroBaseWidth !== null && availableWidth > 0 && heroTier < 0
+    ? false // Hero 永不转 K/M（用户规格：金额必须完整显示，靠整串等比缩小适配）
     : compactFallback &&
       !hidden &&
       compactWorthwhile &&
@@ -582,15 +601,11 @@ export function MoneyText({
   //   （320 视口 15 位金额实测：40 号内容 440px / 预算 256px）。停在地板是「尽力显示」，
   //   地板仍放不下再交给 compactFallback（首页金额槽已打开）。
   const tier = hero
-    ? useCompact
-      ? 0
-      : heroTier < 0
-        ? ladder.length - 1
-        : heroTier
+    ? 0
     : useCompact
       ? Math.max(0, tierFitting(estimateEm(shownText), token.letterSpacing * shownText.length, ladder, availableWidth))
       : Math.max(0, fullTier, digitTier(moneyIntDigits(fullText)));
-  const fontSize = ladder[Math.min(tier, ladder.length - 1)] ?? token.fontSize;
+  const fontSize = hero ? heroFitSize : ladder[Math.min(tier, ladder.length - 1)] ?? token.fontSize;
   const lineHeight = Math.round((token.lineHeight / token.fontSize) * fontSize);
   // V2.2c：≥28 号的大金额字距 −2%（40 号 = −0.8，与 display 令牌同值）；Hero 走自己的 −4.14%
   const largeLetterSpacing =
@@ -603,11 +618,15 @@ export function MoneyText({
       : { fontSize, lineHeight, letterSpacing: largeLetterSpacing };
 
   // Hero 渲染尺寸：各部件都从**当前档**（可能是降级后的 50/42/34）派生，保证整串等比缩放
-  const heroPrefixSize = Math.round(fontSize * HERO_PREFIX_RATIO);
+  // Hero 的前缀只可能是正负号（币种码在卡头胶囊里），必须与整数同大小；
+  // 非 Hero 的 RM 前缀仍是小一号的稿面规格
+  const heroPrefixSize = hero ? Math.round(fontSize) : Math.round(fontSize * HERO_PREFIX_RATIO);
   const heroDecimalsSize =
     heroDecimalSize != null ? Math.round(heroDecimalSize * (fontSize / heroSize)) : Math.round(fontSize * HERO_DECIMALS_RATIO);
   const heroLetterSpacing = Math.round(fontSize * (heroLetterRatio ?? HERO_LETTER_RATIO) * 10) / 10;
-  const heroLineHeight = Math.round(fontSize * HERO_LINE_RATIO);
+  // 行高按基准档（heroSize）算，不随缩放变：金额缩小后行盒高度不变，
+  // 预算行不会被顶下去（用户规格：保持金额所在行高度稳定）
+  const heroLineHeight = Math.round(heroSize * HERO_LINE_RATIO);
 
   /* -------------------------------------------------- 布局 / 文本样式拆分 */
 
@@ -766,7 +785,7 @@ export function MoneyText({
               weight={heroDecimalWeight ?? '300'}
               color="transparent"
               numberOfLines={1}
-              style={{ fontSize: Math.round(heroSize * HERO_PREFIX_RATIO), lineHeight: Math.round(heroSize * HERO_PREFIX_RATIO * 1.15), marginRight: HERO_PREFIX_GAP }}
+              style={{ fontSize: heroSize, lineHeight: Math.round(heroSize * HERO_LINE_RATIO), letterSpacing: Math.round(heroSize * HERO_LETTER_RATIO * 10) / 10, marginRight: HERO_PREFIX_GAP }}
             >
               {heroPartsFull.prefix}
             </AppText>
@@ -821,8 +840,9 @@ export function MoneyText({
     };
     const heroPrefixStyle: TextStyle = {
       fontSize: heroPrefixSize,
-      lineHeight: Math.round(heroPrefixSize * 1.15),
-      opacity: 0.8,
+      lineHeight: heroLineHeight,
+      letterSpacing: heroLetterSpacing,
+      opacity: 1,
       marginRight: HERO_PREFIX_GAP,
     };
     // 尾数与整数同大小：行高/字距也取整数的值，否则 baseline 会错位；
@@ -843,7 +863,7 @@ export function MoneyText({
       >
         <View style={[styles.row, styles.rowNatural]} onLayout={onNaturalLayout}>
         {heroParts.prefix ? (
-          <AppText variant={variant} weight="300" color={resolvedColor} style={[heroPrefixStyle, cellTextStyle]} numberOfLines={1}>
+          <AppText variant={variant} weight={heroIntWeight} color={resolvedColor} style={[heroPrefixStyle, cellTextStyle]} numberOfLines={1}>
             {heroParts.prefix}
           </AppText>
         ) : null}

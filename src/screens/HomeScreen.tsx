@@ -71,6 +71,8 @@ const HERO_AMOUNT_SIZE = 43;
 const HERO_AMOUNT_LINE = 64;
 /** Hero 金额行的最小行盒高（= MoneyText hero 行高比 1.103 × 40 取整）：降档时行高不再变，页面高度恒定 */
 const HERO_AMOUNT_MIN_H = 47;
+/** 金额槽左右内缩（占卡宽的比例）：槽样式与 MoneyText 的判宽共用同一常量，避免两处漂移 */
+const HERO_AMOUNT_INSET = 0.088;
 /** 预算槽定高（页内第二行）：标签 20 + 明细 16 + 间距 4 + 条 6 = 46，已设 / 未设两态等高 */
 const HERO_BUDGET_SLOT_H = 46;
 /** 金额行的「眼睛」占位宽（眼睛 36 + 间距 10，V2 稿 1:1）：金额盒子的宽度上限 = 行宽 − 它 */
@@ -1213,6 +1215,9 @@ const HeroCardPage = React.memo(function HeroCardPage({
   // 安卓原生抛 `IllegalArgumentException: FontSize should be a positive value` → App 直接闪退
   // （Web 上 0 只是不显示，所以浏览器永远复现不出来）。统一夹下限。
   const safeW = Number.isFinite(cardW) && cardW > 0 ? cardW : 0;
+  // 金额槽左右各内缩 8.8%（卡内边距）。判宽必须与真实槽宽同源，否则 MoneyText 会以为
+  // 还有 24% 的空位 → 长金额按大字号画出去，被卡片边缘裁掉（用户截图 700,030,000.00）
+  const amountSlotWidth = width * (1 - 2 * HERO_AMOUNT_INSET);
   const scaled = (ratio: number, min: number): number => Math.max(min, Math.round(safeW * ratio));
   const t = useT();
   // 金额区自己的 tap：**只包金额槽，不含预算槽**。以前这颗 tap 挂在整条金额行上，
@@ -1231,15 +1236,15 @@ const HeroCardPage = React.memo(function HeroCardPage({
   // 条 ratio 固定满格 + tone 固定 danger；读屏走 a11y（不含负号）
   const pct = formatBudgetPct(expense, budget, t);
   return (
-    <View style={{ width, height: cardH }}>
+    <View style={{ width, height: cardH, overflow: 'hidden' }}>
       {/* 金额槽：判档宽度 = 父级页宽（定值）—— MoneyText 自身盒宽恒等于内容宽，
           用它判档会形成逐帧反馈环（长金额时整页上下抖动）；minHeight 保住降档时的行高 */}
       <GestureDetector gesture={amountTap}>
         <View
           style={{
             position: 'absolute',
-            left: cardW * 0.088,
-            right: cardW * 0.088,
+            left: cardW * HERO_AMOUNT_INSET,
+            right: cardW * HERO_AMOUNT_INSET,
             top: cardH * 0.3,
           }}
         >
@@ -1261,9 +1266,9 @@ const HeroCardPage = React.memo(function HeroCardPage({
               value={total}
               kind="plain"
               currency={code}
-              /* 判档宽度 = 父级页宽（定值）：MoneyText 自身盒宽恒等于内容宽，用它判档会形成
-                 逐帧反馈环（长金额时整页上下抖动） */
-              availableWidth={width}
+              /* 判宽 = 金额槽的真实可用宽（页宽扣掉槽的左右内缩）。用整页宽会让
+                 长金额按大字号画出去被卡片裁掉；用组件自身盒宽又会形成逐帧反馈环 */
+              availableWidth={amountSlotWidth}
               // V2.2：大数字不再带 RM 前缀（上方胶囊已表示币种）——
               // 小数点后两位照常保留，读屏标签仍带币种
               variant="display"
@@ -1274,9 +1279,7 @@ const HeroCardPage = React.memo(function HeroCardPage({
                  MoneyText 会整段沿用整数段的字号、字重与颜色 */
               heroLetterRatio={-0.03}
               color={textColor}
-              /* 地板档仍放不下（320 视口 + 15 位金额）→ 紧凑格式（100.1T）+ 长按看全文，
-                 同资产页资产行；不靠裁切掩盖溢出 */
-              compactFallback
+              /* 用户规格：金额必须完整显示、不转 K/M —— 适配交给 MoneyText 的整串等比缩小 */
               accessibilityLabel={fmtMoney(total, { currency: code, showCurrency: true })}
               style={shadow}
             />
