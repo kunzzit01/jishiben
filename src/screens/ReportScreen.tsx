@@ -49,7 +49,6 @@ import {
   MoneyText,
   StatusBarGlass,
 } from '../components/ui';
-import { withAlpha } from '../components/ui/color';
 import { TransactionType, Transaction } from '../types';
 import { UNCATEGORIZED_ICON, UNCATEGORIZED_NAME, UNCATEGORIZED_COLOR } from '../constants/uncategorized';
 import { useT, useLanguage } from '../i18n/LanguageContext';
@@ -62,11 +61,11 @@ type IconName = keyof typeof Ionicons.glyphMap;
 type RangeType = 'year' | 'month' | 'week' | 'custom';
 
 // 环的几何：DonutChart 的绘制与「点扇区命中判定」共用这三个数，改一处必须两处一起改
-// UI V2 定稿：直径 200；环带厚度按稿的内联样式换算（稿里 viewBox 42 / stroke-width 4.6 →
-// 10.95% 直径，200 × 0.1095 ≈ 22）；圆孔 = 200 − 2×22 = 156pt；
+// 直径 240（原 200，2026-10-29 按「白卡内左右各空 90」的空旷感放大）；环带 24（仍约 10% 直径，
+// 保持细环性格）；圆孔 = 240 − 2×24 = 192pt；
 // 渲染角度微调 -15° 让扇区边界错开最挤的正上方。
-const DONUT_SIZE = 200;
-const DONUT_STROKE = 22;
+const DONUT_SIZE = 240;
+const DONUT_STROKE = 24;
 const DONUT_ROTATION_DEG = -15;
 
 /**
@@ -76,14 +75,14 @@ const DONUT_ROTATION_DEG = -15;
  * MoneyText 的「放不下就降档」判定用的是**组件当帧自己的盒宽**；圆孔这里是「内容居中、
  * 盒子 = 内容宽」的容器，加上它内置的估算表比 Inter 实测宽约 10%，首档永远会被自己判成放不下
  * ——实测三档阶梯会一路停到第二档（T21 的 22/18 同样停在 18，用户看到的「约 18 号」就是这个）。
- * 圆孔是固定 156pt（环 200 − 2×22），与屏幕宽无关，所以按「字号 → 156pt 能放几个字符」直接定档：
- * 30 号每字约 14.5pt（Inter 数字 + 千分位 + 负字距）→ 10 字以内；26 号约 12.6pt → 12 字以内；再多给 22。
+ * 圆孔是固定 192pt（环 240 − 2×24），与屏幕宽无关，所以按「字号 → 192pt 能放几个字符」直接定档：
+ * 30 号每字约 14.5pt（Inter 数字 + 千分位 + 负字距）→ 12 字以内；26 号约 12.6pt → 14 字以内；再多给 22。
  */
 const DONUT_CENTER_SIZES = [30, 26, 22] as const;
 
 function donutCenterSize(text: string): number {
-  if (text.length <= 10) return DONUT_CENTER_SIZES[0];
-  if (text.length <= 12) return DONUT_CENTER_SIZES[1];
+  if (text.length <= 12) return DONUT_CENTER_SIZES[0];
+  if (text.length <= 14) return DONUT_CENTER_SIZES[1];
   return DONUT_CENTER_SIZES[2];
 }
 
@@ -307,11 +306,12 @@ function RankRow({
             {title}
           </AppText>
         </View>
-        {/* 金额（中性色、不带正负号）+ 百分比统一 1 位小数；flexShrink:0，永不被标题挤走 */}
-        <View style={{ flexShrink: 0, marginLeft: spacing.sm, alignItems: 'flex-end' }}>
+        {/* 金额（中性色、不带正负号）+ 百分比统一 1 位小数，同一行右对齐（baseline 对齐 17/12 两种字号）；
+            flexShrink:0，永不被标题挤走 */}
+        <View style={{ flexShrink: 0, marginLeft: spacing.sm, flexDirection: 'row', alignItems: 'baseline' }}>
           <MoneyText value={amount} variant="body" />
           {/* 百分比 12pt（稿）→ caption 档；次要色（稿 #82829A）→ textSecondary */}
-          <AppText variant="caption" color={semantic.textSecondary} align="right" style={{ marginTop: spacing.xs }}>
+          <AppText variant="caption" color={semantic.textSecondary} align="right" style={{ marginLeft: spacing.xs }}>
             {pctText}
           </AppText>
         </View>
@@ -478,37 +478,8 @@ export default function ReportScreen() {
   // R5：这段时间没有可统计的分类（或总额为 0）→ 空状态，不再画灰圈 + 0.00
   const isEmpty = categoryBreakdown.length === 0 || periodTotal <= 0;
 
-  // R4 环比（设计稿 04 屏）：上一周期的同口径合计（周/月/年前移一段；自定义区间不外推）
-  const prevRange = useMemo(() => {
-    if (rangeType === 'custom') return null;
-    const prevAnchor =
-      rangeType === 'month'
-        ? new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)
-        : rangeType === 'year'
-          ? new Date(anchor.getFullYear() - 1, 0, 1)
-          : new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - 7);
-    return buildRange(rangeType, prevAnchor, tr);
-  }, [rangeType, anchor, tr]);
-
-  // 上一周期合计：口径与 periodTotal 完全一致（同类型 + 同币种 + 只算收入/支出），不跨币种相加
-  const prevPeriodTotal = useMemo(() => {
-    if (!prevRange) return null;
-    let sum = 0;
-    ledgerTransactions.forEach((t) => {
-      if (t.date < prevRange.start || t.date > prevRange.end) return;
-      if (t.type !== type) return;
-      if (getTransactionCurrency(t) !== selectedReportCurrency) return;
-      sum += t.amount;
-    });
-    return sum;
-  }, [ledgerTransactions, prevRange, type, selectedReportCurrency, currency, getAssetById]);
-
-  const momDelta = prevPeriodTotal == null ? null : periodTotal - prevPeriodTotal;
-  const momPct =
-    prevPeriodTotal != null && prevPeriodTotal > 0 ? (periodTotal / prevPeriodTotal - 1) * 100 : null;
-  // 颜色：支出涨 = 变差（红）/ 支出跌 = 变好（绿）；收入反过来。
-  // ⚠ 与「涨绿跌红」的字面说法在支出侧相反 —— 依据是设计稿 04 屏：下降徽章取薄荷底（token bg.tileMint）。
-  const momGood = momDelta == null ? true : (type === 'expense' ? momDelta <= 0 : momDelta >= 0);
+  // 相较上期的环比展示已下载（2026-10-29 用户指令）：原 prevRange / prevPeriodTotal /
+  // momDelta / momPct / momGood 一并删除，不做「上一周期」的额外扫描。
 
   // R2 高亮：点扇区 / 点列表行选中的分类（null = 默认态，环心显示总支出/总收入）
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -779,6 +750,7 @@ export default function ReportScreen() {
         <View style={[styles.segRow, { paddingHorizontal: pagePadding }]}>
           <View style={styles.segTray}>
             <SegmentedControl
+              stretch
               appearance="glass"
               options={[
                 { value: 'expense', label: tr('report.expense') },
@@ -790,6 +762,7 @@ export default function ReportScreen() {
           </View>
           <View style={styles.segTray}>
             <SegmentedControl
+              stretch
               appearance="glass"
               options={rangeOptions}
               selected={rangeType}
@@ -830,28 +803,6 @@ export default function ReportScreen() {
                 color={semantic.textPrimary}
               />
             </View>
-            {momPct != null && momDelta != null && (
-              <View style={styles.summaryRight}>
-                <View
-                  style={[
-                    styles.momBadge,
-                    { backgroundColor: momGood ? semantic.tileMint : withAlpha(semantic.danger, 0.14) },
-                  ]}
-                >
-                  <Ionicons
-                    name={momDelta >= 0 ? 'trending-up' : 'trending-down'}
-                    size={12}
-                    color={momGood ? semantic.success : semantic.danger}
-                  />
-                  <AppText variant="caption2" weight="600" color={momGood ? semantic.success : semantic.danger}>
-                    {`${Math.abs(momPct).toFixed(1)}%`}
-                  </AppText>
-                </View>
-                <AppText variant="caption2" color={semantic.textTertiary} style={{ marginTop: 2 }}>
-                  {`${momDelta >= 0 ? '+' : '−'}${formatMoney(Math.abs(momDelta))}`}
-                </AppText>
-              </View>
-            )}
           </View>
         )}
 
@@ -875,7 +826,7 @@ export default function ReportScreen() {
                 环区上挂 Race(点按命中, 左右滑)，卡底保留 strip 的滑动换期 */}
             {isDark ? (
               <GlassView
-                radius={28}
+                radius={26}
                 style={[styles.donutCard, { marginHorizontal: pagePadding }]}
               >
                 {donutCardBody}
@@ -1002,15 +953,6 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
       marginTop: spacing.lg,
     },
     summaryLeft: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-    summaryRight: { flexShrink: 0, alignItems: 'flex-end' },
-    momBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      columnGap: spacing.xs,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 2,
-      borderRadius: radius.sm,
-    },
     segRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1024,7 +966,8 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
     // 单层玻璃压在渐变最亮的一段上只有 3.8-4.1:1。托盘必须是**实底**（surfaceSunken，全 App
     // 「凹底」档）—— 半透明 scrim 会被玻璃槽自己的 backdrop 模糊从上下的亮渐变里回拉，压不下去。
     // 与槽同圆角、零内衬（视觉上就是「槽更深一档」，不再多一层描边）
-    segTray: { borderRadius: radius.full, backgroundColor: semantic.surfaceSunken },
+    // 两块等分整行：托盘 flex:1 撑满 + 分段控件 stretch（窄屏放不下时年/月/周 整块换行）
+    segTray: { flex: 1, minWidth: 0, borderRadius: radius.full, backgroundColor: semantic.surfaceSunken },
     periodNav: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 },
     // 日期标签允许换行变高（不截断、不用省略号）；宽度由内容决定，挤不到就整行换下去
     periodLabel: { flexShrink: 1, textAlign: 'center', marginHorizontal: spacing.xs },
@@ -1047,11 +990,11 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
     },
     // 大标题（渐变上的白字）：稿为 30 / 600（token title1 是 28/700，字号按稿覆盖）
     heroTitle: { fontSize: 30, lineHeight: 36 },
-    // 饼图卡：稿为 radius 28 / 内衬 18（夜间是 GlassView、日间是白卡，两者都在这里给同样的内衬）
-    donutCard: { marginTop: spacing.md, padding: 18 },
-    // 日间白卡：Card 默认 radius.lg（20），稿里是 28（阴影 / 白底由 Card 自己给）
-    donutCardLight: { borderRadius: 28 },
-    // 环区必须与 DonutChart 同尺寸（200×200）：绘制坐标与点击命中的坐标系都从这里起算。
+    // 饼图卡：内衬 20（夜间是 GlassView、日间是白卡，两者都在这里给同样的内衬）
+    donutCard: { marginTop: spacing.md, padding: 20 },
+    // 日间白卡：与列表卡统一 26（阴影 / 白底由 Card 自己给）
+    donutCardLight: { borderRadius: 26 },
+    // 环区必须与 DonutChart 同尺寸（240×240）：绘制坐标与点击命中的坐标系都从这里起算。
     // 用 minHeight（不用固定 height）：高度实际由环本身撑出，文字容器不写死高度（UI_RULES 第 4 节）
     donutArea: {
       width: DONUT_SIZE,
