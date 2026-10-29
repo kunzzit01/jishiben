@@ -6,3 +6,10 @@ dist
 .env.*
 npm-debug.log*
 __tests__
+# 内测安装包：只通过 bind mount 提供下载，绝不烤进镜像层
+# （历史问题：每构建一次 web 镜像，deploy/downloads 里的 apk 就复制一份进镜像层）
+deploy/downloads
+*.apk
+*.aab
+*.keystore
+*.jks
