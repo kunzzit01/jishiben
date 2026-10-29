@@ -387,6 +387,7 @@ export const zh = {
     typeExpense: '支出',
     typeIncome: '收入',
     typeTransfer: '转账',
+    typeExchange: '兑换',
     sectionDetail: '明细',
     account: '账户',
     fromAccount: '转出账户',
@@ -404,6 +405,7 @@ export const zh = {
     edit: '编辑',
     delete: '删除这笔记录',
     transferCount: '转账 %{count} 笔',
+    exchangeCount: '兑换 %{count} 笔',
   },
   ai: {
     title: 'AI 专区',
@@ -603,6 +605,7 @@ export const zh = {
     statementDayValue: '账单日 %{day} 号',
     dueDayValue: '还款日 %{day} 号',
     dayValue: '%{day} 号',
+    dayListCollapse: '收起',
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
     accountDetail: '账户详情',

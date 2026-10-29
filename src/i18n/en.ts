@@ -385,6 +385,7 @@ export const en = {
     typeExpense: 'Expense',
     typeIncome: 'Income',
     typeTransfer: 'Transfer',
+    typeExchange: 'Exchange',
     sectionDetail: 'Details',
     account: 'Account',
     fromAccount: 'From',
@@ -402,6 +403,7 @@ export const en = {
     edit: 'Edit',
     delete: 'Delete this transaction',
     transferCount: 'Transfers · %{count}',
+    exchangeCount: '%{count} exchange',
   },
   ai: {
     title: 'AI Zone',
@@ -600,6 +602,7 @@ export const en = {
     statementDayValue: 'Statement day %{day}',
     dueDayValue: 'Due day %{day}',
     dayValue: 'Day %{day}',
+    dayListCollapse: 'Collapse',
     emptyTitle: 'No accounts yet',
     emptyHint: 'Add an account to see balances and statements here',
     accountDetail: 'Account',

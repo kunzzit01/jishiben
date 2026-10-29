@@ -2118,6 +2118,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             title={accountPickerRole === 'from' ? t('addTx.selectOut') : t('addTx.selectIn')}
             selectedId={accountPickerRole === 'from' ? fromAssetId : toAssetId}
             excludeId={accountPickerRole === 'from' ? toAssetId : fromAssetId}
+            // 转账只能同币种互转（跨币种请用「兑换」页）：转出列表按转入账户币种限制，反之亦然。
+            // 兑换（isExchange）不限制，保持跨币种能力。
+            restrictCurrency={
+              isExchange
+                ? null
+                : accountPickerRole === 'from'
+                  ? toAsset?.currency ?? null
+                  : fromAsset?.currency ?? null
+            }
             currencyCode={amountCurrencyCode}
             onPickAsset={(id) => {
               // 手动选过之后不再自动跟随"默认账户"变化。
@@ -2127,6 +2136,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               userPickedFromRef.current = true;
               if (accountPickerRole === 'from') {
                 setFromAssetId(id);
+                // 转账：换了转出币种 → 转入账户若不是同币种就清空，用户重新选（兑换不处理）
+                const picked = assets.find((a) => a.id === id);
+                const toCur = assets.find((a) => a.id === toAssetId)?.currency;
+                if (!isExchange && picked && toCur && picked.currency !== toCur) setToAssetId(null);
               } else {
                 setToAssetId(id);
               }

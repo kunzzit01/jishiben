@@ -1847,16 +1847,25 @@ export default function AssetScreen() {
                           {t('asset.statementDayLabel')}
                         </AppText>
                         <PressableScale
-                          style={[styles.creditCycleBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
+                          style={[
+                            styles.creditCycleBox,
+                            { backgroundColor: semantic.bg, borderColor: semantic.hairline },
+                            // 打开态：边框变主色，箭头翻转，再点一下即收起
+                            sheetDaySheet === 'statement' && { borderColor: semantic.accentText },
+                          ]}
                           activeScale={0.98}
-                          onPress={() => setSheetDaySheet('statement')}
+                          onPress={() => setSheetDaySheet((prev) => (prev === 'statement' ? null : 'statement'))}
                           accessibilityRole="button"
                           testID="asset-detail-statement-day"
                         >
                           <AppText variant="subhead" color={semantic.textPrimary}>
                             {t('asset.perMonthDay', { day: sheetAsset.statementDay ?? 1 })}
                           </AppText>
-                          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                          <Ionicons
+                            name={sheetDaySheet === 'statement' ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={sheetDaySheet === 'statement' ? semantic.accentText : semantic.textTertiary}
+                          />
                         </PressableScale>
                       </View>
                       <View style={styles.creditCycleCol}>
@@ -1864,16 +1873,24 @@ export default function AssetScreen() {
                           {t('asset.dueDayLabel')}
                         </AppText>
                         <PressableScale
-                          style={[styles.creditCycleBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
+                          style={[
+                            styles.creditCycleBox,
+                            { backgroundColor: semantic.bg, borderColor: semantic.hairline },
+                            sheetDaySheet === 'due' && { borderColor: semantic.accentText },
+                          ]}
                           activeScale={0.98}
-                          onPress={() => setSheetDaySheet('due')}
+                          onPress={() => setSheetDaySheet((prev) => (prev === 'due' ? null : 'due'))}
                           accessibilityRole="button"
                           testID="asset-detail-due-day"
                         >
                           <AppText variant="subhead" color={semantic.textPrimary}>
                             {t('asset.perMonthDay', { day: sheetAsset.dueDay ?? 5 })}
                           </AppText>
-                          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                          <Ionicons
+                            name={sheetDaySheet === 'due' ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={sheetDaySheet === 'due' ? semantic.accentText : semantic.textTertiary}
+                          />
                         </PressableScale>
                       </View>
                     </View>
@@ -1882,7 +1899,19 @@ export default function AssetScreen() {
                   {/* 1–28 选择列表：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层） */}
                   {sheetAsset.type === 'credit' && sheetDaySheet !== null && (
                     <View style={styles.creditDayList} testID="asset-detail-day-list">
-                      <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+                      <PressableScale
+                        activeScale={0.98}
+                        onPress={() => setSheetDaySheet(null)}
+                        accessibilityRole="button"
+                        style={styles.creditDayCloseRow}
+                        testID="asset-detail-day-close"
+                      >
+                        <AppText variant="caption" color={semantic.textTertiary}>
+                          {t('asset.dayListCollapse')}
+                        </AppText>
+                        <Ionicons name="chevron-up" size={14} color={semantic.textTertiary} />
+                      </PressableScale>
+                      <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
                         {Array.from({ length: 28 }, (_, k) => k + 1).map((day) => {
                           const current = sheetDaySheet === 'due' ? sheetAsset.dueDay ?? 5 : sheetAsset.statementDay ?? 1;
                           return (
@@ -2120,6 +2149,15 @@ function makeStyles(
     // V2.2c B3：小标签在输入框上方，左边与框内文字对齐（内缩 = 输入框 paddingHorizontal）
     // 账单日 / 还款日两格（详情 → 账户设置）
     creditDayList: { marginTop: spacing.sm },
+    creditDayCloseRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.sm,
+      marginBottom: spacing.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: semantic.hairline,
+    },
     creditCycleBlock: { flexDirection: 'row', columnGap: spacing.md, marginTop: spacing.md },
     creditCycleCol: { flex: 1, minWidth: 0 },
     creditCycleBox: {

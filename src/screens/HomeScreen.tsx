@@ -1877,14 +1877,18 @@ export default function HomeScreen({ navigation }: any) {
                 ? (tx.fromAssetId ? getAssetById(tx.fromAssetId)?.currency : undefined)
                 : (tx.toAssetId ? getAssetById(tx.toAssetId)?.currency : undefined);
             const flow = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
+            // 跨币种（两侧币种不同）＝ 兑换，同币种才是转账 —— 与「记一笔」的两个入口一致
+            const fromCur = tx.fromAssetId ? getAssetById(tx.fromAssetId)?.currency : undefined;
+            const toCur = tx.toAssetId ? getAssetById(tx.toAssetId)?.currency : undefined;
+            const isExchangeTx = !!fromCur && !!toCur && fromCur !== toCur;
             return {
               id: tx.id,
-              title: tx.note?.trim() || t('txDetail.typeTransfer'),
+              title: tx.note?.trim() || t(isExchangeTx ? 'txDetail.typeExchange' : 'txDetail.typeTransfer'),
               subtitle: counterpart ? `${flow} · ${counterpart}` : flow,
               amount: tf?.amount ?? tx.amount,
               kind: (tf?.direction === 'in' ? 'income' : 'expense') as 'income' | 'expense',
               dateText: tx.date,
-              icon: 'swap-horizontal' as IconName,
+              icon: (isExchangeTx ? 'repeat-outline' : 'swap-horizontal') as IconName,
               color: palette.brand,
             };
           }
@@ -2238,6 +2242,10 @@ export default function HomeScreen({ navigation }: any) {
     // 副标题上的币种 = 「另一侧」的币种（用户 2026-10-28 定版）：
     // 金额本身已经是本钱包币种，这里要说明它来自/去往哪个币种 ——
     // MYR 钱包看到 +18.75，标注 CNY（来自人民币）；CNY 钱包看到 −30.00，标注 MYR。
+    // 跨币种 = 兑换（两侧币种不同），同币种 = 转账；与首页最近交易、详情页同一口径
+    const searchFromCur = item.fromAssetId ? getAssetById(item.fromAssetId)?.currency : undefined;
+    const searchToCur = item.toAssetId ? getAssetById(item.toAssetId)?.currency : undefined;
+    const searchIsExchange = !!searchFromCur && !!searchToCur && searchFromCur !== searchToCur;
     const transferFlow = fromName && toName ? `${fromName} → ${toName}` : fromName || toName || '';
     const counterpartCurrency =
       tfView?.direction === 'in'
@@ -2251,7 +2259,7 @@ export default function HomeScreen({ navigation }: any) {
 
     return (
       <TxRowMemo
-        title={isTransfer ? ownTitle || t('txDetail.typeTransfer') : hasOwnTitle ? ownTitle : catName}
+        title={isTransfer ? ownTitle || t(searchIsExchange ? 'txDetail.typeExchange' : 'txDetail.typeTransfer') : hasOwnTitle ? ownTitle : catName}
         categoryName={isTransfer ? '' : hasOwnTitle ? catName : ''}
         categoryIcon={
           isTransfer ? (tfView?.direction === 'in' ? 'arrow-down-circle-outline' : 'arrow-up-circle-outline') : catIcon
@@ -2306,9 +2314,18 @@ export default function HomeScreen({ navigation }: any) {
         <AppText variant="caption" weight="500" color={palette.textTertiary} numberOfLines={1} style={styles.daySumText}>
           {section.expense === 0 && section.income === 0
             ? // 当天只有转账：既不是支出也不是收入，写「支出/收入 0.00」只会让人以为漏记
-              t('txDetail.transferCount', {
-                count: section.items.filter((it) => it.type === 'transfer').length,
-              })
+              (() => {
+                // 当天只有转账类：全是跨币种就写「兑换 N 笔」，否则「转账 N 笔」
+                const transfers = section.items.filter((it) => it.type === 'transfer');
+                const allExchange = transfers.every((it) => {
+                  const fc = it.fromAssetId ? getAssetById(it.fromAssetId)?.currency : undefined;
+                  const tc = it.toAssetId ? getAssetById(it.toAssetId)?.currency : undefined;
+                  return !!fc && !!tc && fc !== tc;
+                });
+                return t(allExchange ? 'txDetail.exchangeCount' : 'txDetail.transferCount', {
+                  count: transfers.length,
+                });
+              })()
             : `${t(section.expense > 0 ? 'home.expenseShort' : 'home.incomeShort')}${fmtMoney(
                 section.expense > 0 ? section.expense : section.income,
                 { showCurrency: false }

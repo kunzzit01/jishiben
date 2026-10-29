@@ -57,6 +57,8 @@ interface Props {
   onClose: () => void;
   /** 面板内「添加新账户」：父层负责关闭并跳转 */
   onAddAccount: () => void;
+  /** 只列出该币种的账户（转账=同币种互转；兑换不传=允许跨币种） */
+  restrictCurrency?: string | null;
 }
 
 export function AccountPickerSheet({
@@ -65,6 +67,7 @@ export function AccountPickerSheet({
   excludeId,
   onPickAsset,
   currencyCode,
+  restrictCurrency,
   onClose,
   onAddAccount,
 }: Props) {
@@ -93,13 +96,15 @@ export function AccountPickerSheet({
 
   // 用户已有账户出现过的币种（去重、ABC 字母序）+ 当前金额币种兜底（还没有账户的全局货币也要能选）
   const ownCurrencies = useMemo(() => {
+    // 受限模式（转账同币种）下，币种筛选条只保留该币种，避免出现选了也筛不到东西的胶囊
+    const source = restrictCurrency ? activeAssets.filter((a) => a.currency === restrictCurrency) : activeAssets;
     const codes: string[] = [];
-    activeAssets.forEach((a) => {
+    source.forEach((a) => {
       if (a.currency && !codes.includes(a.currency)) codes.push(a.currency);
     });
-    if (!codes.includes(currencyCode)) codes.push(currencyCode);
+    if (!restrictCurrency && !codes.includes(currencyCode)) codes.push(currencyCode);
     return codes.sort((c1, c2) => c1.localeCompare(c2));
-  }, [activeAssets, currencyCode]);
+  }, [activeAssets, currencyCode, restrictCurrency]);
 
   // 过滤后的账户 → 按币种分组（组内保持 activeAssets 顺序）
   const groups = useMemo(() => {
@@ -112,7 +117,9 @@ export function AccountPickerSheet({
       const matchFilter = accountFilter === 'all' || a.type === accountFilter;
       // 转账的两个角色互相排除：选转出时不列转入账户，反之亦然
       const matchExclude = !excludeId || a.id !== excludeId;
-      return matchSearch && matchCurrency && matchFilter && matchExclude;
+      // 转账限定同币种（跨币种走「兑换」）：由父层传入对方账户币种，兑换传 null
+      const matchRestrict = !restrictCurrency || a.currency === restrictCurrency;
+      return matchSearch && matchCurrency && matchFilter && matchExclude && matchRestrict;
     });
     const byCurrency: Record<string, typeof visible> = {};
     visible.forEach((a) => {
@@ -120,7 +127,7 @@ export function AccountPickerSheet({
       byCurrency[a.currency].push(a);
     });
     return Object.entries(byCurrency).sort(([c1], [c2]) => c1.localeCompare(c2));
-  }, [activeAssets, accountSearch, currencyFilter, accountFilter, excludeId]);
+  }, [activeAssets, accountSearch, currencyFilter, accountFilter, excludeId, restrictCurrency]);
 
   const FILTERS: { key: AccountFilter; label: string }[] = [
     { key: 'all', label: t('common.all') },
@@ -236,7 +243,9 @@ export function AccountPickerSheet({
                                 按档位降级足够，不需要紧凑兜底 */}
                             <MoneyText
                               value={credit ? owed : balance}
-                              kind={credit ? 'expense' : 'plain'}
+                              kind="plain"
+                              // 欠款以正数展示（与列表/详情一致）；红色单独给，kind 不能再用 expense（会给值加 − 号）
+                              color={credit ? semantic.amountExpense : undefined}
                               variant="subhead"
                               compactFallback={false}
                             />

@@ -63,18 +63,21 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
   const toAsset = tx.toAssetId ? getAssetById(tx.toAssetId) : undefined;
   const ledger = ledgers.find((l) => l.id === tx.ledgerId);
 
+  // 跨币种的两侧币种不同 → 这笔就是「兑换」；同币种才是「转账」（与记一笔的两个入口一致）
+  const isExchangeTx = isTransfer && !!fromAsset?.currency && !!toAsset?.currency && fromAsset.currency !== toAsset.currency;
+  const transferKindLabel = isExchangeTx ? t('txDetail.typeExchange') : t('txDetail.typeTransfer');
   // 转账没有类别：这里直接显示「转账」+ 换向箭头，不再落到「未分类」（用户 2026-10-28 反馈）
   const categoryName = isTransfer
-    ? t('txDetail.typeTransfer')
+    ? transferKindLabel
     : category
       ? getCategoryLabel(category, t)
       : tx.displayName || t('txDetail.uncategorized');
   const categoryIcon = (isTransfer
-    ? 'swap-horizontal'
+    ? isExchangeTx ? 'repeat-outline' : 'swap-horizontal'
     : category?.icon ?? 'apps-outline') as React.ComponentProps<typeof Ionicons>['name'];
   const categoryColor = isTransfer ? semantic.accent : category?.color ?? semantic.accent;
 
-  const typeLabel = isTransfer ? t('txDetail.typeTransfer') : isIncome ? t('txDetail.typeIncome') : t('txDetail.typeExpense');
+  const typeLabel = isTransfer ? transferKindLabel : isIncome ? t('txDetail.typeIncome') : t('txDetail.typeExpense');
 
   /**
    * 转账的「本钱包视角」：
@@ -90,7 +93,11 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
     return activeCurrency && code && activeCurrency !== code ? 'in' : 'out';
   })();
 
-  const heroTitle = isTransfer ? (perspective === 'in' ? toAsset?.name ?? t('txDetail.typeTransfer') : fromAsset?.name ?? t('txDetail.typeTransfer')) : categoryName;
+  const heroTitle = isTransfer
+    ? perspective === 'in'
+      ? toAsset?.name ?? transferKindLabel
+      : fromAsset?.name ?? transferKindLabel
+    : categoryName;
   const heroAmount = isTransfer
     ? perspective === 'in'
       ? tx.convertedAmount ?? tx.amount
@@ -99,7 +106,7 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
   const heroKind = isTransfer ? (perspective === 'in' ? 'income' : 'expense') : kind;
   // 与首页行一致：金额是本钱包币种，标注「另一侧」的币种（转入视角标转出币种，反之亦然）
   const heroCurrency = isTransfer
-    ? `${t('txDetail.typeTransfer')} · ${perspective === 'in' ? fromAsset?.currency ?? '' : toAsset?.currency ?? ''}`
+    ? `${transferKindLabel} · ${perspective === 'in' ? fromAsset?.currency ?? '' : toAsset?.currency ?? ''}`
     : '';
   const feeText = currencySymbol + String(tx.fee);
 
