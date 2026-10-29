@@ -36,6 +36,7 @@ import { useT } from '../i18n/LanguageContext';
 import { useDialog } from '../components/AppDialog';
 import { useApp } from '../context/AppContext';
 import { ROUTES } from '../navigation/routes';
+import { parseInterestRate, sanitizeInterestRateInput } from '../utils/interestRate';
 import { getAssetDisplayBalance } from '../utils/creditCard';
 import { formatMoney } from '../utils/formatMoney';
 import { AssetType } from '../types';
@@ -870,6 +871,8 @@ export default function AssetScreen() {
 
   const [viewName, setViewName] = useState('');
   const [viewBalanceStr, setViewBalanceStr] = useState('');
+  /** 账户设置里的年利率输入态（字符串：保住 "18." 中间态；空 = 未设置） */
+  const [viewInterestStr, setViewInterestStr] = useState('');
   const [viewKeypadOpen, setViewKeypadOpen] = useState(false);
   const balanceExpr = useAmountExpression();
 
@@ -974,6 +977,9 @@ export default function AssetScreen() {
       setViewBalanceStr(
         String(asset.type === 'credit' ? asset.creditLimit ?? 0 : getAssetBalance(asset.id)),
       );
+      setViewInterestStr(
+        asset.type === 'credit' && asset.interestRate != null ? String(asset.interestRate) : ''
+      );
     }
     setViewKeypadOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -998,7 +1004,8 @@ export default function AssetScreen() {
   // 未保存修改检测：名称、余额目标值、默认勾选任一变化即视为脏
   const viewEditDirty =
     !!viewingAsset &&
-    (viewName.trim() !== viewingAsset.name ||
+    (parseInterestRate(viewInterestStr) !== viewingAsset.interestRate ||
+      viewName.trim() !== viewingAsset.name ||
       viewSetDefault !== !!viewingAsset.isDefault ||
       (parseFloat(viewBalanceStr) || 0) !==
         (viewingAsset.type === 'credit'
@@ -1076,7 +1083,12 @@ export default function AssetScreen() {
     }
     typed = typed ?? (parseFloat(viewBalanceStr) || 0);
     if (viewingAsset.type === 'credit') {
-      await updateAsset(viewingAsset.id, { name: viewName.trim(), creditLimit: typed });
+      await updateAsset(viewingAsset.id, {
+        name: viewName.trim(),
+        creditLimit: typed,
+        // 清空 → undefined（键消失），不是 0
+        interestRate: parseInterestRate(viewInterestStr),
+      });
     } else {
       // 输入的是"想让当前余额变成的数"：差额写回起始余额，保存后当前余额即变为输入值
       const delta = getAssetBalance(viewingAsset.id) - viewingAsset.initialBalance;
@@ -1932,6 +1944,40 @@ export default function AssetScreen() {
                     </View>
                   )}
 
+                  {/* 年利率（仅信用卡）：与名称/额度同款胶囊框，右侧 `%` 后缀。
+                      空 = 未设置（保存时写 undefined，键消失）；逾期估算利息靠它 */}
+                  {sheetAsset.type === 'credit' && (
+                    <View>
+                      <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
+                        {t('asset.interestRateLabel')}
+                      </AppText>
+                      <View
+                        style={[
+                          styles.nameInput,
+                          styles.interestRow,
+                          { backgroundColor: semantic.bg, borderColor: semantic.hairline },
+                        ]}
+                      >
+                        <TextInput
+                          style={[styles.interestInput, { color: semantic.textPrimary }]}
+                          value={viewInterestStr}
+                          onChangeText={(v) => setViewInterestStr(sanitizeInterestRateInput(v))}
+                          placeholder={t('asset.interestRateHint')}
+                          placeholderTextColor={semantic.textTertiary}
+                          selectionColor={semantic.accent}
+                          keyboardType="decimal-pad"
+                          inputMode="decimal"
+                          maxLength={6}
+                          returnKeyType="done"
+                          testID="asset-detail-interest-rate"
+                        />
+                        <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
+                          %
+                        </AppText>
+                      </View>
+                    </View>
+                  )}
+
                   {/* 设为默认账户：Switch 行（随"保存"一并提交） */}
                   <View style={styles.sheetList}>
                     <ListRow
@@ -2170,6 +2216,15 @@ function makeStyles(
       borderWidth: 1,
     },
     fieldLabelInline: { marginTop: spacing.lg, marginBottom: spacing.xs, marginLeft: spacing.lg },
+    // 年利率行：复用 nameInput 的胶囊外形，内部「输入 + %」横排
+    interestRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
+    interestInput: {
+      flex: 1,
+      padding: 0,
+      textAlign: 'right',
+      fontSize: typography.body.fontSize,
+      lineHeight: typography.body.lineHeight,
+    },
     nameInput: {
       minHeight: 44,
       // 胶囊框（V2.2c）：与 radius.full 一致的圆角，不用矩形输入框

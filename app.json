@@ -45,6 +45,7 @@
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "package": "com.kylim0103.jizhangapp",
+      "versionCode": 3,
       "usesCleartextTraffic": true
     },
     "web": {

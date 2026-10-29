@@ -31,6 +31,8 @@ import { formatMoney } from '../utils/formatMoney';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { hapticSuccess } from '../utils/haptics';
+// 年利率的清洗/解析与账户设置页共用同一份实现（src/utils/interestRate.ts）
+import { parseInterestRate, sanitizeInterestRateInput } from '../utils/interestRate';
 import { AppText, BottomSheet, Button, ListRow, ScreenHeader } from '../components/ui';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -57,33 +59,6 @@ const NAME_PLACEHOLDER_KEY: Record<AssetType, string> = {
   investment: 'addTx.accountNamePlaceholderInvestment',
   other: 'addTx.accountNamePlaceholderOther',
 };
-
-// 年利率（%）输入清洗：只留数字与一个小数点、最多两位小数、上限 100。
-// 返回字符串而不是数字：中间态（"18." 之后还要敲 5）必须留住，空串 = 未设置。
-function sanitizeInterestRateInput(raw: string): string {
-  let intPart = '';
-  let decPart = '';
-  let hasDot = false;
-  for (const ch of raw) {
-    if (ch >= '0' && ch <= '9') {
-      if (!hasDot) intPart += ch;
-      else if (decPart.length < 2) decPart += ch;
-    } else if ((ch === '.' || ch === ',') && !hasDot) {
-      hasDot = true;
-    }
-  }
-  intPart = intPart.replace(/^0+(?=\d)/, '');
-  if (!intPart && !decPart) return '';
-  const next = hasDot ? `${intPart}.${decPart}` : intPart;
-  return Number(next) > 100 ? '100' : next;
-}
-
-// 保存用：空 / 非法 → undefined（清空后必须让 interestRate 这个键消失，绝不能落成 0）
-function parseInterestRate(text: string): number | undefined {
-  if (!text.trim()) return undefined;
-  const num = Number(text);
-  return Number.isFinite(num) ? Number(num.toFixed(2)) : undefined;
-}
 
 // 计算器键盘当前在给哪个金额字段打字；null = 键盘收起
 // （信用卡模式下这个字段就是"信用额度"，现金/银行卡是"起始余额"）
