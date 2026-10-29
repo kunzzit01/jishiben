@@ -30,6 +30,7 @@
     "expo-sharing": "~57.0.17",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.26",
     "i18n-js": "^4.5.3",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
