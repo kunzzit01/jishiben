@@ -1121,7 +1121,7 @@ export default function AssetScreen() {
   // 头部大余额：信用卡按欠费口径（与原欠款块完全一致：欠款显示成绝对值 + 减号），其余显示当前余额
   const sheetHeroBalance = sheetAsset
     ? sheetAsset.type === 'credit'
-      ? -Math.max(0, -getAssetBalance(sheetAsset.id))
+      ? Math.max(0, -getAssetBalance(sheetAsset.id))
       : getAssetBalance(sheetAsset.id)
     : 0;
 
@@ -1243,13 +1243,13 @@ export default function AssetScreen() {
         icon={a.icon as IconName}
         title={a.name}
         subtitle={isCredit ? creditSubtitle : accountSubtitle}
-        // 信用卡：主数字是欠款（分组头已标币种）；其余账户就是余额。
+        // 信用卡：主数字是欠款（正数，与「欠款」语义一致；分组头已标币种）；其余账户就是余额。
         // V2.2c：行余额 17/600（text.primary + tabular，AppText 统一给等宽数字）
         // 金额栏拿到的预算 → MoneyText 先按阶降字号；降到地板仍放不下才用紧凑格式
         // （长按看完整金额、读屏也读完整金额），绝不再去挤压左侧文字栏
         value={(amountWidth) => (
           <MoneyText
-            value={isCredit ? -owed : balance}
+            value={isCredit ? owed : balance}
             variant="body"
             weight="600"
             availableWidth={amountWidth}
