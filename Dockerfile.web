@@ -35,6 +35,9 @@ server {
 
     client_max_body_size 12m;
     server_tokens off;
+    # 跳转一律用相对 Location：容器内 $scheme 是 http，绝对地址会拼出 http://，
+    # 而 Android release 默认禁明文，客户端跟随这种跳转会直接失败。
+    absolute_redirect off;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
 
@@ -50,6 +53,47 @@ server {
 
     location /api/ {
         proxy_pass http://jishiben_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering off;
+    }
+
+    # 自建 OTA 更新服务（deploy/updates）：/updates、/updates/* → updates:8081
+    # 用变量 + Docker 内置 DNS 让 nginx 在请求时解析上游：updates 容器比本容器晚起来，
+    # 也不会让 nginx 因 "host not found in upstream" 起不来（静态 upstream 会在启动时解析）。
+    # proxy_pass 不带 URI，转发的是原始请求路径（如 /updates/manifest），由 updates 自己剥前缀。
+    #
+    # 两个 location 都必要：expo-updates 客户端直接请求 updates.url 本身，
+    # 即 GET /updates（不带尾斜杠）。而 nginx 对「以 / 结尾的前缀 location」在 URI 缺尾斜杠时
+    # 会回 301 补斜杠（/api 同样如此），客户端跟随后即失败 —— 所以用精确匹配拦掉这个形状，
+    # 保证 /updates 本身返回 manifest 而不是任何跳转。
+    location = /updates {
+        resolver 127.0.0.11 ipv6=off valid=10s;
+        set $updates_upstream http://updates:8081;
+        proxy_pass $updates_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering off;
+    }
+
+    location /updates/ {
+        resolver 127.0.0.11 ipv6=off valid=10s;
+        set $updates_upstream http://updates:8081;
+        proxy_pass $updates_upstream;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
@@ -86,3 +130,7 @@ server {
 NGINX
 
 EXPOSE 80
+
+# 容器级探活：命中 server 块里的 location = /healthz（不经 api）
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
+    CMD wget -q --spider http://127.0.0.1/healthz || exit 1

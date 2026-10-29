@@ -114,6 +114,43 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 自建 OTA 更新服务（expo-updates 协议 v1），不依赖 Expo/EAS 云端。
+  # 不发布宿主端口：外部经 web 容器的 nginx 反代 /updates/ → updates:8081。
+  # 代码与说明见 deploy/updates/。
+  updates:
+    build:
+      context: ./updates
+      dockerfile: Dockerfile
+    image: jishiben/updates:0.1.0
+    container_name: jishiben-updates
+    restart: unless-stopped
+    environment:
+      PORT: "8081"
+      DATA_DIR: /data
+      # manifest 里所有 URL 的绝对前缀，必须与客户端 updates.url 一致
+      PUBLIC_BASE_URL: ${UPDATES_PUBLIC_BASE_URL:-https://187.127.125.136/updates}
+      DEFAULT_CHANNEL: ${UPDATES_DEFAULT_CHANNEL:-production}
+    volumes:
+      # 更新包与「当前生效版本」指针放在宿主机，重建镜像/重启容器都不丢
+      - ./updates/data:/data
+    networks:
+      - jishiben-net
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8081/healthz').then((r)=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   mysql-data:
     name: jishiben-mysql-data

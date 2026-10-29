@@ -1,0 +1,4 @@
+# 更新包数据通过 bind mount 进容器，不进镜像
+data
+publish.sh
+README.md

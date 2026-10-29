@@ -1,0 +1,13 @@
+{
+  "name": "jishiben-updates-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "自建 expo-updates（OTA）服务端：协议 v1，零运行时依赖，只用 Node 标准库",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
