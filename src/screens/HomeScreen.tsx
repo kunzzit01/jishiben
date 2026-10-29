@@ -1270,9 +1270,8 @@ const HeroCardPage = React.memo(function HeroCardPage({
               hero
               heroSize={scaled(0.126, 28)}
               weight="700"
-              heroDecimalSize={scaled(0.063, 15)}
-              heroDecimalWeight="600"
-              heroDecimalColor={decimalColor}
+              /* 尾数与整数同大（2026-10-29）：不传 heroDecimalSize / Weight / Color，
+                 MoneyText 会整段沿用整数段的字号、字重与颜色 */
               heroLetterRatio={-0.03}
               color={textColor}
               /* 地板档仍放不下（320 视口 + 15 位金额）→ 紧凑格式（100.1T）+ 长按看全文，

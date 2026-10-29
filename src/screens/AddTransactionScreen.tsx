@@ -150,12 +150,14 @@ function amountFontTier(display: string, base: number): number {
 }
 
 // ---------- UI V2 记一笔：Hero 金额（稿）----------
-// 整数段 = 基准 64/500 白（字距 −2.5、行高 66）；「.小数」段 = 34/300 白 70%（稿的降透明度）。
+// 整数段 = 基准 64/500（字距 −2.5、行高 66）；「.小数」段与整数段同大、同字重、同色。
+// 2026-10-29 用户要求尾数与前面的数字一样大（原稿 34/300 + 70% 透明度会让尾数看着小一号）。
 // 键盘开着时把闪烁光标画在「光标所在的那一段」里：复用 CursorAmountText 的点按/拖动定位，
 // 只做 cursorFromEnd 的全串 ↔ 分段换算（整段：Li − si；小段：Li + Ld − si）。
 // 为什么不是 MoneyText / CursorAmountText 单独搞定：MoneyText hero 没有光标，
 // CursorAmountText 不拆整数/小数（组件都在别处、本车道不改），两个片段各自渲染是唯一不损功能的组合。
-const HERO_INT_RATIO_DEC = 34 / 64; // 小数段 ÷ 整数段（稿 34/64）
+// 小数段与整数段同大小（2026-10-29 用户要求「尾数的大小要和前面的数字一样」，原稿 34/64）
+const HERO_INT_RATIO_DEC = 1;
 const HERO_LINE_RATIO = 66 / 64; // 行高 ÷ 字号（稿 line-height 66）
 const HERO_LETTER_RATIO = -2.5 / 64; // 字距 ÷ 字号（稿 letter-spacing −2.5）
 
@@ -208,7 +210,6 @@ function HeroAmountText({
   // 小数与光标沿用稿里的降透明度（本就是大字档，§4 按 3:1 口径）
   const { semantic } = useTheme();
   const onHero = semantic.textPrimary;
-  const onHeroDim = withAlpha(semantic.textPrimary, 0.7);
   const onHeroCursor = withAlpha(semantic.textPrimary, 0.9);
 
   const intSize = fontSize;
@@ -223,9 +224,9 @@ function HeroAmountText({
   const decStyle = {
     fontSize: decSize,
     lineHeight: Math.round(decSize * HERO_LINE_RATIO),
-    fontWeight: '300' as const,
-    // 稿：小数部分降透明度
-    color: onHeroDim,
+    // 与整数段同字重同色：只保留「同号同大」一个视觉层级（原稿 300 + 70% 透明度）
+    fontWeight: '500' as const,
+    color: onHero,
   };
   // 光标：白色细竖条（稿里是 2×44 渐变条；这里沿用文字光标字形，尺寸跟着片段字号）
   const cursorStyle = {

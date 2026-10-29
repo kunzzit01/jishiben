@@ -69,7 +69,9 @@ const LARGE_AMOUNT_LETTER_RATIO = -0.02;
  * RM 与小数为 300 且降透明度。其余部件按稿比例派生（58 → RM 24 / 小数 28 / 行高 64 / 字距 −2.4）。
  */
 const HERO_PREFIX_RATIO = 0.414;
-const HERO_DECIMALS_RATIO = 0.483;
+// 尾数（小数段）与整数段同大小（2026-10-29 用户要求「尾数的大小要和前面的数字一样」）。
+// 原值 0.483（整数 40 配小数 22）；改成 1 后小数段直接沿用当前档的字号、行高与字距。
+const HERO_DECIMALS_RATIO = 1;
 const HERO_LINE_RATIO = 1.103;
 const HERO_LETTER_RATIO = -0.0414;
 /** RM 与整数之间的间距（稿：4） */
@@ -131,7 +133,7 @@ export interface MoneyTextProps extends FormatMoneyOptions {
   hero?: boolean;
   /** Hero 整数段字号（默认 58），其余部件按稿比例派生：RM ≈ 0.414×、小数 ≈ 0.483× */
   heroSize?: number;
-  /** Hero 小数段字号（dp，按 heroSize 等比；默认 = 比例派生 0.483×）—— 首页 40 整数配 22 小数 */
+  /** Hero 小数段字号（dp，按 heroSize 等比；默认 = 比例派生 1×，即与整数同大小；传值可单独调小） */
   heroDecimalSize?: number;
   /** Hero 小数段字重（默认 300）*/
   heroDecimalWeight?: FontWeightKey;
@@ -823,10 +825,13 @@ export function MoneyText({
       opacity: 0.8,
       marginRight: HERO_PREFIX_GAP,
     };
+    // 尾数与整数同大小：行高/字距也取整数的值，否则 baseline 会错位；
+    // 不再降透明度（原 0.7 会让尾数看着比前面"小一号"）
     const heroDecimalsStyle: TextStyle = {
       fontSize: heroDecimalsSize,
-      lineHeight: Math.round(heroDecimalsSize * 1.15),
-      opacity: heroDecimalColor ? 1 : 0.7,
+      lineHeight: heroLineHeight,
+      letterSpacing: heroLetterSpacing,
+      opacity: 1,
     };
 
     const heroContent = (
@@ -858,7 +863,7 @@ export function MoneyText({
           />
         ))}
         {heroParts.decimals ? (
-          <AppText variant={variant} weight={heroDecimalWeight ?? '300'} color={heroDecimalColor ?? resolvedColor} style={[heroDecimalsStyle, cellTextStyle]} numberOfLines={1}>
+          <AppText variant={variant} weight={heroDecimalWeight ?? heroIntWeight} color={heroDecimalColor ?? resolvedColor} style={[heroDecimalsStyle, cellTextStyle]} numberOfLines={1}>
             {heroParts.decimals}
           </AppText>
         ) : null}
