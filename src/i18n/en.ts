@@ -599,6 +599,8 @@ export const en = {
     perMonthDay: 'Day %{day} of each month',
     statementDayLabel: 'Statement day',
     dueDayLabel: 'Due day',
+    interestRateLabel: 'Interest rate (APR)',
+    interestRateHint: 'Not set',
     statementDayValue: 'Statement day %{day}',
     dueDayValue: 'Due day %{day}',
     dayValue: 'Day %{day}',

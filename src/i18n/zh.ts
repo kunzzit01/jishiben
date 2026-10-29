@@ -602,6 +602,9 @@ export const zh = {
     perMonthDay: '每月 %{day} 日',
     statementDayLabel: '账单日',
     dueDayLabel: '还款日',
+    // 添加/编辑信用卡时的年利率（%）：逾期未还时用于估算利息，空 = 未设置
+    interestRateLabel: '年利率',
+    interestRateHint: '未设置',
     statementDayValue: '账单日 %{day} 号',
     dueDayValue: '还款日 %{day} 号',
     dayValue: '%{day} 号',

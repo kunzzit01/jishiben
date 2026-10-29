@@ -58,6 +58,33 @@ const NAME_PLACEHOLDER_KEY: Record<AssetType, string> = {
   other: 'addTx.accountNamePlaceholderOther',
 };
 
+// 年利率（%）输入清洗：只留数字与一个小数点、最多两位小数、上限 100。
+// 返回字符串而不是数字：中间态（"18." 之后还要敲 5）必须留住，空串 = 未设置。
+function sanitizeInterestRateInput(raw: string): string {
+  let intPart = '';
+  let decPart = '';
+  let hasDot = false;
+  for (const ch of raw) {
+    if (ch >= '0' && ch <= '9') {
+      if (!hasDot) intPart += ch;
+      else if (decPart.length < 2) decPart += ch;
+    } else if ((ch === '.' || ch === ',') && !hasDot) {
+      hasDot = true;
+    }
+  }
+  intPart = intPart.replace(/^0+(?=\d)/, '');
+  if (!intPart && !decPart) return '';
+  const next = hasDot ? `${intPart}.${decPart}` : intPart;
+  return Number(next) > 100 ? '100' : next;
+}
+
+// 保存用：空 / 非法 → undefined（清空后必须让 interestRate 这个键消失，绝不能落成 0）
+function parseInterestRate(text: string): number | undefined {
+  if (!text.trim()) return undefined;
+  const num = Number(text);
+  return Number.isFinite(num) ? Number(num.toFixed(2)) : undefined;
+}
+
 // 计算器键盘当前在给哪个金额字段打字；null = 键盘收起
 // （信用卡模式下这个字段就是"信用额度"，现金/银行卡是"起始余额"）
 /** 金额字段：balance = 起始余额 / 信用额度；available = 信用卡「现在还剩多少额度」 */
@@ -99,6 +126,11 @@ export default function AddAssetScreen({ route }: any) {
   const [statementDay, setStatementDay] = useState<number>(editAsset?.statementDay ?? 1);
   const [dueDay, setDueDay] = useState<number>(editAsset?.dueDay ?? 5);
   const [daySheet, setDaySheet] = useState<'statement' | 'due' | null>(null);
+  // 年利率（%）：逾期时 AssetScreen 的「预估逾期利息」靠它算。存输入态字符串，
+  // 编辑已有账户时回填；空串 = 未设置（保存成 undefined，不是 0）
+  const [interestRateText, setInterestRateText] = useState<string>(
+    editAsset?.interestRate != null ? String(editAsset.interestRate) : ''
+  );
   // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
   const [keypadHeight, setKeypadHeight] = useState(0);
   const scrollRef = useRef<any>(null);
@@ -301,12 +333,16 @@ export default function AddAssetScreen({ route }: any) {
     }
     const available = Math.max(liveAvail, 0);
     const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
+    // 空 → undefined：JSON 落库时该键直接消失（不是 0），AssetScreen 那边就当作"没设置利率"
+    const interestRate = isCredit ? parseInterestRate(interestRateText) : undefined;
 
     if (isEdit && editAsset) {
       await updateAsset(editAsset.id, {
         // 仅信用卡带账单日/还款日；类型切走后清空，避免残留
         statementDay: isCredit ? statementDay : undefined,
         dueDay: isCredit ? dueDay : undefined,
+        // 年利率只属于信用卡：类型切走或清空都要变回 undefined（键消失）
+        interestRate,
         name: name.trim(),
         icon: typeInfo?.icon ?? editAsset.icon,
         color: typeInfo?.color ?? editAsset.color,
@@ -318,7 +354,7 @@ export default function AddAssetScreen({ route }: any) {
       });
     } else {
       await addAsset({
-        ...(isCredit ? { statementDay, dueDay } : {}),
+        ...(isCredit ? { statementDay, dueDay, interestRate } : {}),
         name: name.trim(),
         icon: typeInfo!.icon,
         color: typeInfo!.color,
@@ -549,6 +585,42 @@ export default function AddAssetScreen({ route }: any) {
                   </AppText>
                   <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
                 </PressableScale>
+              </View>
+            </View>
+
+            {/* 年利率：两列下方、同一信用卡区块内，一条发丝线与上面隔开。
+                逾期时 AssetScreen 用它算「预估逾期利息」；空 = 未设置（存 undefined，不是 0）。 */}
+            <View style={styles.interestDivider} />
+            <View style={styles.interestRow}>
+              <AppText
+                variant="subhead"
+                weight="600"
+                color={semantic.textSecondary}
+                numberOfLines={1}
+                style={styles.interestLabel}
+              >
+                {t('asset.interestRateLabel')}
+              </AppText>
+              <View style={styles.interestValueWrap}>
+                <TextInput
+                  style={styles.interestInput}
+                  value={interestRateText}
+                  onChangeText={(v) => setInterestRateText(sanitizeInterestRateInput(v))}
+                  onFocus={() => setSysKeyboardVisible(true)}
+                  onBlur={() => setSysKeyboardVisible(false)}
+                  placeholder={t('asset.interestRateHint')}
+                  placeholderTextColor={semantic.textTertiary}
+                  selectionColor={semantic.accent}
+                  keyboardType="decimal-pad"
+                  inputMode="decimal"
+                  returnKeyType="done"
+                  maxLength={6}
+                  accessibilityLabel={t('asset.interestRateLabel')}
+                  testID="add-asset-interest-rate"
+                />
+                <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
+                  %
+                </AppText>
               </View>
             </View>
           </View>
@@ -930,6 +1002,35 @@ function makeStyles(
     // 账单日 / 还款日两行
     dayRows: { marginTop: spacing.md, marginBottom: spacing.lg },
     dayRowInner: { flexDirection: 'row', columnGap: 10 },
+    // 年利率行（账单日/还款日下方）：发丝线隔开，标签左、数值 + % 右，
+    // 与卡内其它行的排布同族；数值字号取 body（17），低于金额行的 amountEntry 档位
+    interestDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: semantic.hairline,
+      marginTop: spacing.md,
+    },
+    interestRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      columnGap: spacing.sm,
+      paddingTop: spacing.sm,
+    },
+    // 窄屏：标签先截断（numberOfLines=1），不动右侧输入区
+    interestLabel: { flexShrink: 1, minWidth: 0 },
+    interestValueWrap: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs, flexShrink: 1 },
+    interestInput: {
+      width: 88,
+      flexShrink: 1,
+      paddingVertical: 0,
+      paddingHorizontal: 0,
+      textAlign: 'right',
+      fontSize: typography.body.fontSize,
+      lineHeight: typography.body.lineHeight,
+      fontWeight: '600',
+      color: semantic.textPrimary,
+      fontVariant: ['tabular-nums'],
+    },
     daySelect: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
     amountLabel: {
       fontSize: 14,
