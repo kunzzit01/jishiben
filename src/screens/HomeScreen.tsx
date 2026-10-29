@@ -1735,9 +1735,10 @@ export default function HomeScreen({ navigation }: any) {
     cancelAnimation(pagerX);
     pagerN.value = Math.max(1, totalsByCurrency.length);
     pagerTargetIdx.value = idx;
-    pagerX.value = -idx * amountRowW;
+    // Math.round：亚像素页宽（如 395.5）会让静止位落在半像素上，邻页边缘就会漏出一两像素
+    pagerX.value = -idx * Math.round(amountRowW);
     // 先写 X 再写宽：reaction 读到 w>0 时 X 已经是目标位置
-    pagerW.value = amountRowW;
+    pagerW.value = Math.round(amountRowW);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amountRowW, totalsByCurrency.length]);
 
@@ -3253,7 +3254,11 @@ export default function HomeScreen({ navigation }: any) {
                     <View
                       style={[
                         styles.heroAmountRow,
-                        { position: 'absolute', zIndex: 0, left: 0, top: 0, width: cardSize.width, height: cardSize.height },
+                        /* 宽度用 '100%'（= 卡片内容宽）而不是 cardSize.width：
+                           cardSize 是另一处 onLayout 量到的外框宽，两者一旦差几 px，
+                           翻页条的邻页就会从卡片左边缘漏出一小截（表现为一个「)」形残字）。
+                           '100%' 与下面 heroPagerClip 的宽度来源相同，静止位必然精确。 */
+                        { position: 'absolute', zIndex: 0, left: 0, top: 0, width: '100%', height: cardSize.height },
                       ]}
                       onLayout={(e) => {
                         // 拖动 / 翻页动画期间不理会行宽变化（中途改页宽会让金额盒被重新量、挤出省略号）
