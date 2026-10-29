@@ -102,6 +102,9 @@ export default function AddAssetScreen({ route }: any) {
   // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
   const [keypadHeight, setKeypadHeight] = useState(0);
   const scrollRef = useRef<any>(null);
+  // 用户是否在当前字段真正输入过（切换字段时据此决定要不要提交，空算式不能覆盖已有值）
+  const balanceDirtyRef = useRef(false);
+  const availableDirtyRef = useRef(false);
   const limitYRef = useRef(0);
   const availYRef = useRef(0);
 
@@ -149,6 +152,12 @@ export default function AddAssetScreen({ route }: any) {
     Keyboard.dismiss();
     nameInputRef.current?.blur();
     if (amountField === 'available') return;
+    // 从「总信用额度」切过来时，先把第一格已经敲进去的值落库，
+    // 否则离开编辑态后显示会用旧的 balanceValue → 用户看到"刚输入的数字消失"
+    if (amountField === 'balance' && balanceDirtyRef.current) {
+      setBalanceValue(balanceExpr.confirm());
+      balanceDirtyRef.current = false;
+    }
     availableExpr.reset();
     setAvailableCursor(0);
     setAmountField('available');
@@ -162,6 +171,11 @@ export default function AddAssetScreen({ route }: any) {
     nameInputRef.current?.blur();
     // 金额模式已开着：只收系统键盘/切换光标，不重置算式
     if (amountField === 'balance') return;
+    // 反向切换同理：把「当前可用」已输入的值先落库
+    if (amountField === 'available' && availableDirtyRef.current) {
+      setAvailableValue(availableExpr.confirm());
+      availableDirtyRef.current = false;
+    }
     // 打开键盘即从空态起输：按 5 就是 0.05（分录入法），新输入直接替换旧值
     balanceExpr.reset();
     setBalanceCursor(0);
@@ -183,6 +197,12 @@ export default function AddAssetScreen({ route }: any) {
 
   // 计算器键盘上的 Enter（下一项）箭头已由小数点键取代（标准金额录入）
   const nameInputRef = useRef<TextInput>(null);
+
+  // 金额的"实时有效值"：正在编辑的那一格取算式实时结果，否则取已落库值。
+  // 「已用额度」= 总信用 − 当前可用，必须跟着输入实时变，不能等「完成」。
+  const liveBalance = amountField === 'balance' ? balanceExpr.total : balanceValue;
+  const liveAvailable = amountField === 'available' ? availableExpr.total : availableValue;
+  const liveUsed = Math.max(0, liveBalance - liveAvailable);
 
   // 键盘当前作用在哪个金额字段上
   const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
@@ -268,15 +288,18 @@ export default function AddAssetScreen({ route }: any) {
     const typeInfo = TYPE_OPTIONS.find((t) => t.type === selectedType);
     // 信用卡只填"信用额度"：初始余额从 0 开始，填的数字存成 creditLimit；
     // 现金/银行卡填的数字就是初始余额。账单日/还款日/年利率不在此填写
-    const bal = overrideBalance ?? balanceValue;
+    // 保存前先把两格的实时输入提交，避免"最后一格输完直接点保存"丢失刚敲的数字
+    const liveBal = amountField === 'balance' ? balanceExpr.confirm() : balanceValue;
+    const liveAvail = amountField === 'available' ? availableExpr.confirm() : availableValue;
+    const bal = overrideBalance ?? liveBal;
     // 信用卡两个数值 → 既有模型：creditLimit 存「银行给的初始额度」，
     // initialBalance 存「现有额度 − 初始额度」（负数 = 已用掉多少），
     // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
-    if (isCredit && bal > 0 && availableValue > bal) {
+    if (isCredit && bal > 0 && liveAvail > bal) {
       dialog.alert({ title: t('addTx.creditAvailableTooHigh'), message: t('addTx.creditAvailableTooHighMsg') });
       return;
     }
-    const available = Math.max(availableValue, 0);
+    const available = Math.max(liveAvail, 0);
     const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
 
     if (isEdit && editAsset) {
@@ -463,7 +486,7 @@ export default function AddAssetScreen({ route }: any) {
                 </PressableScale>
               </View>
               <AppText variant="caption" color={semantic.textSecondary}>
-                {formatMoney(Math.max(0, balanceValue - availableValue))}
+                {formatMoney(liveUsed)}
               </AppText>
             </View>
           </View>
@@ -642,7 +665,11 @@ export default function AddAssetScreen({ route }: any) {
           ]}
         >
           <AmountCalculatorKeypad
-            onPressKey={(key) => setActiveCursor(activeExpr.pressKeyAt(key, activeCursor))}
+            onPressKey={(key) => {
+              if (amountField === 'available') availableDirtyRef.current = true;
+              else balanceDirtyRef.current = true;
+              setActiveCursor(activeExpr.pressKeyAt(key, activeCursor));
+            }}
             onPressToday={() => {}}
             hideDateKey
             onClear={() => { activeExpr.reset(0); setActiveCursor(0); }}

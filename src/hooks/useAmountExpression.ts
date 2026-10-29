@@ -20,6 +20,7 @@ interface UseAmountExpressionResult {
   pressKey: (key: string) => void; // 传入 '0'-'9' / '.' / '+' / '-' / 'backspace'
   /** 光标模式按键：cursorFromEnd = 光标距显示串尾部的偏移（0 = 最末尾）。返回新光标偏移 */
   pressKeyAt: (key: string, cursorFromEnd: number) => number;
+  total: number;        // 当前算式的实时结果（仅读取，不重置键盘状态）
   confirm: () => number;  // 返回求值结果，同时重置键盘状态
   reset: (value?: number | string) => void;
 }
@@ -73,6 +74,7 @@ export function useAmountExpression(initialValue?: number | string): UseAmountEx
 
   return {
     displayValue: getExpressionDisplay(state),
+    total: getExpressionTotal(state),
     isMulti: isMultiTerm(state),
     pressKey,
     pressKeyAt,

@@ -1041,6 +1041,9 @@ export default function AssetScreen() {
    * 「编辑」动作：落到「账户设置」段并把光标放进名称框 —— 编辑的就是原来那个输入框，
    * 没有新增编辑状态，也没有新增保存路径。
    */
+  // 账户设置里的「账单日 / 还款日」弹层（信用卡）；选中即写库，立即同步到详情与列表
+  const [sheetDaySheet, setSheetDaySheet] = useState<'statement' | 'due' | null>(null);
+
   const handleDetailEdit = () => {
     setDetailTab('settings');
     setTimeout(() => viewNameInputRef.current?.focus(), 60);
@@ -1836,6 +1839,70 @@ export default function AssetScreen() {
                     </PressableScale>
                   </View>
 
+                  {/* 账单日 / 还款日（仅信用卡）：点开 1–28 弹层，选中即写库并同步到列表/详情 */}
+                  {sheetAsset.type === 'credit' && (
+                    <View style={styles.creditCycleBlock} testID="asset-detail-credit-cycle">
+                      <View style={styles.creditCycleCol}>
+                        <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
+                          {t('asset.statementDayLabel')}
+                        </AppText>
+                        <PressableScale
+                          style={[styles.creditCycleBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
+                          activeScale={0.98}
+                          onPress={() => setSheetDaySheet('statement')}
+                          accessibilityRole="button"
+                          testID="asset-detail-statement-day"
+                        >
+                          <AppText variant="subhead" color={semantic.textPrimary}>
+                            {t('asset.perMonthDay', { day: sheetAsset.statementDay ?? 1 })}
+                          </AppText>
+                          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                        </PressableScale>
+                      </View>
+                      <View style={styles.creditCycleCol}>
+                        <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
+                          {t('asset.dueDayLabel')}
+                        </AppText>
+                        <PressableScale
+                          style={[styles.creditCycleBox, { backgroundColor: semantic.bg, borderColor: semantic.hairline }]}
+                          activeScale={0.98}
+                          onPress={() => setSheetDaySheet('due')}
+                          accessibilityRole="button"
+                          testID="asset-detail-due-day"
+                        >
+                          <AppText variant="subhead" color={semantic.textPrimary}>
+                            {t('asset.perMonthDay', { day: sheetAsset.dueDay ?? 5 })}
+                          </AppText>
+                          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
+                        </PressableScale>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 1–28 选择列表：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层） */}
+                  {sheetAsset.type === 'credit' && sheetDaySheet !== null && (
+                    <View style={styles.creditDayList} testID="asset-detail-day-list">
+                      <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+                        {Array.from({ length: 28 }, (_, k) => k + 1).map((day) => {
+                          const current = sheetDaySheet === 'due' ? sheetAsset.dueDay ?? 5 : sheetAsset.statementDay ?? 1;
+                          return (
+                            <ListRow
+                              key={day}
+                              title={t('asset.dayValue', { day })}
+                              trailing={current === day ? <Ionicons name="checkmark" size={18} color={semantic.accentText} /> : undefined}
+                              onPress={() => {
+                                if (sheetDaySheet === 'due') void updateAsset(sheetAsset.id, { dueDay: day });
+                                else void updateAsset(sheetAsset.id, { statementDay: day });
+                                setSheetDaySheet(null);
+                              }}
+                              testID={`asset-detail-day-${day}`}
+                            />
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+
                   {/* 设为默认账户：Switch 行（随"保存"一并提交） */}
                   <View style={styles.sheetList}>
                     <ListRow
@@ -2051,6 +2118,19 @@ function makeStyles(
     // 分段与头部动作区之间 16
     detailSegWrap: { marginTop: spacing.lg },
     // V2.2c B3：小标签在输入框上方，左边与框内文字对齐（内缩 = 输入框 paddingHorizontal）
+    // 账单日 / 还款日两格（详情 → 账户设置）
+    creditDayList: { marginTop: spacing.sm },
+    creditCycleBlock: { flexDirection: 'row', columnGap: spacing.md, marginTop: spacing.md },
+    creditCycleCol: { flex: 1, minWidth: 0 },
+    creditCycleBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      height: 40,
+      paddingHorizontal: spacing.md,
+      borderRadius: 10,
+      borderWidth: 1,
+    },
     fieldLabelInline: { marginTop: spacing.lg, marginBottom: spacing.xs, marginLeft: spacing.lg },
     nameInput: {
       minHeight: 44,

@@ -25,6 +25,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
+import { getAssetDisplayBalance } from '../utils/creditCard';
 import { ROUTES, AddTxPresetType } from '../navigation/routes';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { TransactionType, Transaction, Category } from '../types';
@@ -2658,7 +2659,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             </AppText>
             {assetId != null && (
               <AppText variant="caption2" color={semantic.textTertiary} numberOfLines={1}>
-                {`${t('addTx.availableBalance')} ${formatMoney(getAssetBalance(assetId))}`}
+                {selectedAsset?.type === 'credit'
+                  ? `${t('asset.creditAvailableShort')} ${formatMoney(getAssetDisplayBalance(selectedAsset, getAssetBalance(assetId)))}`
+                  : `${t('addTx.availableBalance')} ${formatMoney(getAssetBalance(assetId))}`}
               </AppText>
             )}
           </View>
