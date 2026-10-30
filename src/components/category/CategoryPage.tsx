@@ -1227,7 +1227,10 @@ export default function CategoryPage({
                     <PressableScale
                       style={[styles.catIconPreviewBtn, { backgroundColor: semantic.accentSoft }]}
                       activeScale={0.94}
-                      onPress={() => setIconPickerOpen(true)}
+                      onPress={() => {
+                        hapticLight();
+                        setIconPickerOpen(true);
+                      }}
                     >
                       <Ionicons name={inlineIcon} size={22} color={semantic.textPrimary} />
                     </PressableScale>
