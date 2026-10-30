@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import * as Updates from 'expo-updates';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
 /**
@@ -38,11 +39,64 @@ function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void 
   );
 }
 
+type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'latest' | 'ready' | 'failed' | 'unsupported';
+
 export default function AboutAppScreen({ navigation }: any) {
   const { semantic, spacing, isDark } = useTheme();
   const t = useT();
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
+
+  /* ── 手动检查更新（用户 2026-10-30 要的入口） ─────────────────────────
+   * 平时 expo-updates 只在冷启动检查一次；这里手动跑同一套流程：
+   * 检查 → 有新版就下载（下载完成写进缓存）→ 重启生效。
+   * Web / 未配置 OTA 的构建里 isEnabled 为 false，直接给出"当前构建不支持"，
+   * 绝不假装在检查。                                               */
+  const [phase, setPhase] = useState<UpdatePhase>('idle');
+  const busyRef = useRef(false);
+
+  const updateIdText = Updates.updateId ? Updates.updateId.slice(0, 8) : t('addTx.updateBuiltin');
+
+  const phaseText =
+    phase === 'checking'
+      ? t('addTx.updateChecking')
+      : phase === 'downloading'
+        ? t('addTx.updateDownloading')
+        : phase === 'latest'
+          ? t('addTx.updateLatest')
+          : phase === 'ready'
+            ? t('addTx.updateReady')
+            : phase === 'failed'
+              ? t('addTx.updateFailed')
+              : phase === 'unsupported'
+                ? t('addTx.updateUnsupported')
+                : '';
+
+  const handleCheckUpdate = async () => {
+    if (busyRef.current) return;
+    // Web 上 expo-updates 的桩会让 isEnabled 为 true，但调用必抛 —— 显式当"不支持"处理，
+    // 免得把浏览器的正常状态报成"检查失败"
+    if (Platform.OS === 'web' || !Updates.isEnabled) {
+      setPhase('unsupported');
+      return;
+    }
+    busyRef.current = true;
+    setPhase('checking');
+    try {
+      const result = await Updates.checkForUpdateAsync();
+      if (!result.isAvailable) {
+        setPhase('latest');
+        return;
+      }
+      setPhase('downloading');
+      await Updates.fetchUpdateAsync();
+      setPhase('ready');
+    } catch {
+      setPhase('failed');
+    } finally {
+      busyRef.current = false;
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}>
@@ -69,14 +123,55 @@ export default function AboutAppScreen({ navigation }: any) {
           <TouchableOpacity
             style={styles.actionRow}
             activeOpacity={0.6}
+            onPress={handleCheckUpdate}
+            disabled={phase === 'checking' || phase === 'downloading'}
             accessibilityRole="button"
             accessibilityLabel={t('addTx.checkUpdate')}
+            testID="about-check-update"
           >
             <AppText variant="subhead" color={semantic.textSecondary}>
               {t('addTx.checkUpdate')}
             </AppText>
-            <Ionicons name="chevron-forward" size={18} color={semantic.textSecondary} />
+            <View style={styles.actionRight}>
+              {phaseText ? (
+                <AppText variant="footnote" color={semantic.textSecondary} numberOfLines={1}>
+                  {phaseText}
+                </AppText>
+              ) : null}
+              <Ionicons name="chevron-forward" size={18} color={semantic.textSecondary} />
+            </View>
           </TouchableOpacity>
+
+          {/* 已下载好、等重启：给出唯一的动作按钮（重启后立刻是新版本） */}
+          {phase === 'ready' && (
+            <TouchableOpacity
+              style={styles.actionRow}
+              activeOpacity={0.6}
+              onPress={() => {
+                Updates.reloadAsync().catch(() => setPhase('failed'));
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.updateRestart')}
+              testID="about-restart-update"
+            >
+              <AppText variant="subhead" weight="600" color={semantic.accent}>
+                {t('addTx.updateRestart')}
+              </AppText>
+              <Ionicons name="refresh" size={18} color={semantic.accent} />
+            </TouchableOpacity>
+          )}
+
+          {/* 诊断行：现在跑的是哪一份 JS（内置 / 某个 updateId）+ 哪个渠道 */}
+          <Row
+            label={t('addTx.updateBundleRow')}
+            value={Updates.isEnabled ? updateIdText : t('addTx.updateUnsupported')}
+            muted={semantic.textSecondary}
+          />
+          <Row
+            label={t('addTx.updateChannelRow')}
+            value={Updates.channel ?? '-'}
+            muted={semantic.textSecondary}
+          />
         </GlassView>
 
         <AppText variant="caption" color={semantic.textSecondary} style={styles.footer}>
@@ -140,5 +235,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  actionRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   footer: { marginTop: 20 },
 });
