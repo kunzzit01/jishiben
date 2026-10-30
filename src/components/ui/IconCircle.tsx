@@ -14,7 +14,7 @@
 //   <IconCircle icon="grid-outline" />   // 中性「全部」
 
 import React, { useEffect, useMemo } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { Platform, StyleSheet, View, ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -270,6 +270,14 @@ export function IconCircle({
   // 画在背景与内容之间，挂在根节点会被球面 SVG 盖住）
   const innerShadow = `inset 0px 2px 1px rgba(255,255,255,0.55), inset 0px -3px 6px ${dark}`;
 
+  /* 2026-10-30 · 安卓绘制降级
+   * 一个磁贴原本要画：SVG 径向渐变球 + 月牙高光渐变 + 右缘反光弧渐变 + 外阴影层 + 内阴影层。
+   * 其中 boxShadow（尤其 inset）在安卓上是**逐节点离屏合成**，40 个磁贴就是 80 个离屏层，
+   * 这是「进页面那一两秒掉帧」的主要绘制开销（gfxinfo: Slow issue draw commands 18/18）。
+   * 安卓只保留球体本身（径向渐变 + 月牙高光），去掉外阴影、内阴影层与第二层反光弧；
+   * iOS / Web 保持原样（它们有硬件合成，代价低）。 */
+  const heavyEffects = Platform.OS !== 'android';
+
   return (
     <Animated.View
       style={[
@@ -278,7 +286,7 @@ export function IconCircle({
           width: size,
           height: size,
           borderRadius: radius,
-          boxShadow: selectedShadow,
+          boxShadow: heavyEffects ? selectedShadow : undefined,
         },
         animatedRoot,
         style,
@@ -307,20 +315,24 @@ export function IconCircle({
         <Circle cx={radius} cy={radius} r={radius} fill={`url(#${ballId})`} />
         {/* 左上弧形高光（V2.2）：贴球面的月牙，两端收尖（几何见 glossCrescentPath 注释） */}
         <Path d={crescentD} fill={`url(#${CRESCENT_GRADIENT_ID})`} />
-        {/* 右下边缘淡反光弧（白 18%，细；两端淡出） */}
-        <Path
-          d={edgeD}
-          fill="none"
-          stroke={`url(#${EDGE_GLOSS_GRADIENT_ID})`}
-          strokeWidth={Math.max(1, Math.round(size * 0.035 * 100) / 100)}
-          strokeLinecap="round"
-        />
+        {/* 右下边缘淡反光弧（白 18%，细；两端淡出）——安卓省掉这一层梯度描边 */}
+        {heavyEffects ? (
+          <Path
+            d={edgeD}
+            fill="none"
+            stroke={`url(#${EDGE_GLOSS_GRADIENT_ID})`}
+            strokeWidth={Math.max(1, Math.round(size * 0.035 * 100) / 100)}
+            strokeLinecap="round"
+          />
+        ) : null}
       </Svg>
       {/* 内阴影层：压在高光之上、图标之下 */}
-      <View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { borderRadius: radius, boxShadow: innerShadow }]}
-      />
+      {heavyEffects ? (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { borderRadius: radius, boxShadow: innerShadow }]}
+        />
+      ) : null}
       {icon ? (
         <Ionicons
           name={icon}

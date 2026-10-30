@@ -446,6 +446,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   const perfRendersRef = useRef(0);
   perfRendersRef.current += 1;
   const [perf, setPerf] = useState<{ first: number; full: number | null; renders: number } | null>(null);
+  const [frameStats, setFrameStats] = useState<{ avg: number; max: number } | null>(null);
 
   const [mountedSections, setMountedSections] = useState(2);
   // 切「支出 / 收入」→ 重新从 2 组开始挂
@@ -533,6 +534,29 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   }, [categories, categoryGroups, catOrder, groupOrder, manageType]);
   // 手势回调是稳定闭包，读"当前渲染顺序"走 ref
   sectionsRef.current = sections;
+
+  /* 帧间隔采样：进页面后连采 70 帧，报平均 / 最差。
+   * 绘制卡顿会直接体现为 rAF 回调被推迟 —— 这是真机上能量化「绘制到底慢不慢」的信号。 */
+  useEffect(() => {
+    let last = Date.now();
+    const deltas: number[] = [];
+    let raf = 0;
+    const loop = () => {
+      const now = Date.now();
+      deltas.push(now - last);
+      last = now;
+      if (deltas.length < 70) {
+        raf = requestAnimationFrame(loop);
+      } else {
+        const avg = Math.round(deltas.reduce((s, v) => s + v, 0) / deltas.length);
+        let max = 0;
+        for (const d of deltas) if (d > max) max = d;
+        setFrameStats({ avg, max: Math.round(max) });
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   // 首帧耗时：mount → 第二帧（第一帧真正画出来的时刻）
   useEffect(() => {
@@ -915,7 +939,8 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
       (perf.full == null ? '…' : perf.full + 'ms') +
       ' · 渲染 ' +
       perf.renders +
-      ' 次'
+      ' 次 · 帧 ' +
+      (frameStats ? '均 ' + frameStats.avg + ' / 最差 ' + frameStats.max + 'ms' : '采样中')
     : '';
 
   return (
