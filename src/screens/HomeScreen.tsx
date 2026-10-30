@@ -442,7 +442,7 @@ function devCalLog(label: string) {
 
 /** 列表格子统一的过渡包装：淡出 × 上升 × 日历下沉。所有格子共用同一份计算，没有逐行错峰。
  *  纯 UI 线程 useAnimatedStyle，不用 entering / exiting 属性（Fabric 下会 addViewAt 崩） */
-function ListFx({ outP, rise, listY, listO, shiftX, children, pointerEvents }: { outP: SharedValue<number>; rise: SharedValue<number>; listY: SharedValue<number>; listO: SharedValue<number>; shiftX: SharedValue<number>; children: React.ReactNode; /** 日历模式下账单行不吃点击（安卓上必须逐行关，父层关会连头部一起关掉） */ pointerEvents?: 'none' | 'auto' }) {
+function ListFx({ outP, rise, listY, listO, shiftX, children, pointerEvents, hidden }: { outP: SharedValue<number>; rise: SharedValue<number>; listY: SharedValue<number>; listO: SharedValue<number>; shiftX: SharedValue<number>; children: React.ReactNode; /** 日历模式下账单行不吃点击（安卓上必须逐行关，父层关会连头部一起关掉） */ pointerEvents?: 'none' | 'auto'; /** 日历模式下整块行从布局与命中里摘掉（display:none）：它们 opacity 0 却仍盖在日历卡上层，会把药丸/月格的点击吃掉 */ hidden?: boolean }) {
   const style = useAnimatedStyle(() => {
     const r = rise.value;
     return {
@@ -453,11 +453,17 @@ function ListFx({ outP, rise, listY, listO, shiftX, children, pointerEvents }: {
     };
   });
   return (
-    <Reanimated.View pointerEvents={pointerEvents} style={style}>
+    <Reanimated.View
+      pointerEvents={pointerEvents}
+      style={[style, hidden ? listFxStyles.hidden : null]}
+    >
       {children}
     </Reanimated.View>
   );
 }
+
+/** 日历模式：整块行不占布局、不参与命中（等价于从树上摘掉，但不丢组件状态） */
+const listFxStyles = StyleSheet.create({ hidden: { display: 'none' } });
 
 /** 净资产胶囊里的一个币种文字：按「当前页距离」淡入淡出，纯 UI 线程（拖动中不 setState） */
 const PILL_LABEL_LAYER = { position: 'absolute' as const, left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center' as const, justifyContent: 'center' as const };
@@ -2294,7 +2300,7 @@ export default function HomeScreen({ navigation }: any) {
   const calBlockRowsRef = useRef(false);
 
   const renderTxRow = useCallback(({ item, index, section }: { item: Transaction; index: number; section: TxDaySection }) => (
-    <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
+    <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'} hidden={calBlockRowsRef.current}>
       {buildTxRow(item, index, section, item.id === flashTxId)}
     </ListFx>
     // 依赖：渲染期读到的都列进来；stable 的 renderItem 让 VirtualizedList 的 CellRenderer
@@ -2352,7 +2358,7 @@ export default function HomeScreen({ navigation }: any) {
   // 列表内的日期头：切币种过渡时跟着列表淡出 / 上滑（吸顶条 / pinnedHeader 仍直接用 renderDayHeader，不动）
   const renderSectionHeaderEntering = useCallback(
     ({ section }: { section: TxDaySection }) => (
-      <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
+      <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'} hidden={calBlockRowsRef.current}>
         {renderDayHeader({ section })}
       </ListFx>
     ),
@@ -3051,7 +3057,7 @@ export default function HomeScreen({ navigation }: any) {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           // 日历模式不显示空状态（列表为空是刻意的）；真没账单时才给「记第一笔」
-          <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
+          <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'} hidden={calBlockRowsRef.current}>
             {renderEmptyState()}
           </ListFx>
         }
