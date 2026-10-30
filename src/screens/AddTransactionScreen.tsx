@@ -4,20 +4,16 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   Pressable,
   ScrollView,
   ActivityIndicator,
   Animated,
   Modal,
-  Switch,
   Platform,
   Keyboard,
   BackHandler,
-  PanResponder,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useSharedValue } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,7 +26,7 @@ import { ROUTES, AddTxPresetType } from '../navigation/routes';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { TransactionType, Transaction, Category } from '../types';
 import { useT, useLanguage } from '../i18n/LanguageContext';
-import { getCategoryLabel, getGroupLabel, findCategoryIdByChineseName } from '../i18n/categories';
+import { getCategoryLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { scanReceipt } from '../utils/scanReceipt';
 import { isAiConfigured } from '../config/aiConfig';
@@ -38,9 +34,8 @@ import { isAiConfigured } from '../config/aiConfig';
 /** 大组排序的存储键：与「管理类别」页共用同一个键，两页顺序保持一致 */
 const GROUP_ORDER_KEY = '@jizhang/categoryGroupOrder';
 import { getCurrencySymbol } from '../utils/currencies';
-import { CATEGORY_ICON_OPTIONS, CATEGORY_COLOR_OPTIONS, CategoryIconName } from '../constants/categoryAddOptions';
-// 分类网格编辑器（虚线占位框 / 长按 200ms 拖拽 / 虚线＋新增磁贴 / 删除角标）——与管理类别页同一个组件
-import { CategoryGridEditor, sortByOrder } from '../components/CategoryGridEditor';
+// 选类别整页 = 与「财务规划 → 类别分类」共用的同一份 CategoryPage（玻璃组卡 / 3 列 / 可拖可删可增）
+import CategoryPage from '../components/category/CategoryPage';
 import { hapticLight, hapticSelection, hapticSuccess, hapticWarning } from '../utils/haptics';
 import { useTheme } from '../theme/useTheme';
 import { useLayout } from '../theme/useLayout';
@@ -60,7 +55,6 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import IconButton from '../components/ui/IconButton';
-import ScreenHeader from '../components/ui/ScreenHeader';
 import GlassView from '../components/ui/GlassView';
 import { withAlpha } from '../components/ui/color';
 import HeroGradient from '../components/ui/HeroGradient';
@@ -524,60 +518,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     [categories, type]
   );
 
-  // 选择类别页：支出按大类分组分节（组序=EXPENSE_CATEGORY_GROUPS，无组分类落尾部"其他"节）；
-  // 折叠状态只在本页用，保存后重置。搜索时全部强制展开并按名字过滤。
-  // 编辑模式（长按任一图标进入，iOS 风格）：图标抖动 + 删除角标，把分类拖到目标大组卡片标题上即换组
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  // 组内联添加（TASK-004：从类别分类页并入——能力补齐后选择类别页自成一页，不再跳转）
-  const [addingGroupName, setAddingGroupName] = useState<string | null>(null);
-  const [inlineName, setInlineName] = useState('');
-  const [inlineIcon, setInlineIcon] = useState<CategoryIconName>(CATEGORY_ICON_OPTIONS[0]);
-  const [inlineColor, setInlineColor] = useState(CATEGORY_COLOR_OPTIONS[0]);
-  // TASK-012④：名称输入框跟随焦点——聚焦时若被键盘挡住，滚动到输入框可见
-  const inlineInputRef = useRef<TextInput | null>(null);
-  const categoryScrollRef = useRef<ScrollView | null>(null);
-  // 网格拖拽用：页面滚动量（内容坐标换算）+ 内容高度（贴边自动滚动夹取）
-  const categoryScrollYSV = useSharedValue(0);
-  const categoryContentHRef = useRef(0);
-  const keyboardHeightRef = useRef(0);
-  // TASK-016⑥：聚焦时把输入框滚到键盘上方。
-  // measureLayout 在新架构(Fabric)下要求原生 ref，getInnerViewNode() 直接报
-  // "must be called with a ref to a native component"——放弃测量输入框本身，
-  // 改用分节卡片 onLayout 记录各组在 ScrollView 内容里的 y（卡片是 ScrollView
-  // 直接子节点，layout.y 就是内容坐标，零测量歧义），聚焦时按组名查表滚动。
-  const groupContentYRef = useRef<Record<string, number>>({});
-  // 内联小卡在组卡内的 y 偏移（网格可能占多行，只滚到卡顶可能还盖不住/露不出输入框）
-  const inlineCardOffsetRef = useRef<Record<string, number>>({});
-  // 正在编辑内联小卡的组名：键盘弹出（keyboardDidShow）时补滚一次——
-  // autoFocus 聚焦发生在键盘高度还未知的时候，先按 0 滚一版，键盘弹起后校正
-  const inlineFocusGroupRef = useRef<string | null>(null);
-  const scrollInlineInputIntoView = (groupName: string, keyboardH?: number) => {
-    requestAnimationFrame(() => {
-      const scroll = categoryScrollRef.current;
-      if (!scroll) return;
-      const cardY = groupContentYRef.current[groupName];
-      if (cardY === undefined) return;
-      const inlineY = inlineCardOffsetRef.current[groupName] ?? 0;
-      // 头部留白 = 键盘高度的一半再减 60：键盘矮时输入框大致露在视口中部，
-      // 键盘高时相应多滚。keyboardH 不传按当前 ref 值（键盘未弹时为 0，先滚一版）
-      const kb = keyboardH ?? keyboardHeightRef.current;
-      scroll.scrollTo({ y: Math.max(0, cardY + inlineY - Math.max(60, kb / 2)), animated: true });
-    });
-  };
-  // 提交：加进目标组、轻震反馈、收起表单（不用弹窗打断——展开处立即可见新增结果）
-  const handleInlineAdd = async (groupName: string) => {
-    const name = inlineName.trim();
-    if (!name) return;
-    await addCategory({ name, icon: inlineIcon, color: inlineColor, type: type as 'expense' | 'income', group: groupName });
-    hapticSuccess();
-    setInlineName('');
-    setInlineIcon(CATEGORY_ICON_OPTIONS[0]);
-    setInlineColor(CATEGORY_COLOR_OPTIONS[0]);
-    setAddingGroupName(null);
-  };
+  // 新建分组已随选类别页搬进共享 CategoryPage：本页这个开关恒为 false，
+  // 但仍被浮层守卫（forceHideWanted / overlayOpen / 安卓返回键）引用，故保留声明
   const [newGroupFormOpen, setNewGroupFormOpen] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-  // 编辑模式拖动排序（TASK-016：资产页三条横线式，只在大组内部排序、不跨组）
+
+  // 类别顺序 = 共享页落库后的镜像（本页不再自己排序、不再写 @jizhang/categoryOrder）；
+  // 首屏仍从同一对存储键读一次，拖完返回后快捷格与「全部」抽屉按同一份顺序
   const [categoryOrder, setCategoryOrder] = useState<Record<string, number>>({});
   useEffect(() => {
     AsyncStorage.getItem(CATEGORY_ORDER_KEY)
@@ -588,87 +534,13 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       })
       .catch(() => {});
   }, []);
-  const persistCategoryOrder = (next: Record<string, number>) => {
-    setCategoryOrder(next);
-    AsyncStorage.setItem(CATEGORY_ORDER_KEY, JSON.stringify(next)).catch(() => {});
-  };
-  // 某个大组内拖拽结束：把 0..n-1 写回该组这几个分类的序号；缺序号的分类排在其原本位置之后
-  const handleCatReorder = (groupItems: Category[]) => {
-    const next = { ...categoryOrder };
-    groupItems.forEach((item, index) => {
-      next[item.id] = index;
-    });
-    persistCategoryOrder(next);
-    hapticSelection();
-  };
-  // 图标选择底部弹层（TASK-016 两步小卡：点预览方块打开，119 个图标 6 列）
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const confirmDeleteCategory = (c: Category) => {
-    // 防呆：删的是大组里最后一个分类时提示"大组将一并移除"（组删除的既有级联行为不变，只加文案）
-    const groupSize = filteredCategories.filter((x) => x.group === c.group).length;
-    const isLastInGroup = !!c.group && groupSize <= 1;
-    dialog.alert({
-      title: t('addTx.deleteCategoryTitle'),
-      message: isLastInGroup
-        ? t('addTx.deleteLastInGroupMsg', { name: c.name, group: getGroupLabel(c.group as string, t) })
-        : t('addTx.deleteCategoryMsg', { name: c.name }),
-      buttons: [
-        { text: t('common.cancel'), style: 'cancel' },
-        { text: t('common.delete'), style: 'destructive', onPress: () => deleteCategory(c.id) },
-      ],
-    });
-  };
 
-  // 确认删除大组：自定义组删除组记录；默认组把组内分类移到"其他"（组空了自动隐藏）
-  const confirmDeleteGroup = (groupName: string, itemCount: number) => {
-    const members = filteredCategories.filter((c) => c.group === groupName);
-    const isCustom = categoryGroups.some((g) => g.name === groupName);
-    dialog.alert({
-      title: t('addTx.deleteGroupTitle', { name: groupName }),
-      message: itemCount > 0 ? t('addTx.deleteGroupMsg', { count: itemCount }) : t('addTx.emptyGroup'),
-      buttons: [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: () => {
-            if (isCustom) {
-              deleteCategoryGroup(groupName);
-            } else {
-              members.forEach((c) => updateCategory(c.id, { group: undefined }));
-            }
-          },
-        },
-      ],
-    });
-  };
-  // 离开本页/切换类型时重置编辑与搜索状态（分组默认全部展开，点卡片空白处可收起）
-  useEffect(() => {
-    setCollapsedGroups(new Set<string>());
-    setNewGroupFormOpen(false);
-    setNewGroupName('');
-  }, [type, step, categoryGroups]);
-  // 收入/支出各自的大组分组（默认组 + 自定义组 + 其他），支出与收入流程完全一致
-  // ── 大组排序（本页与「管理类别」页共用 @jizhang/categoryGroupOrder）──
-  // 为什么不用 RNGH：本页组头里的 Pressable 在按下那刻就自封 responder，RNGH 的 DOM 监听收不到
-  // 后续 move（实测 onStart 从未触发）。PanResponder 走 React 的 responder 协商，
-  // 且在 capture 阶段接管 → 长按满 250ms 后纵向移动即抬起整组，短按仍落到组头自己的 onPress。
+  // 图标选择弹层随选类别页搬进共享 CategoryPage：本页恒为 false，仅供浮层守卫引用
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+
+  // 大组顺序的镜像：与共享 CategoryPage 共用 @jizhang/categoryGroupOrder ——
+  // 本页只保留首屏读取 + 共享页落库后的回调镜像，不再自己写这个键
   const [groupOrder, setGroupOrder] = useState<Record<string, number>>({});
-  /** 拖动中的整组：from=起始位、hover=当前落点、dy=跟手位移 */
-  const [gDrag, setGDrag] = useState<{ group: string; from: number; dy: number; hover: number } | null>(null);
-  const groupPanCache = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
-  /** 图标拖拽进行中（CategoryGridEditor 通告）—— 组排序必须让位，两者互斥 */
-  const iconDraggingRef = useRef(false);
-  /** 组拖拽期间 + 结束后 350ms 内，屏蔽组头点击（否则松手会被当成折叠） */
-  const groupTapBlockUntilRef = useRef(0);
-  const handleIconDragging = (v: boolean) => {
-    iconDraggingRef.current = v;
-  };
-  const groupPressAtRef = useRef(0);
-  /** 每张组卡的布局（相对滚动内容）：拖动时算落点、算其它卡让位、画虚线占位都靠它 */
-  const gBoxRef = useRef<Record<string, { y: number; h: number }>>({});
-  const GROUP_HOLD_MS = 250;
-  const GROUP_START_DY = 8;
 
   useEffect(() => {
     AsyncStorage.getItem(GROUP_ORDER_KEY)
@@ -681,126 +553,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       })
       .catch(() => {});
   }, []);
-
-  const applyGroupOrder = (next: Record<string, number>) => {
-    setGroupOrder(next);
-    AsyncStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(next)).catch(() => {});
-  };
-
-  const groupList = () => orderedExpenseSectionsRef.current.map((s) => s.group);
-
-  /** 落点判定：手指所在整卡的中心越过谁的"中线"，就排到谁后面（自然支持拖到最底）。
-   *  dy 传"有效位移"= 手指位移 + 拖动期间自动滚动产生的滚动量，否则贴边滚动时落点算不对。 */
-  const computeHover = (group: string, dy: number) => {
-    const list = groupList();
-    const box = gBoxRef.current[group];
-    if (!box) return Math.max(0, list.indexOf(group));
-    const center = box.y + dy + box.h / 2;
-    let idx = 0;
-    list.forEach((g, i) => {
-      const b = gBoxRef.current[g];
-      if (b && center >= b.y + b.h / 2) idx = i;
-    });
-    return Math.min(list.length - 1, Math.max(0, idx));
-  };
-
-  /** 其它组卡的让位位移：被拖组跨过谁，谁就往相反方向挪一个"被拖组高度" */
-  const shiftForGroup = (group: string) => {
-    if (!gDrag) return 0;
-    const list = groupList();
-    const i = list.indexOf(group);
-    const draggedH = gBoxRef.current[gDrag.group]?.h ?? 0;
-    if (group === gDrag.group) return 0;
-    if (gDrag.from < gDrag.hover && i > gDrag.from && i <= gDrag.hover) return -draggedH;
-    if (gDrag.from > gDrag.hover && i >= gDrag.hover && i < gDrag.from) return draggedH;
-    return 0;
-  };
-
-  /** 拖动期间持续采样：手指停在边缘带里就滚动列表，让用户能拖到看不见的位置（含最底部） */
-  const gScroll0Ref = useRef(0);
-  const gFingerYRef = useRef(-1);
-  const gLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stopGroupScrollLoop = () => {
-    if (gLoopRef.current) {
-      clearInterval(gLoopRef.current);
-      gLoopRef.current = null;
-    }
-  };
-  const startGroupScrollLoop = () => {
-    stopGroupScrollLoop();
-    gLoopRef.current = setInterval(() => {
-      const fingerY = gFingerYRef.current;
-      if (fingerY < 0) return;
-      const winH = windowHeight;
-      const EDGE = 140;
-      let delta = 0;
-      if (fingerY < EDGE) delta = -12;
-      else if (fingerY > winH - EDGE) delta = 12;
-      if (!delta) return;
-      const next = Math.max(0, categoryScrollYSV.value + delta);
-      categoryScrollRef.current?.scrollTo({ y: next, animated: false });
-    }, 16);
-  };
-
-  const getGroupPanHandlers = (group: string) => {
-    const cached = groupPanCache.current[group];
-    if (cached) return cached.panHandlers;
-    const responder = PanResponder.create({
-      // 按下只记时刻，不接管：短按照旧走组头 onPress（折叠/展开、垃圾桶）
-      onStartShouldSetPanResponderCapture: () => {
-        groupPressAtRef.current = Date.now();
-        return false;
-      },
-      onStartShouldSetPanResponder: () => !iconDraggingRef.current,
-      // 长按满 250ms 后纵向移动 ≥8px → 在 capture 阶段接管（子节点此时抢不走）
-      // 把手是独立小热区：按下即接管（原生 responder 下最可靠；不需要长按闸门）
-      onMoveShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: () => false,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (_e, g) => {
-        hapticLight();
-        groupTapBlockUntilRef.current = Date.now() + 60000;
-        const from = Math.max(0, groupList().indexOf(group));
-        gScroll0Ref.current = categoryScrollYSV.value;
-        gFingerYRef.current = g.y0;
-        startGroupScrollLoop();
-        setGDrag({ group, from, dy: 0, hover: from });
-      },
-      onPanResponderMove: (_e, g) => {
-        const from = Math.max(0, groupList().indexOf(group));
-        gFingerYRef.current = g.moveY;
-        // 有效位移 = 手指位移 + 自动滚动产生的滚动量（贴边滚动时卡片仍跟手）
-        const eff = g.dy + (categoryScrollYSV.value - gScroll0Ref.current);
-        const hover = computeHover(group, eff);
-        setGDrag({ group, from, dy: eff, hover });
-      },
-      onPanResponderRelease: () => {
-        stopGroupScrollLoop();
-        groupTapBlockUntilRef.current = Date.now() + 350;
-        gFingerYRef.current = -1;
-        setGDrag((cur) => {
-          if (cur) {
-            const list = groupList();
-            const next = [...list];
-            const [moved] = next.splice(cur.from, 1);
-            next.splice(Math.min(next.length, cur.hover), 0, moved);
-            const order: Record<string, number> = {};
-            next.forEach((g, i) => (order[g] = i));
-            applyGroupOrder(order);
-          }
-          return null;
-        });
-      },
-      onPanResponderTerminate: () => {
-        stopGroupScrollLoop();
-        groupTapBlockUntilRef.current = Date.now() + 350;
-        gFingerYRef.current = -1;
-        setGDrag(null);
-      },
-    });
-    groupPanCache.current[group] = responder;
-    return responder.panHandlers;
-  };
 
   const groupedExpenseSections = useMemo(() => {
     const customGroups = categoryGroups.filter((g) => g.type === type);
@@ -835,8 +587,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       (a, b) => (groupOrder[a.group] ?? Number.MAX_SAFE_INTEGER) - (groupOrder[b.group] ?? Number.MAX_SAFE_INTEGER)
     );
   }, [groupedExpenseSections, groupOrder]);
-  const orderedExpenseSectionsRef = useRef<{ group: string }[]>([]);
-  orderedExpenseSectionsRef.current = orderedExpenseSections;
 
   // ---------- 类别横排"最近用过"：外面直接显示4个，点了就直接选中，不用进选择页 ----------
   const [recentCategoryIds, setRecentCategoryIds] = useState<string[]>([]);
@@ -1111,17 +861,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       setKeyboardVisible(true);
       setKeyboardHeight(e?.endCoordinates?.height ?? 0);
-      keyboardHeightRef.current = e?.endCoordinates?.height ?? 0;
-      // TASK-016⑥：内联小卡输入框聚焦中 → 键盘弹起后按真实高度校正滚动位置
-      if (isFocused && inlineFocusGroupRef.current) {
-        scrollInlineInputIntoView(inlineFocusGroupRef.current, keyboardHeightRef.current);
-      }
       // 系统键盘弹出 → 自绘面板收起让位；但备注框聚焦的共存场景例外
       if (isFocused && !noteFocusRef.current) setAmountKeypadOpen(false);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
-      keyboardHeightRef.current = 0;
       // 系统键盘收起 → 自绘面板重新出现（含 Android 返回键收起键盘的情况）
       if (isFocused && !noteFocusRef.current) setAmountKeypadOpen(true);
     });
@@ -1141,11 +885,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     Platform.OS === 'ios' && keyboardVisible
       ? Math.max(0, Math.min(keyboardHeight, windowHeight - insets.top - keypadAreaH))
       : 0;
-  // 图标选择弹层（Modal）最大高度 = min(屏高 × 0.72, 视口高 − 顶部安全区)；
-  // 底部安全区由它自己的 paddingBottom（bottomInset + 16）让出，不重复扣。
-  const iconPickerMaxHeight = Math.round(Math.max(0, Math.min(windowHeight * 0.72, windowHeight - insets.top)));
-
-
   // 最终网格内容：固定在前的（本次选过 + 最近用过）、按默认顺序补齐到可见容量；
   // 多出来的（历史用过的）不再按字符估宽裁剪丢弃 —— 网格区可滚动（T15），「全部」永远殿后
   const displayCategories = useMemo(() => {
@@ -2209,314 +1948,29 @@ export default function AddTransactionScreen({ navigation, route }: any) {
 
   // ---------- 支出/收入：选分类 ----------
   if (step === 'category') {
+    // 与「财务规划 → 类别分类」同一份页面（components/category/CategoryPage）：
+    // 玻璃组卡 + 玻璃返回钮 + 3 列网格 + 可拖 / 可删 / 可增全在共享页里，这里只做参数适配。
+    // ⚠ onBack 必须回本屏的表单步骤：类别是同一屏的 step、不是独立路由，
+    //   写成 navigation.goBack() 会多弹一层。
     return (
       <EdgeBackSwipe onBack={edgeBackHome}>
-      <SafeAreaView style={styles.container} edges={['top']}
-      onTouchStart={() => { Keyboard.dismiss(); }}>
-        {/* 二级页标准页头（T15 换 ScreenHeader）：返回 + 居中标题；本页进入即编辑态，没有编辑/完成开关 */}
-        <ScreenHeader
-          title={t('addTx.selectCategory')}
+        <CategoryPage
+          selectMode
+          // 类型映射与 filteredCategories 对齐（转账按支出走；本页没有第四种类型）
+          initialType={type === 'transfer' ? 'expense' : type}
           onBack={() => setStep('detail')}
+          onPickCategory={handlePickCategory}
+          onOrderChange={({ categoryOrder: nextCatOrder, groupOrder: nextGroups }) => {
+            // 共享页落库后把载荷镜像进本地 state：快捷格与「全部」抽屉按同一份顺序重排。
+            // 本页不再自己写这两个存储键（键归共享页写，两处各写一份只会互相覆盖）
+            setCategoryOrder(nextCatOrder);
+            const mirrored: Record<string, number> = {};
+            nextGroups.forEach((group, index) => {
+              mirrored[group] = index;
+            });
+            setGroupOrder(mirrored);
+          }}
         />
-
-        {/* 类别选择页不再显示 支出/收入/转账/兑换 切换栏：进来是什么类型就只显示该类型的类别 */}
-
-        <ScrollView
-          ref={categoryScrollRef}
-          onScroll={(e) => {
-            // 网格拖拽要把绝对坐标换算成内容坐标：顺手记下滚动量，再喂给浮空 Tab 栏
-            categoryScrollYSV.value = e.nativeEvent.contentOffset.y;
-            onTabScroll?.(e);
-          }}
-          onContentSizeChange={(_w, h) => {
-            categoryContentHRef.current = h;
-          }}
-          scrollEventThrottle={16}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: tabClearance }}
-        >
-          {/* 按大类分节（每节一张圆角卡片、可折叠）；本页进入即编辑态（没有「编辑 / 完成」开关）：
-              点磁贴 = 选中该分类并返回 · 长按 200ms 抬起可拖动组内排序 · 图标右上角红色角标删除 ·
-              网格最后一项是虚线「＋」磁贴，复用组内两步小卡的新增流程 */}
-          {/* 原槽位不再画虚线占位（用户定版：虚线隐藏）：
-              被拖的那张卡跟手走、其它卡让位后，原位自然留白，不再额外画框。 */}
-          {orderedExpenseSections.map(({ group, items, custom }) => {
-              const expanded = !collapsedGroups.has(group);
-              const themeColor = colors.link;
-              const toggleGroup = () => {
-                if (Date.now() < groupTapBlockUntilRef.current) return; // 拖拽刚结束的补发点击不算
-                setCollapsedGroups((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(group)) next.delete(group);
-                  else next.add(group);
-                  return next;
-                });
-              };
-              // 新增入口的开关：组头药丸与网格末尾的虚线＋磁贴共用同一份状态
-              const toggleInlineAdd = () => {
-                hapticLight();
-                if (addingGroupName === group) {
-                  setAddingGroupName(null);
-                  setInlineName('');
-                } else {
-                  setInlineName('');
-                  setInlineIcon(CATEGORY_ICON_OPTIONS[0]);
-                  setInlineColor(CATEGORY_COLOR_OPTIONS[0]);
-                  setAddingGroupName(group);
-                }
-              };
-              // 组内按持久化序号排（与「管理类别」页共用 @jizhang/categoryOrder）：
-              // 拖过的顺序 reload 后仍然保持，没序号的按原数组顺序殿后
-              const orderedItems = sortByOrder(items, categoryOrder);
-              const card = (
-                <View
-                  key={group}
-                  style={[
-                    styles.catGroupCard,
-                    // 让位：被拖组跨过谁，谁就朝相反方向挪一个"被拖组高度"（与图标磁贴同一手感）
-                    shiftForGroup(group) ? { transform: [{ translateY: shiftForGroup(group) }] } : null,
-                    // 被拖的那张：跟手位移 + 抬到最上层 + 轻微透明
-                    gDrag?.group === group
-                      ? { transform: [{ translateY: gDrag.dy }], zIndex: 20, opacity: 0.97 }
-                      : null,
-                  ]}
-                  /* TASK-016⑥：卡片是 ScrollView 直接子节点，layout.y 即内容坐标——
-                     聚焦滚动按组名查这张表，绕开 Fabric 不支持的 measureLayout */
-                  onLayout={(e) => {
-                    const { y, height } = e.nativeEvent.layout;
-                    groupContentYRef.current[group] = y;
-                    gBoxRef.current[group] = { y, h: height };
-                  }}
-                >
-                  {/* TASK-012②：收起大列表只点头部行（箭头所在行）；点卡片其余区域/空白不收 */}
-                  {/* 组头行 = 折叠区（Pressable） + 排序把手（独立 View） + 删除（TouchableOpacity）。
-                      把手必须是 Pressable 的兄弟节点：嵌套时 Pressable 先成为 responder，
-                      PanResponder 拿不到 grant，表现为「拖不动」并把拖动误判成点按（折叠） */}
-                  <View style={styles.catGroupHeader}>
-                  <View style={styles.catGroupHeaderMain}>
-                  <Pressable
-                    style={styles.catGroupHeaderTap}
-                    onPress={toggleGroup}
-                    hitSlop={{ top: 6, bottom: 6 }}
-                  >
-                    <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={14} color={themeColor} />
-                    <Text style={[styles.catGroupTitle, { color: themeColor }]}>{getGroupLabel(group, t)}</Text>
-                    {/* 新增入口只在网格末尾的虚线＋磁贴上（分组头不再挂「＋ 新增」药丸） */}
-                    <View style={styles.catGroupCountWrap}>
-                      <Text style={styles.catGroupCount}>{t('addTx.itemsCount', { count: items.length })}</Text>
-                    </View>
-                  </Pressable>
-                    {/* 组排序把手（≡）：唯一入口 */}
-                    <View
-                      {...getGroupPanHandlers(group)}
-                      style={styles.catGroupDragHandle}
-                      accessibilityRole="adjustable"
-                      accessibilityLabel={`${getGroupLabel(group, t)} reorder`}
-                      testID={`group-drag-handle-${group}`}
-                    >
-                      <Ionicons name="reorder-three-outline" size={17} color={semantic.textTertiary} />
-                    </View>
-                  </View>
-                    {/* TASK-016①：整组删除入口（原左滑删除改这里）：垃圾桶贴数量胶囊右侧 */}
-                    <TouchableOpacity
-                      style={styles.catHeaderDeleteBtn}
-                      onPress={() => confirmDeleteGroup(group, items.length)}
-                      hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('common.delete')}
-                    >
-                      <Ionicons name="trash-outline" size={15} color={colors.expense} />
-                    </TouchableOpacity>
-                  </View>
-                  {/* 分类网格（与管理类别页同一个组件）：虚线占位框 + 长按 200ms 拖拽排序 +
-                      虚线＋磁贴；点磁贴仍是"选中并返回"，拖完那一下松手不会被当成点击 */}
-                  {expanded && (
-                    <CategoryGridEditor
-                      items={orderedItems}
-                      columns={4}
-                      isAdding={addingGroupName === group}
-                      scrollRef={categoryScrollRef}
-                      contentH={categoryContentHRef}
-                      scrollY={categoryScrollYSV}
-                      onDraggingChange={handleIconDragging}
-                      onPick={handlePickCategory}
-                      onDelete={(id) => {
-                        const target = filteredCategories.find((c) => c.id === id);
-                        if (target) confirmDeleteCategory(target);
-                      }}
-                      onReorder={handleCatReorder}
-                      onToggleAdd={toggleInlineAdd}
-                    />
-                  )}
-                  {expanded && addingGroupName === group && (
-                    /* TASK-016②：两步小卡——一行（图标预览 + 名称 + ✓）+ 单行色条；
-                       图标在弹层里选（点预览方块打开底部弹层） */
-                    <View
-                      style={styles.catInlineCard}
-                      /* TASK-016⑥：记小卡在组卡内的 y 偏移，聚焦滚动 = 组卡 y + 小卡偏移 */
-                      onLayout={(e) => {
-                        inlineCardOffsetRef.current[group] = e.nativeEvent.layout.y;
-                      }}
-                    >
-                      <View style={styles.catInlineNameRow}>
-                        <TouchableOpacity
-                          style={styles.catIconPreviewBtn}
-                          onPress={() => {
-                            hapticLight();
-                            setIconPickerOpen(true);
-                          }}
-                        >
-                          <Ionicons name={inlineIcon} size={22} color={colors.textPrimary} />
-                        </TouchableOpacity>
-                        <TextInput
-                          ref={inlineInputRef}
-                          style={styles.catInlineInput}
-                          value={inlineName}
-                          onChangeText={setInlineName}
-                          placeholder={t('addTx.inlineAddPlaceholder', { group })}
-                          placeholderTextColor={colors.textTertiary}
-                          maxLength={10}
-                          autoFocus
-                          onFocus={() => {
-                            inlineFocusGroupRef.current = group;
-                            scrollInlineInputIntoView(group);
-                          }}
-                          onBlur={() => {
-                            if (inlineFocusGroupRef.current === group) inlineFocusGroupRef.current = null;
-                          }}
-                        />
-                        <TouchableOpacity
-                          style={[styles.catInlineSaveSquare, !inlineName.trim() && { opacity: 0.35 }]}
-                          disabled={!inlineName.trim()}
-                          onPress={() => handleInlineAdd(group)}
-                        >
-                          <Ionicons name="checkmark" size={20} color={colors.fabIcon} />
-                        </TouchableOpacity>
-                      </View>
-                      {/* TASK-016⑥：16 色直接铺 2 排（每排 8 个），不再横向滑动 */}
-                      <View style={styles.catMiniColorsGrid}>
-                        {CATEGORY_COLOR_OPTIONS.map((color) => (
-                          <TouchableOpacity
-                            key={color}
-                            style={[
-                              styles.catMiniColorDot,
-                              { backgroundColor: color },
-                              inlineColor === color && styles.catMiniColorDotActive,
-                            ]}
-                            onPress={() => setInlineColor(color)}
-                            // 26 圆点 + 9×2 热区 = 44pt 最小触控区
-                            hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
-                            accessibilityRole="button"
-                            accessibilityLabel={t('ledger.colorLabel')}
-                            accessibilityState={{ selected: inlineColor === color }}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                  )}
-                </View>
-              );
-              // TASK-016①：整组删除入口已移入标题行垃圾桶，左滑删除退役——分节直接返回卡片
-              return card;
-            })}
-
-          {/* 新增大分类：点击展开表单，填写名字+主题色后创建（空组也会显示） */}
-          <View style={[styles.catGroupCard, styles.newGroupCard]}>
-            {newGroupFormOpen ? (
-              <>
-                <View style={styles.newCatTitleRow}>
-                  <Text style={styles.newCatTitle}>{t('addTx.addGroup')}</Text>
-                  <TouchableOpacity
-                    onPress={() => setNewGroupFormOpen(false)}
-                    hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('common.close')}
-                  >
-                    <Ionicons name="close" size={16} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-                <TextInput
-                  style={styles.newCatInput}
-                  value={newGroupName}
-                  onChangeText={setNewGroupName}
-                  placeholder={t('addTx.groupNamePlaceholder')}
-                  placeholderTextColor={colors.textTertiary}
-                  maxLength={10}
-                />
-                <TouchableOpacity
-                  style={[styles.newCatBtnFull, !newGroupName.trim() && { opacity: 0.4 }]}
-                  disabled={!newGroupName.trim()}
-                  onPress={() => {
-                    const name = newGroupName.trim();
-                    if (!name) return;
-                    hapticSuccess();
-                    addCategoryGroup({ name, icon: 'folder-outline', type: type as 'expense' | 'income' });
-                    setNewGroupName('');
-                    setNewGroupFormOpen(false);
-                  }}
-                >
-                  <Text style={styles.newCatBtnFullText}>{t('addTx.createGroup')}</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <TouchableOpacity style={styles.newGroupEntry} onPress={() => setNewGroupFormOpen(true)}>
-                <Ionicons name="add-circle-outline" size={18} color={colors.link} />
-                <Text style={styles.newGroupEntryText}>{t('addTx.addGroup')}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-        </ScrollView>
-
-        {/* TASK-016③：图标选择底部弹层（两步小卡的第二步）——119 个图标 6 列网格，
-            点选回填小卡预览方块；挂在选择类别页自己的 return 分支内（详情分支的 Modal 在这里渲染不到） */}
-        <Modal
-          visible={iconPickerOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIconPickerOpen(false)}
-        >
-          <TouchableOpacity style={[styles.iconPickerOverlay, { backgroundColor: semantic.scrim }]} activeOpacity={1} onPress={() => setIconPickerOpen(false)}>
-            <Pressable
-              style={[styles.iconPickerSheet, { paddingBottom: bottomInset + 16, maxHeight: iconPickerMaxHeight }]}
-              onPress={() => {}}
-            >
-              <View style={styles.iconPickerHeader}>
-                <Text style={styles.iconPickerTitle}>{t('addTx.pickIconTitle')}</Text>
-                <TouchableOpacity
-                  style={styles.iconPickerClose}
-                  onPress={() => setIconPickerOpen(false)}
-                  hitSlop={{ top: 13, bottom: 13, left: 13, right: 13 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('common.close')}
-                >
-                  <Ionicons name="close" size={18} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.iconPickerGrid} keyboardShouldPersistTaps="handled">
-                <View style={styles.iconPickerGridInner}>
-                  {CATEGORY_ICON_OPTIONS.map((icon) => (
-                    <TouchableOpacity
-                      key={icon}
-                      accessibilityRole="button"
-                      accessibilityLabel={icon}
-                      accessibilityState={{ selected: inlineIcon === icon }}
-                      style={[styles.iconPickerCell, inlineIcon === icon && styles.iconPickerCellActive]}
-                      onPress={() => {
-                        hapticSelection();
-                        setInlineIcon(icon);
-                        setIconPickerOpen(false);
-                      }}
-                    >
-                      <Ionicons name={icon} size={22} color={inlineIcon === icon ? colors.link : colors.textPrimary} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-            </Pressable>
-          </TouchableOpacity>
-        </Modal>
-      </SafeAreaView>
       </EdgeBackSwipe>
     );
   }
@@ -2909,115 +2363,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   container: { flex: 1, backgroundColor: semantic.bg },
   scanningWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scanningText: { marginTop: 16, color: colors.textSecondary, fontSize: 14 },
-  // 组内联添加（TASK-004 自类别分类页并入；TASK-016 两步小卡：图标预览 + 名称 + ✓ 一行 + 单行色条）
-  catInlineCard: { paddingHorizontal: 14, paddingBottom: 12, paddingTop: 2 },
-  catInlineInput: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: colors.bg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.dividerHair,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  // 图标预览方块：显示当前选中图标，点它打开底部弹层选 119 图标
-  catIconPreviewBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 11,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.dividerHair,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  // ✓ 确认方钮：名称+图标齐了就能点（替代原「添加到 X」文字钮）
-  catInlineSaveSquare: {
-    marginLeft: 8,
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: colors.fabBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  catInlineNameRow: { flexDirection: 'row', alignItems: 'center' },
-  // 单行 16 色横条（横向可滑）→ TASK-016⑥：2 排网格（每排 8 个）
-  catMiniColorsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 10,
-    paddingHorizontal: 2,
-  },
-  catMiniColorDot: { width: 26, height: 26, borderRadius: 13, marginRight: 10, marginBottom: 8 },
-  catMiniColorDotActive: { borderWidth: 2, borderColor: colors.textPrimary },
-  // 大组分节：每节一张圆角卡片（图1 样式：外框 boarder + 卡片内标题行 + 九宫格）
-  catGroupCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.dividerHair,
-    marginHorizontal: 12,
-    marginTop: 10,
-    paddingBottom: 6,
-    overflow: 'hidden',
-  },
-  // 搜索框：与卡片同宽同风格
-  // 组标题行：紫色小标题 + 右侧数量胶囊 + 折叠箭头
-  catGroupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-  // 组头左右两槽：整行左侧是「折叠区 + ≡」，右侧是删除
-  catGroupHeaderMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  catGroupHeaderTap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  // 组排序把手：34 视觉 + hitSlop 撑到 44 触控（组长按 ≡ 上下拖 = 整组换位）
-  catGroupDragHandle: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 2,
-    marginRight: 2,
-  },
-  catGroupTitle: { fontSize: 13, fontWeight: '700', color: colors.link, marginLeft: 6 },
-  catGroupCountWrap: { marginLeft: 'auto', backgroundColor: colors.bg, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 },
-  catGroupCount: { fontSize: 10, color: colors.textTertiary },
-  // 标题行只剩垃圾桶（新增入口已收敛到网格末尾的虚线＋磁贴）
-  catHeaderDeleteBtn: { marginLeft: 8, padding: 2 },
-  // 新增大分类：底部入口 + 表单 + 主题色板
-  newGroupCard: { marginTop: 14, padding: 14 },
-  newGroupEntry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
-  newGroupEntryText: { color: colors.link, fontSize: 14, fontWeight: '700', marginLeft: 6 },
-  newCatTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  newCatTitle: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
-  newCatBtnFull: {
-    marginTop: 12,
-    backgroundColor: colors.fabBg,
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  newCatBtnFullText: { color: colors.fabIcon, fontWeight: '700', fontSize: 14 },
-  newCatInput: {
-    height: 38,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.dividerHair,
-    backgroundColor: colors.bg,
-    paddingHorizontal: 10,
-    fontSize: 13,
-    color: colors.textPrimary,
-    paddingVertical: 0,
-  },
 
   // ---------- 键盘停靠区（V2）：面板自身画 keypadPanel 底 + 顶部 30 圆角，这里只留底部安全区补白 ----------
   stickyFooter: {
@@ -3030,45 +2375,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   // ---------- 支出/收入卡片式表单新增样式 ----------
   // 与转账/兑换页头部(txHeaderRow)对齐：同样的水平边距和更高的上下留白，
   // 让选择类别/编辑页的返回按钮和标题与主页面保持在同一层
-  // TASK-016③：图标选择底部弹层（fade 遮罩 + 顶部圆角面板 + 6 列图标网格）
-  iconPickerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  iconPickerSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 16,
-  },
-  iconPickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
-  },
-  iconPickerTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
-  iconPickerClose: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconPickerGrid: { paddingHorizontal: 10 },
-  iconPickerGridInner: { flexDirection: 'row', flexWrap: 'wrap' },
-  iconPickerCell: {
-    width: `${100 / 6}%` as unknown as `${number}%`,
-    aspectRatio: 1.15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-  },
-  iconPickerCellActive: { backgroundColor: colors.link + '1A' },
 
   // ---------- 记一笔的编辑 / 选择类别页头部（返回键、删除键；主表单头部已抽成 TransactionTypeHeader 组件） ----------
   // 返回按钮：更大(40)、紫色外环（与"全部"Pill 同色）、加粗箭头，让返回入口足够明显
