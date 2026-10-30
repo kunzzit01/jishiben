@@ -75,6 +75,10 @@ server {
     # 会回 301 补斜杠（/api 同样如此），客户端跟随后即失败 —— 所以用精确匹配拦掉这个形状，
     # 保证 /updates 本身返回 manifest 而不是任何跳转。
     location = /updates {
+        # OTA 产物（Hermes 字节码 .hbc）绝不能被 gzip：expo-updates 校验原始文件的 SHA-256，
+        # 收到压缩流会哈希不匹配 → 下载被判失败、无限重试。
+        # 2026-10-30 实测：带 gzip 只下 2,520,551 字节 / 实际 5,196,435 字节。
+        gzip off;
         resolver 127.0.0.11 ipv6=off valid=10s;
         set $updates_upstream http://updates:8081;
         proxy_pass $updates_upstream;
@@ -91,6 +95,10 @@ server {
     }
 
     location /updates/ {
+        # OTA 产物（Hermes 字节码 .hbc）绝不能被 gzip：expo-updates 校验原始文件的 SHA-256，
+        # 收到压缩流会哈希不匹配 → 下载被判失败、无限重试。
+        # 2026-10-30 实测：带 gzip 只下 2,520,551 字节 / 实际 5,196,435 字节。
+        gzip off;
         resolver 127.0.0.11 ipv6=off valid=10s;
         set $updates_upstream http://updates:8081;
         proxy_pass $updates_upstream;
