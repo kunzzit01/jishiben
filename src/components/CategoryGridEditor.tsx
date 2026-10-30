@@ -403,7 +403,7 @@ export type CategoryGridEditorProps = {
  * 拖动时只把"展示顺序"做让位排列（真数据等松手才写回），被拖的磁贴内容隐藏、
  * 由一枚绝对定位的幽灵跟手 —— 与列表重排解耦，所以它不会跟着让位抖动。
  */
-export function CategoryGridEditor({
+function CategoryGridEditorInner({
   items,
   columns = 3,
   slotHeight = GRID_SLOT_H,
@@ -847,4 +847,11 @@ function makeGridStyles(columns: number, slotHeight: number, semantic: SemanticC
   });
 }
 
+/* 管理类别页一次挂 10 多个网格、每个 10+ 磁贴。父组件里任何一处状态变化
+ * （折叠某组 / 打开内联新增 / 排序配置从 AsyncStorage 载入…）都会重渲整页，
+ * 若网格不 memo，就是 10 网格 × 40 磁贴全量重建 → 安卓上肉眼可见的卡顿。
+ * 这里用浅比较兜住：items 引用未变（排序/增删才会变）且回调稳定时直接复用。 */
+const CategoryGridEditor = React.memo(CategoryGridEditorInner);
+
+export { CategoryGridEditor };
 export default CategoryGridEditor;

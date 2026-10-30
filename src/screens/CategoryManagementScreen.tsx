@@ -463,14 +463,12 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
 
   // 载入组内排序编号 + 大分组排列顺序
   useEffect(() => {
-    AsyncStorage.getItem(CAT_ORDER_KEY)
-      .then((raw) => {
-        if (raw) setCatOrder(JSON.parse(raw) as Record<string, number>);
-      })
-      .catch(() => {});
-    AsyncStorage.getItem(GROUP_ORDER_KEY)
-      .then((raw) => {
-        if (raw) setGroupOrder(JSON.parse(raw) as Record<string, number>);
+    // 两个键一起读、一次提交：分两次 setState 会触发两轮重渲，而每轮都会重算 sections
+    // → 10 个网格的 items 引用全变 → memo 失效（安卓进页面卡顿的一半原因）。
+    Promise.all([AsyncStorage.getItem(CAT_ORDER_KEY), AsyncStorage.getItem(GROUP_ORDER_KEY)])
+      .then(([rawCat, rawGroup]) => {
+        if (rawCat) setCatOrder(JSON.parse(rawCat) as Record<string, number>);
+        if (rawGroup) setGroupOrder(JSON.parse(rawGroup) as Record<string, number>);
       })
       .catch(() => {});
   }, []);
@@ -860,6 +858,26 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     [addingGroupName]
   );
 
+  /* 分组网格的回调必须**按组稳定**：CategoryGridEditor 已用 React.memo 包住，
+   * 若每次渲染都传新的箭头函数，memo 形同虚设 → 10 个网格 × 40 多磁贴全量重渲（安卓卡顿的成因）。
+   * 这里按组名缓存一份，内部经 ref 永远调用最新的处理函数。 */
+  const editorHandlersRef = useRef({ reorder: handleCatGroupReorder, toggleAdd: handleToggleAdd });
+  editorHandlersRef.current = { reorder: handleCatGroupReorder, toggleAdd: handleToggleAdd };
+  const editorCbsRef = useRef(
+    new Map<string, { onReorder: (next: { id: string }[]) => void; onToggleAdd: () => void }>()
+  );
+  const getEditorCbs = useCallback((group: string) => {
+    let cbs = editorCbsRef.current.get(group);
+    if (!cbs) {
+      cbs = {
+        onReorder: (next) => editorHandlersRef.current.reorder(group, next),
+        onToggleAdd: () => editorHandlersRef.current.toggleAdd(group),
+      };
+      editorCbsRef.current.set(group, cbs);
+    }
+    return cbs;
+  }, []);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}
       onTouchStart={() => { Keyboard.dismiss(); }}
@@ -1003,10 +1021,10 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                     contentH={contentHRef}
                     scrollY={scrollYSV}
                     onDraggingChange={handleGridDragging}
-                    onReorder={(next) => handleCatGroupReorder(group, next)}
+                    onReorder={getEditorCbs(group).onReorder}
                     onDelete={selectMode ? undefined : handleDeleteCategory}
                     onPick={selectMode ? handlePickCategory : undefined}
-                    onToggleAdd={() => handleToggleAdd(group)}
+                    onToggleAdd={getEditorCbs(group).onToggleAdd}
                   />
                   ) : (
                     /* 还没轮到挂载：按「行数 × 格高」预留精确高度，避免内容长出来时版面跳动 */
