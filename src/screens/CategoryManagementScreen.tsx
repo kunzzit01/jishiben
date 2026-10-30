@@ -51,6 +51,7 @@ import {
   GRID_FINGER_STEP,
   GRID_LAND_MS,
   GRID_SCROLL_STEP,
+  GRID_SLOT_H,
   moveInArray,
   sortByOrder,
 } from '../components/CategoryGridEditor';
@@ -432,9 +433,17 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   // 不进入管理交互（删除徽章隐藏、添加入口保留），选中后 navigate 回传 pickedCategoryId
   const selectMode = !!(route?.params && route.params.selectMode);
   // 顶部支出/收入切换：只显示并编辑对应类型的大组；跳转方可带 initialType 直接落到对应类型
+  /* 分组卡里的可拖拽网格很重：每个实例 14 个动画值 + 手势识别 + 定时器，40 多个渐变球。
+   * 一次性挂 10 多组会让首帧被堵住（用户 2026-10-30：点进管理类别要等 1~3 秒）。
+   * 做法：首帧只挂前 2 组，其余按帧补齐（每 60ms 加 3 组），占位高度按行数精确预留 → 不跳版。 */
   const [manageType, setManageType] = useState<'expense' | 'income'>(
     route?.params?.initialType === 'income' ? 'income' : 'expense'
   );
+  const [mountedSections, setMountedSections] = useState(2);
+  // 切「支出 / 收入」→ 重新从 2 组开始挂
+  useEffect(() => {
+    setMountedSections(2);
+  }, [manageType]);
   // 组内排序编号（按分类 id 存，跟资产页 assetOrder 同一套思路）
   const [catOrder, setCatOrder] = useState<Record<string, number>>({});
   // 大分组排列顺序（按组名存）
@@ -518,6 +527,14 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   }, [categories, categoryGroups, catOrder, groupOrder, manageType]);
   // 手势回调是稳定闭包，读"当前渲染顺序"走 ref
   sectionsRef.current = sections;
+
+  // 分批把分组卡里的可拖拽网格挂上（每 60ms 补 3 组），首帧就不会被 10 多组一起堵住
+  useEffect(() => {
+    const total = sections.length;
+    if (mountedSections >= total) return;
+    const id = setTimeout(() => setMountedSections((n) => Math.min(n + 3, total)), 60);
+    return () => clearTimeout(id);
+  }, [mountedSections, sections.length]);
 
   // —— 大分组拖拽：JS 侧控制器（量测、落点、自动滚动、落库） ——
   const readGroupBoxes = useCallback(() => {
@@ -883,7 +900,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
           )}
 
           {/* 每张大组一张玻璃卡：组内成员 + 该组自己的添加入口；自定义组可删除 */}
-          {sections.map(({ group, items }) => {
+          {sections.map(({ group, items }, sectionIndex) => {
             const isAdding = addingGroupName === group;
             // TASK-020③：selectMode 照搬记一笔——折叠状态在 Set 里，点头部行收/展（管理模式不受影响）
             const expanded = !selectMode || !collapsedGroups.has(group);
@@ -976,6 +993,7 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                       {t('addTx.noCatsAddHint')}
                     </AppText>
                   )}
+                  {sectionIndex < mountedSections ? (
                   <CategoryGridEditor
                     items={items}
                     columns={3}
@@ -990,6 +1008,10 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
                     onPick={selectMode ? handlePickCategory : undefined}
                     onToggleAdd={() => handleToggleAdd(group)}
                   />
+                  ) : (
+                    /* 还没轮到挂载：按「行数 × 格高」预留精确高度，避免内容长出来时版面跳动 */
+                    <View style={{ height: Math.ceil(items.length / 3) * GRID_SLOT_H }} />
+                  )}
                 </>
               )}
 
