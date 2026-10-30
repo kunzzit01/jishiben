@@ -26,13 +26,8 @@ const TOOLS: { name: string; sub: string; icon: string; color: string; route: st
 
 /** UI V2.1 玻璃二级页头：ScreenHeader 的返回键是透明 44 触控区，这里在它底下垫一枚 44 玻璃圆钮（稿） */
 function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
-  const { spacing } = useTheme();
-  const { pagePadding } = useLayout();
   return (
     <View>
-      <View pointerEvents="none" style={[headerStyles.glass, { left: pagePadding, top: spacing.sm }]}>
-        <GlassView intensity={WEB_GLASS_INTENSITY} radius={999} style={headerStyles.glassInner} />
-      </View>
       <ScreenHeader variant="compact" title={title} onBack={onBack} />
     </View>
   );

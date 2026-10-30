@@ -79,13 +79,8 @@ function GlassBackHeader({
   onBack: () => void;
   right?: React.ReactNode;
 }) {
-  const { spacing } = useTheme();
-  const { pagePadding } = useLayout();
   return (
     <View>
-      <View pointerEvents="none" style={[glassHeaderStyles.glass, { left: pagePadding, top: spacing.sm }]}>
-        <GlassView intensity={WEB_GLASS_INTENSITY} radius={999} style={glassHeaderStyles.glassInner} />
-      </View>
       <ScreenHeader variant="compact" title={title} onBack={onBack} right={right} />
     </View>
   );

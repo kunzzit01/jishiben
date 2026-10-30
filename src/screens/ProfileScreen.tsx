@@ -410,22 +410,8 @@ function GlassBackHeader({
   /** 缺省 = 没有可返回的上一屏（Tab 根页），返回键与玻璃圆钮都不画 */
   onBack?: () => void;
 }) {
-  const { spacing } = useTheme();
-  const { pagePadding } = useLayout();
   return (
     <View>
-      {onBack ? (
-        <View
-          pointerEvents="none"
-          style={[glassHeaderStyles.glass, { left: pagePadding, top: spacing.sm }]}
-        >
-          <GlassView
-            intensity={WEB_GLASS_INTENSITY}
-            radius={999}
-            style={glassHeaderStyles.glassInner}
-          />
-        </View>
-      ) : null}
       <ScreenHeader variant="compact" title={title} onBack={onBack} testID="profile-header" />
     </View>
   );
