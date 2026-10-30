@@ -38,6 +38,7 @@ import {
   AppText,
   BottomSheet,
   EmptyState,
+  HeroGradient,
   IconButton,
   ListRow,
   MoneyText,
@@ -219,6 +220,8 @@ export default function OverviewScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* UI V2.1 §1：品牌渐变铺满整页（fill），卡片 / 列表直接浮在渐变上 */}
+      <HeroGradient fill />
       {/* 二级页统一页头：返回 + 居中标题（稿里没有返回键，但本页是从设置项 push 进来的二级页，
           返回必须可达；页面自身的信息结构仍按稿从「概览头部」开始） */}
       <ScreenHeader

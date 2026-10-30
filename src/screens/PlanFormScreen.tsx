@@ -42,7 +42,7 @@ import { hapticSuccess, hapticWarning } from '../utils/haptics';
 import { ROUTES } from '../navigation/routes';
 import SegmentedControl from '../components/SegmentedControl';
 import { useLayout } from '../theme/useLayout';
-import { AppText, Button, Card, IconButton, ScreenHeader, Switch, withAlpha } from '../components/ui';
+import { AppText, Button, Card, HeroGradient, IconButton, ScreenHeader, Switch, withAlpha } from '../components/ui';
 
 function fmt(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -342,9 +342,11 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   };
 
   return (
-    // 版式：与资产页 / 类别管理页同一代 —— 页底 semantic.bg、无渐变带；
+    // 版式：与设置页同一代 —— 页底 semantic.bg + 品牌渐变铺满整页；
     // 页头统一 ScreenHeader（返回 + 居中标题 + 右侧动作），安全区由 SafeAreaView 的 top 边负责
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* UI V2.1 §1：品牌渐变铺满整页（fill），卡片 / 列表直接浮在渐变上 */}
+      <HeroGradient fill />
       <ScreenHeader
         variant="compact"
         title={isEdit ? tr('finance.editPlan') : tr('finance.addPlan')}

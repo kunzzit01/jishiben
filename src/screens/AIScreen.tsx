@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
 import BackButton from '../components/ui/BackButton';
+import HeroGradient from '../components/ui/HeroGradient';
 import PressableScale from '../components/PressableScale';
 import { useTheme } from '../theme/useTheme';
 import { useTabClearance } from '../hooks/useTabClearance';
@@ -544,6 +545,8 @@ export default function AIScreen({ navigation }: any) {
       style={styles.container}
       edges={['top']}
     >
+      {/* UI V2.1 §1：品牌渐变铺满整页（fill），卡片 / 列表直接浮在渐变上 */}
+      <HeroGradient fill />
       {/* 头部:与其他二级页同款——圆框返回键(40×40、1.5px link 描边) + 标题居中 */}
       <View style={styles.headerRow}>
         <BackButton onPress={() => navigation.goBack()} accessibilityLabel={t('common.back')} />

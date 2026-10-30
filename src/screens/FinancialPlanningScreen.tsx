@@ -40,6 +40,7 @@ import {
   Button,
   Card,
   EmptyState,
+  HeroGradient,
   IconCircle,
   ListSection,
   MoneyText,
@@ -141,9 +142,11 @@ export default function FinancialPlanningScreen({ navigation }: any) {
   };
 
   return (
-    // 版式：与资产页 / 类别管理页同一代 —— 页底 semantic.bg，无渐变带；
+    // 版式：与设置页同一代 —— 页底 semantic.bg + 品牌渐变铺满整页；
     // 页头统一 ScreenHeader（返回键 + 居中标题 + 右侧动作），安全区由 SafeAreaView 的 top 边负责
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* UI V2.1 §1：品牌渐变铺满整页（fill），卡片 / 列表直接浮在渐变上 */}
+      <HeroGradient fill />
       {/* 页头：ui/ScreenHeader（compact）+ ui/Button 右侧动作；入口与跳转一字未动 */}
       <ScreenHeader
         variant="compact"

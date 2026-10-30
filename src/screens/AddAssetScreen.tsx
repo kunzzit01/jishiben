@@ -33,7 +33,7 @@ import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { hapticSuccess } from '../utils/haptics';
 // 年利率的清洗/解析与账户设置页共用同一份实现（src/utils/interestRate.ts）
 import { parseInterestRate, sanitizeInterestRateInput } from '../utils/interestRate';
-import { AppText, BottomSheet, Button, ListRow, ScreenHeader } from '../components/ui';
+import { AppText, BottomSheet, Button, HeroGradient, ListRow, ScreenHeader } from '../components/ui';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -378,6 +378,8 @@ export default function AddAssetScreen({ route }: any) {
         nameInputRef.current?.blur();
       }}
     >
+      {/* UI V2.1 §1：品牌渐变铺满整页（fill），卡片 / 列表直接浮在渐变上 */}
+      <HeroGradient fill />
       {/* 页头：标题排版保持原样（ScreenHeader compact）；这轮只把**返回键与保存键**做成新设计语言 */}
       <ScreenHeader
         variant="compact"
