@@ -300,7 +300,7 @@ export const lightColors: ThemeColors = {
   creditFillOverFrom: '#F87171',
   creditFillOverTo: '#E11D48',
 
-  fabBg: '#6C4DF6',
+  fabBg: '#1677FF', // tokens: brand.primary
   fabIcon: '#ffffff',
   fabBorder: 'rgba(255,255,255,0.10)',
   fabHighlight: '#8570FF',
@@ -468,7 +468,7 @@ export const darkColors: ThemeColors = {
   creditFillOverFrom: '#FB7185',
   creditFillOverTo: '#E11D48',
 
-  fabBg: '#6C4DF6',
+  fabBg: '#1685FF', // tokens: brand.primary
   fabIcon: '#ffffff',
   fabBorder: 'rgba(255,255,255,0.10)',
   fabHighlight: '#8570FF',

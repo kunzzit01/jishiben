@@ -6,7 +6,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -14,20 +13,17 @@ import {
   Modal,
   Dimensions,
   Keyboard,
-  Pressable,
   BackHandler,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
-import Reanimated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, withTiming, runOnJS } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
-import { LinearGradient } from 'expo-linear-gradient';
+import { AccountPickerSheet } from '../components/transaction/AccountPickerSheet';
 import { useTheme } from '../theme/useTheme';
-import type { Elevation, Radius, SemanticColors, Spacing, ThemeColors, Typography } from '../theme/theme';
+import type { Radius, SemanticColors, Spacing, Typography } from '../theme/theme';
 import { useT } from '../i18n/LanguageContext';
 import DateRangePickerSheet from '../components/DateRangePickerSheet';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
@@ -35,7 +31,6 @@ import { CursorAmountText } from '../components/CursorAmountText';
 import { useAmountExpression } from '../hooks/useAmountExpression';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
-import { getAssetDisplayBalance } from '../utils/creditCard';
 import { formatMoney } from '../utils/formatMoney';
 import { getCategoryLabel } from '../i18n/categories';
 import { hapticSuccess, hapticWarning } from '../utils/haptics';
@@ -49,8 +44,8 @@ function fmt(d: Date): string {
 }
 
 export default function PlanFormScreen({ route, navigation }: any) {
-  const { addPaymentPlan, updatePaymentPlan, deletePaymentPlan, assets, activeAssets, paymentPlans, activeLedgerId, categories, currency, getAssetBalance, decimalPlaces } = useApp();
-  const { colors, semantic, elevation, spacing, radius, typography } = useTheme();
+  const { addPaymentPlan, updatePaymentPlan, deletePaymentPlan, assets, paymentPlans, activeLedgerId, categories, currency, decimalPlaces } = useApp();
+  const { semantic, spacing, radius, typography } = useTheme();
   const { pagePadding } = useLayout();
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
@@ -59,8 +54,8 @@ export default function PlanFormScreen({ route, navigation }: any) {
   const isFocused = useIsFocused();
   const setTabBarForceHidden = useTabBarForceHide();
   const styles = useMemo(
-    () => makeStyles(colors, semantic, elevation, spacing, radius, typography),
-    [colors, semantic, elevation, spacing, radius, typography]
+    () => makeStyles(semantic, spacing, radius, typography),
+    [semantic, spacing, radius, typography]
   );
 
   const editPlan = route?.params?.planId ? paymentPlans.find((p) => p.id === route.params.planId) : undefined;
@@ -82,94 +77,10 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   const [rangeStart, setRangeStart] = useState(editPlan?.startDate ?? fmt(today));
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [active, setActive] = useState(editPlan?.active ?? true);
-  // 账户底部上拉菜单
+  // 关联账户抽屉（共享 AccountPickerSheet）：遮罩 / 下滑收起 / 安卓返回键都由组件内部处理，
+  // 这里只留一个开关；筛选、分组折叠、选中态全部由组件自己管（每次打开都是全新的面板状态）
   const [assetSheetOpen, setAssetSheetOpen] = useState(false);
-  // 账户弹层筛选状态（与记一笔账户弹层同款交互）
-  const [assetSearch, setAssetSearch] = useState('');
-  const [assetFilter, setAssetFilter] = useState<'all' | 'cash' | 'bank' | 'credit' | 'ewallet'>('all');
-  // TASK-025：账户弹层币种分组（资产页内联菜单式）——反向记录「被收起」的组，默认全展开
-  const [pickerCollapsedGroups, setPickerCollapsedGroups] = useState<Set<string>>(new Set());
-  const togglePickerGroup = (code: string) => {
-    setPickerCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  };
-  // 币种直选（与记一笔弹层同款）：ALL 键点开的下拉面板 + 当前币种筛选
-  const [assetCurrencyDropOpen, setAssetCurrencyDropOpen] = useState(false);
-  const [assetCurrencyFilter, setAssetCurrencyFilter] = useState<string>('all');
-  // 金额币种只认所选账户（2026-09-24 用户定版）：弹层币种项只做账户筛选，
-  // 不再直选改金额币种（displayCurrencyCode 联动机制已移除——撤销第七十八节的直选联动）
-  // 自己已有的币种集合（账户里出现过的币种，去重、ABC 字母序——2026-09-24 用户定版），供 ALL 下拉面板列出
-  const ownCurrencies = useMemo(() => {
-    const codes: string[] = [];
-    activeAssets.forEach((a) => {
-      if (a.currency && !codes.includes(a.currency)) codes.push(a.currency);
-    });
-    return codes.sort((c1, c2) => c1.localeCompare(c2));
-  }, [activeAssets]);
-
-  // —— 账户弹层下滑收起手势：与记一笔账户弹层完全同款（manualActivation Pan + sharedValue 动画）——
-  // - 列表滚到顶部时往下拖 → 接管手势，整块面板跟手下移，松手超过 120px / 快速甩动就收起
-  // - 列表不在顶部、或往上拖 → 不接管，账户列表照常滚动；从把手/头部下滑永远生效
-  const sheetPanY = useSharedValue(0);
-  const sheetScrim = useSharedValue(0);
-  const sheetListOffset = useSharedValue(0);
-  const sheetListScrollHandler = useAnimatedScrollHandler((e) => {
-    sheetListOffset.value = e.contentOffset.y;
-  });
-  const sheetDragStart = useSharedValue({ x: 0, y: 0 });
-  const sheetClosingSV = useSharedValue(false);
-  const closeAssetSheet = () => {
-    setAssetSheetOpen(false);
-    setAssetCurrencyDropOpen(false);
-  };
-  const sheetGesture = Gesture.Pan()
-    .manualActivation(true)
-    .onTouchesDown((e) => {
-      const t = e.allTouches[0];
-      sheetDragStart.value = { x: t?.absoluteX ?? 0, y: t?.absoluteY ?? 0 };
-    })
-    .onTouchesMove((e, stateManager) => {
-      const t = e.allTouches[0];
-      if (!t) return;
-      if (sheetListOffset.value > 0) return; // 列表不在顶部：不接管，让它正常滚
-      const dy = t.absoluteY - sheetDragStart.value.y;
-      const dx = t.absoluteX - sheetDragStart.value.x;
-      if (dy > 12 && Math.abs(dy) > Math.abs(dx) * 1.2) stateManager.activate();
-    })
-    .onUpdate((e) => {
-      sheetPanY.value = Math.max(0, e.translationY);
-      sheetScrim.value = Math.min(0.4, Math.max(0, e.translationY) / 500 + 0.15);
-    })
-    .onEnd((e) => {
-      if (e.translationY > 120 || e.velocityY > 800) {
-        if (sheetClosingSV.value) return;
-        sheetClosingSV.value = true;
-        sheetScrim.value = withTiming(0, { duration: 180 });
-        sheetPanY.value = withTiming(900, { duration: 220 }, (finished) => {
-          if (finished) runOnJS(closeAssetSheet)();
-        });
-      } else {
-        sheetPanY.value = withTiming(0, { duration: 180 });
-        sheetScrim.value = withTiming(0.4, { duration: 150 });
-      }
-    });
-  const sheetAnimStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetPanY.value }] }), []);
-  const sheetScrimStyle = useAnimatedStyle(() => ({ opacity: sheetScrim.value }), []);
-  // 入场：面板从屏幕外滑入 + 遮罩淡入；列表滚动偏移一并清零
-  useEffect(() => {
-    if (assetSheetOpen) {
-      sheetClosingSV.value = false;
-      sheetPanY.value = 900;
-      sheetScrim.value = 0;
-      sheetListOffset.value = 0;
-      sheetPanY.value = withTiming(0, { duration: 260 });
-      sheetScrim.value = withTiming(0.4, { duration: 260 });
-    }
-  }, [assetSheetOpen, sheetPanY, sheetScrim, sheetListOffset]);
+  const closeAssetSheet = () => setAssetSheetOpen(false);
 
   const selectedAsset = assets.find((a) => a.id === assetId);
   const selectedCategory = categories.find((c) => c.id === categoryId);
@@ -182,9 +93,10 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
   //    （这就是"返回财务规划时导航栏跑出来"的根源）。放栏只在【卸载】时做。
   // 2) 日期面板关闭时它内部的 cleanup 会放栏——依赖里保留 keypadOpen/datePickerOpen
   //    让本 effect 重跑一次把栏重新压下去。
+  // 3) 账户抽屉（BottomSheet）卸载时同样会放栏——依赖里带上 assetSheetOpen，同一条路径压回去。
   useEffect(() => {
     if (isFocused) setTabBarForceHidden(true);
-  }, [isFocused, keypadOpen, datePickerOpen, setTabBarForceHidden]);
+  }, [isFocused, keypadOpen, datePickerOpen, assetSheetOpen, setTabBarForceHidden]);
   // 只有真正卸载（goBack 离开页面）才交还控制权
   useEffect(() => {
     return () => setTabBarForceHidden(false);
@@ -597,225 +509,27 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
         </View>
       )}
 
-      {/* 账户选择：与记一笔的账户弹层完全同款——树内覆盖层（不用 RN Modal：Modal 接不了下滑手势）+
-          把手条 + 头部（选择账户 + ALL 币种直选键 + ✕）+ 币种下拉面板 + 搜索 + 类型筛选芯片 +
-          账户行（图标/名称/余额/选中勾）+ 有框「添加新账户」；下滑收起手势与记一笔同一套 */}
+      {/* 关联账户：共享账户抽屉（与记一笔同一套）。外壳（遮罩 / 下滑收起 / 安卓返回键）
+          全在 BottomSheet 内，这里只传数据与开关；本页额外打开的是币种直选、搜索+类型筛选、
+          行金额币种代码三项——另两处调用点不传这些 prop，行为与之前完全一致 */}
       {assetSheetOpen && (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 90, elevation: 90 }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={closeAssetSheet}>
-            <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: semantic.scrim }, sheetScrimStyle]} />
-          </Pressable>
-          <GestureDetector gesture={sheetGesture}>
-            <Reanimated.View style={[styles.sheetCard, sheetAnimStyle]}>
-            {/* 把手条：与记一笔 accountPickerGrabber 同款 */}
-            <View style={styles.sheetGrabber} />
-            <View style={styles.sheetHeaderRow}>
-              <Text style={styles.sheetTitle}>{tr('addTx.selectAccount')}</Text>
-              <View style={styles.sheetHeaderRight}>
-                {/* 货币直选键：点开币种下拉，点选只显示该币种的账户；按键文字跟随当前筛选（全部→ALL） */}
-                <PressableScale
-                  style={styles.sheetCurrencyBtn}
-                  activeScale={0.92}
-                  onPress={() => setAssetCurrencyDropOpen((v) => !v)}
-                >
-                  <Text style={styles.sheetCurrencyBtnText}>
-                    {assetCurrencyFilter === 'all' ? tr('common.all') : assetCurrencyFilter}
-                  </Text>
-                  <Ionicons name={assetCurrencyDropOpen ? 'chevron-up' : 'chevron-down'} size={12} color={colors.link} />
-                </PressableScale>
-                <PressableScale
-                  style={styles.sheetCloseCircle}
-                  activeScale={0.90}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  onPress={() => { setAssetSheetOpen(false); setAssetCurrencyDropOpen(false); }}
-                >
-                  <Ionicons name="close" size={18} color={colors.textSecondary} />
-                </PressableScale>
-              </View>
-            </View>
-
-            {/* 币种下拉面板：悬浮在 ALL 键正下方（右对齐、绝对定位），点面板外空白收起 */}
-            {assetCurrencyDropOpen && (
-              <Pressable style={styles.sheetCurrencyCatch} onPress={() => setAssetCurrencyDropOpen(false)} />
-            )}
-            {assetCurrencyDropOpen && (
-              <View style={styles.sheetCurrencyPanel}>
-                <PressableScale
-                  style={[styles.sheetCurrencyItem, assetCurrencyFilter === 'all' && { backgroundColor: colors.link + '14' }]}
-                  activeScale={0.97}
-                  onPress={() => { setAssetCurrencyFilter('all'); setAssetCurrencyDropOpen(false); }}
-                >
-                  <Text
-                    style={[styles.sheetCurrencyItemText, assetCurrencyFilter === 'all' && { color: colors.link, fontWeight: '700' }]}
-                  >
-                    {tr('addTx.allCurrencies')}
-                  </Text>
-                  {assetCurrencyFilter === 'all' && <Ionicons name="checkmark" size={16} color={colors.link} />}
-                </PressableScale>
-                {ownCurrencies.map((code) => {
-                  const active = assetCurrencyFilter === code;
-                  return (
-                    <PressableScale
-                      key={code}
-                      style={[styles.sheetCurrencyItem, active && { backgroundColor: colors.link + '14' }]}
-                      activeScale={0.97}
-                      onPress={() => { setAssetCurrencyFilter(code); setAssetCurrencyDropOpen(false); }}
-                    >
-                      <Text style={[styles.sheetCurrencyItemText, active && { color: colors.link, fontWeight: '700' }]}>{code}</Text>
-                      {active && <Ionicons name="checkmark" size={16} color={colors.link} />}
-                    </PressableScale>
-                  );
-                })}
-              </View>
-            )}
-            {/* 搜索框：与记一笔弹层同款规格 */}
-            <View style={styles.sheetSearchBox}>
-              <Ionicons name="search-outline" size={16} color={colors.textTertiary} />
-              <TextInput
-                style={styles.sheetSearchInput}
-                value={assetSearch}
-                onChangeText={setAssetSearch}
-                placeholder={tr('addTx.searchPlaceholder')}
-                placeholderTextColor={colors.textTertiary}
-              />
-            </View>
-            {/* 类型筛选芯片：全部/现金/银行卡/信用卡/电子钱包 */}
-            <View style={styles.sheetFilterRow}>
-              {(
-                [
-                  ['all', tr('common.all')],
-                  ['cash', tr('addTx.filterCash')],
-                  ['bank', tr('addTx.filterBank')],
-                  ['credit', tr('addTx.filterCredit')],
-                  ['ewallet', tr('addTx.filterEwallet')],
-                ] as const
-              ).map(([key, label]) => (
-                <PressableScale
-                  key={key}
-                  style={[styles.sheetFilterChip, assetFilter === key && styles.sheetFilterChipActive]}
-                  activeScale={0.94}
-                  onPress={() => setAssetFilter(key)}
-                >
-                  <Text style={[styles.sheetFilterText, assetFilter === key && styles.sheetFilterTextActive]}>{label}</Text>
-                </PressableScale>
-              ))}
-            </View>
-            <Reanimated.ScrollView
-              onScroll={sheetListScrollHandler}
-              style={{ flex: 1 }}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {(() => {
-                // 资产页同款「一币一大卡」（与记一笔两处弹层同款）：任何时候都是大卡——
-                // 选了某币种=只显示那一张卡；账户行保留 meta 行与币种前缀余额（规划页特有）
-                const kw = assetSearch.trim().toLowerCase();
-                const visible = activeAssets.filter((a) => {
-                  const matchSearch = !kw || `${a.name} ${a.currency} ${a.type}`.toLowerCase().includes(kw);
-                  // 币种筛选：ALL 下拉里点了 USD 之类后，列表只显示该币种的账户
-                  const matchCurrency = assetCurrencyFilter === 'all' || a.currency === assetCurrencyFilter;
-                  const matchType = assetFilter === 'all' || a.type === assetFilter;
-                  return matchSearch && matchCurrency && matchType;
-                });
-                if (visible.length === 0) {
-                  return <Text style={styles.sheetEmptyText}>{tr('addTx.noAccount')}</Text>;
-                }
-                const byCurrency: Record<string, typeof visible> = {};
-                visible.forEach((a) => {
-                  if (!byCurrency[a.currency]) byCurrency[a.currency] = [];
-                  byCurrency[a.currency].push(a);
-                });
-                return Object.entries(byCurrency)
-                  .sort(([c1], [c2]) => c1.localeCompare(c2))
-                  .map(([code, items]) => {
-                    const expanded = !pickerCollapsedGroups.has(code);
-                    const groupTotal = items.reduce((sum, a) => sum + getAssetBalance(a.id), 0);
-                    return (
-                      <View key={`grp-${code}`} style={styles.sheetGroupShadow}>
-                        {/* 与资产页 currencyGroupCard 同款渐变/描边/圆角 */}
-                        <LinearGradient
-                          colors={[colors.netWorthGradientFrom, colors.netWorthGradientTo]}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 1 }}
-                          style={styles.sheetGroupCard}
-                        >
-                          <PressableScale
-                            style={styles.sheetGroupHeader}
-                            activeScale={0.98}
-                            onPress={() => togglePickerGroup(code)}
-                          >
-                            <View style={styles.sheetGroupFlag}>
-                              <Text style={styles.sheetGroupFlagText}>{code}</Text>
-                            </View>
-                            <View style={{ flex: 1 }} />
-                            <Text style={styles.sheetGroupTotal}>{formatMoney(groupTotal, { decimals: decimalPlaces })}</Text>
-                            <Ionicons
-                              name={expanded ? 'chevron-up' : 'chevron-down'}
-                              size={16}
-                              color={colors.netWorthAccent}
-                              style={{ marginLeft: 6 }}
-                            />
-                          </PressableScale>
-                          {expanded && (
-                            <View style={styles.sheetGroupBody}>
-                              {items.map((a) => {
-                                const sel = assetId === a.id;
-                                return (
-                                  <PressableScale
-                                    key={a.id}
-                                    style={[styles.sheetGroupRow, sel && styles.sheetGroupRowActive]}
-                                    activeScale={0.97}
-                                    onPress={() => {
-                                      setAssetId(a.id);
-                                      closeAssetSheet();
-                                      setAssetCurrencyFilter('all');
-                                    }}
-                                  >
-                                    <View style={styles.sheetGroupRowIcon}>
-                                      <Ionicons name={a.icon as any} size={20} color={a.color} />
-                                    </View>
-                                    <View style={styles.sheetGroupRowInfo}>
-                                      <Text style={styles.sheetGroupRowName} numberOfLines={1}>
-                                        {a.name}
-                                        {a.isDefault && (
-                                          <Text style={styles.sheetRowBadge}>{tr('addTx.currentDefault')}</Text>
-                                        )}
-                                      </Text>
-                                    </View>
-                                    <Text style={styles.sheetGroupRowAmount}>
-                                      {formatMoney(getAssetDisplayBalance(a, getAssetBalance(a.id)), { decimals: decimalPlaces })}
-                                    </Text>
-                                    {sel && (
-                                      <Ionicons name="checkmark-circle" size={18} color={colors.income} style={{ marginLeft: 6 }} />
-                                    )}
-                                  </PressableScale>
-                                );
-                              })}
-                            </View>
-                          )}
-                        </LinearGradient>
-                      </View>
-                    );
-                  });
-              })()}
-            </Reanimated.ScrollView>
-            {/* 贴底添加入口：与记一笔 addAccountPickerBtn 同款有框胶囊，footer 垫安全区 */}
-            <View style={{ marginTop: 10, paddingBottom: Math.max(bottomInset, 20) + 8 - 9 }}>
-              <PressableScale
-                style={styles.sheetAddBtn}
-                activeScale={0.97}
-                onPress={() => {
-                  closeAssetSheet();
-                  navigation.navigate(ROUTES.ADD_ASSET as never);
-                }}
-              >
-                <Ionicons name="add-circle-outline" size={18} color={colors.link} />
-                <Text style={styles.sheetAddBtnText}>{tr('addTx.addAccount')}</Text>
-              </PressableScale>
-            </View>
-            </Reanimated.View>
-          </GestureDetector>
-        </View>
+        <AccountPickerSheet
+          title={tr('addTx.selectAccount')}
+          selectedId={assetId ?? null}
+          currencyCode={amountCurrency}
+          showCurrencyFilter
+          showTypeFilter
+          amountWithCurrency
+          onPickAsset={(id) => {
+            setAssetId(id);
+            closeAssetSheet();
+          }}
+          onClose={closeAssetSheet}
+          onAddAccount={() => {
+            closeAssetSheet();
+            navigation.navigate(ROUTES.ADD_ASSET as never);
+          }}
+        />
       )}
 
       {/* 计划周期：日期范围选择（开始日期 + 结束日期；月结按开始日期的"日"） */}
@@ -835,9 +549,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
 }
 
 function makeStyles(
-  colors: ThemeColors,
   semantic: SemanticColors,
-  elevation: Elevation,
   spacing: Spacing,
   radius: Radius,
   typography: Typography
@@ -904,175 +616,6 @@ function makeStyles(
     // 金额文字容器（CursorAmountText 外壳）与光标样式
     amountValueWrap: { flexShrink: 1, marginLeft: 'auto' },
     amountCursor: { fontWeight: '300' },
-    // 账户底部上拉面板：与记一笔 accountPickerSheet 同参数（树内覆盖层、贴底 82% 高、圆角 26、描边）
-    sheetCard: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      height: '82%',
-      backgroundColor: colors.card,
-      borderTopLeftRadius: 26,
-      borderTopRightRadius: 26,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      paddingHorizontal: 16,
-      paddingTop: 14,
-      paddingBottom: 9,
-    },
-    sheetCloseCircle: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: colors.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sheetTitle: { fontSize: 17, fontWeight: '800', color: colors.textPrimary, flexShrink: 1, marginRight: 8 },
-    // 把手条：与记一笔 accountPickerGrabber 同款
-    sheetGrabber: {
-      alignSelf: 'center',
-      width: 44,
-      height: 5,
-      borderRadius: 3,
-      backgroundColor: colors.divider,
-      marginBottom: 10,
-    },
-    // 货币直选键（ALL）：与记一笔 accountPickerCurrencyBtn 同规格
-    sheetCurrencyBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.link + '14',
-      borderWidth: 1,
-      borderColor: colors.link + '33',
-      borderRadius: 14,
-      paddingHorizontal: 9,
-      paddingVertical: 5,
-      marginRight: 8,
-    },
-    sheetCurrencyBtnText: { fontSize: 12, fontWeight: '700', color: colors.link, marginRight: 2 },
-    // 币种下拉面板：与记一笔 currencyDropPanel 同规格（悬浮 ALL 键正下方、右对齐）
-    sheetCurrencyCatch: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 18 },
-    sheetCurrencyPanel: {
-      position: 'absolute',
-      top: 62,
-      right: 54,
-      zIndex: 20,
-      backgroundColor: colors.bg,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      paddingVertical: 4,
-      minWidth: 150,
-      elevation: 6,
-    },
-    sheetCurrencyItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10 },
-    sheetCurrencyItemText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-    // —— 账户弹层分组卡（资产页 currencyGroup* 同款）：一币一大卡、卡内小账户框 ——
-    // 阴影走令牌（elevation.level2 的 boxShadow，夜/日各一套），不再写死 shadowColor
-    sheetGroupShadow: {
-      borderRadius: 20,
-      ...elevation.level2,
-      marginBottom: 5,
-    },
-    sheetGroupCard: {
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      overflow: 'hidden',
-    },
-    sheetGroupHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-    },
-    // 币种代码芯片（分组头 / 已选账户）：替代国旗 emoji
-    sheetGroupFlag: {
-      minWidth: 48,
-      height: 26,
-      paddingHorizontal: 8,
-      borderRadius: 8,
-      backgroundColor: colors.cardBorder,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sheetGroupFlagText: { fontSize: 12, fontWeight: '700', color: colors.netWorthValue, letterSpacing: 0.5 },
-    sheetGroupTotal: { fontSize: 20, fontWeight: '800', color: colors.netWorthValue, marginLeft: 6, fontVariant: ['tabular-nums'] },
-    sheetGroupBody: {
-      paddingHorizontal: 10,
-      paddingBottom: 10,
-      paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.dividerHair,
-    },
-    // 卡内账户小框（资产页 assetRowOnGradient 同款）：半透明白底无边框；保留 meta 行（规划页特有）
-    sheetGroupRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.tabBlobBg,
-      borderRadius: 12,
-      paddingVertical: 5,
-      paddingHorizontal: 9,
-      marginBottom: 3,
-    },
-    sheetGroupRowActive: { backgroundColor: colors.tabEdge },
-    sheetGroupRowIcon: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: semantic.onAccent,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sheetGroupRowInfo: { flex: 1, minWidth: 0, marginLeft: 12 },
-    sheetGroupRowName: { fontSize: 15, fontWeight: '700', color: colors.netWorthValue, flexShrink: 1 },
-    sheetGroupRowAmount: { fontSize: 16, fontWeight: '700', color: colors.netWorthValue, marginLeft: 8, fontVariant: ['tabular-nums'] },
-    sheetRowBadge: { fontSize: 7, fontWeight: '700', color: colors.income, marginLeft: 6, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: colors.income + '18' },
-    // —— 账户弹层增强件（与记一笔账户弹层同款规格）——
-    sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, zIndex: 21 },
-    sheetHeaderRight: { flexDirection: 'row', alignItems: 'center' },
-    sheetSearchBox: {
-      height: 42,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.bg,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      marginBottom: 10,
-    },
-    sheetSearchInput: { flex: 1, fontSize: 14, color: colors.textPrimary, paddingVertical: 0 },
-    // 与记一笔 accountFilterRow 同款：单行横排不换行（芯片自身 marginRight 7）
-    sheetFilterRow: { flexDirection: 'row', marginBottom: 10 },
-    // 与记一笔 accountFilterChip 同款：bg 底 + 1px 显眼外框 + 选中紫实底
-    sheetFilterChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 12,
-      backgroundColor: colors.bg,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      marginRight: 7,
-    },
-    sheetFilterChipActive: { backgroundColor: colors.fabBg },
-    sheetFilterText: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
-    sheetFilterTextActive: { color: colors.bg },
-    sheetEmptyText: { fontSize: 13, color: colors.textTertiary, textAlign: 'center', paddingVertical: 24 },
-    // 底部「添加新账户」：与记一笔 addAccountPickerBtn 同款有框胶囊
-    sheetAddBtn: {
-      height: 48,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.dividerHair,
-      backgroundColor: colors.bg,
-    },
-    sheetAddBtnText: { fontSize: 14, fontWeight: '700', color: colors.link, marginLeft: 7 },
     // 计算器键盘底座（与记一笔/添加账户页同规格）
     keypadFooter: { paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth },
     // 底部主按钮容器：页底铺色 + 发丝线，按钮本身走 ui/Button（gradient 档）

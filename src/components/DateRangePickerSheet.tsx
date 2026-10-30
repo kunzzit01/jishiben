@@ -19,7 +19,7 @@ import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import PressableScale from './PressableScale';
 import { useT } from '../i18n/LanguageContext';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
-import { ThemeColors } from '../theme/theme';
+import { ThemeColors, radius, typography } from '../theme/theme';
 
 export type DateRange = { start: string; end: string };
 
@@ -494,7 +494,7 @@ const makeStyles = (colors: ThemeColors) =>
       width: 44,
       height: 5,
       marginBottom: 10,
-      borderRadius: 3,
+      borderRadius: radius.full,
       backgroundColor: colors.divider,
     },
     title: { fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center', marginBottom: 14 },
@@ -508,34 +508,34 @@ const makeStyles = (colors: ThemeColors) =>
       width: '23%',
       alignItems: 'center',
       paddingVertical: 11,
-      borderRadius: 12,
+      borderRadius: radius.sm,
       backgroundColor: colors.summaryCard,
     },
     // 单日模式只剩"今天/昨天"两个预设，沿用range模式24%的窄格子会显得很空，改成两列平分
     presetChipSingle: { width: '48%' },
     presetChipActive: { backgroundColor: colors.link + '1A' },
-    presetText: { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
+    presetText: { fontSize: typography.caption.fontSize, lineHeight: typography.caption.lineHeightCjk, color: colors.textSecondary, fontWeight: '500' },
     presetTextActive: { color: colors.link, fontWeight: '700' },
     calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
     calTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
     calWeekRow: { flexDirection: 'row', marginBottom: 4 },
-    calWeekCell: { flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '600', color: colors.textTertiary },
+    calWeekCell: { flex: 1, textAlign: 'center', fontSize: typography.footnote.fontSize, lineHeight: typography.footnote.lineHeightCjk, fontWeight: '600', color: colors.textTertiary },
     calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
     calCell: { width: `${100 / 7}%` as any, alignItems: 'center', paddingVertical: 3 },
-    calDay: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+    calDay: { width: 38, height: 38, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
     calDayInRange: { backgroundColor: colors.link + '1A', borderRadius: 0 },
     calDaySelected: { backgroundColor: colors.link },
-    calDayText: { fontSize: 15, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+    calDayText: { fontSize: typography.subhead.fontSize, lineHeight: typography.subhead.lineHeight, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     calDayMuted: { color: colors.divider },
     calDayToday: { color: colors.link, fontWeight: '700' },
     calDayTextSelected: { color: colors.fabIcon, fontWeight: '700' },
     confirmBtn: {
       backgroundColor: colors.fabBg,
-      borderRadius: 14,
+      borderRadius: radius.md,
       paddingVertical: 14,
       alignItems: 'center',
       marginTop: 10,
     },
     confirmDisabled: { backgroundColor: colors.dividerHair },
-    confirmText: { color: colors.fabIcon, fontWeight: '700', fontSize: 15 },
+    confirmText: { color: colors.fabIcon, fontWeight: '700', fontSize: typography.subhead.fontSize, lineHeight: typography.subhead.lineHeightCjk },
   });
