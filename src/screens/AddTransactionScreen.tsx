@@ -3151,6 +3151,10 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     paddingHorizontal: layout.page,
     paddingBottom: spacing.xs,
     rowGap: spacing.xs,
+    // 铺不满可用高度时（比如只放得下 2 行），整块网格在剩余空间里**垂直居中**，
+    // 而不是贴顶把空白全堆在下面（用户 2026-10-30 截图反馈）
+    flexGrow: 1,
+    alignContent: 'center',
   },
   // 矮屏：底部留白 4→0（「至少 2 行完整可见」的最后 4px）
   catGridContentShort: { paddingBottom: 0 },
