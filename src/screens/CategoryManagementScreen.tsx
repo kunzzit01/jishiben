@@ -439,6 +439,14 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   const [manageType, setManageType] = useState<'expense' | 'income'>(
     route?.params?.initialType === 'income' ? 'income' : 'expense'
   );
+  /* ⚠️ 临时性能计时（2026-10-30，定位安卓管理类别卡顿）：定位完成即删。
+   * 在真机上取三个数：首帧耗时 / 全部组挂满耗时 / 渲染次数，
+   * 用来区分「JS 渲染慢」还是「绘制慢」，不再靠猜。 */
+  const perfT0Ref = useRef(Date.now());
+  const perfRendersRef = useRef(0);
+  perfRendersRef.current += 1;
+  const [perf, setPerf] = useState<{ first: number; full: number | null; renders: number } | null>(null);
+
   const [mountedSections, setMountedSections] = useState(2);
   // 切「支出 / 收入」→ 重新从 2 组开始挂
   useEffect(() => {
@@ -525,6 +533,28 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
   }, [categories, categoryGroups, catOrder, groupOrder, manageType]);
   // 手势回调是稳定闭包，读"当前渲染顺序"走 ref
   sectionsRef.current = sections;
+
+  // 首帧耗时：mount → 第二帧（第一帧真正画出来的时刻）
+  useEffect(() => {
+    const t0 = perfT0Ref.current;
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setPerf((prev) => ({
+          first: Date.now() - t0,
+          full: prev ? prev.full : null,
+          renders: perfRendersRef.current,
+        }));
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // 全部分组挂满的时刻
+  useEffect(() => {
+    if (mountedSections < sections.length) return;
+    const full = Date.now() - perfT0Ref.current;
+    setPerf((prev) => (prev ? { ...prev, full, renders: perfRendersRef.current } : prev));
+  }, [mountedSections, sections.length]);
 
   // 分批把分组卡里的可拖拽网格挂上（每 60ms 补 3 组），首帧就不会被 10 多组一起堵住
   useEffect(() => {
@@ -878,6 +908,16 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
     return cbs;
   }, []);
 
+  const perfText = perf
+    ? 'PERF 首帧 ' +
+      perf.first +
+      'ms · 满载 ' +
+      (perf.full == null ? '…' : perf.full + 'ms') +
+      ' · 渲染 ' +
+      perf.renders +
+      ' 次'
+    : '';
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}
       onTouchStart={() => { Keyboard.dismiss(); }}
@@ -889,6 +929,17 @@ export default function CategoryManagementScreen({ navigation, route }: any) {
         title={selectMode ? t('addTx.selectCategory') : t('addTx.categoryMgmt')}
         onBack={() => navigation?.goBack()}
       />
+      {perfText ? (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', top: 96, left: 0, right: 0, alignItems: 'center', zIndex: 999 }}
+        >
+          <AppText variant="caption2" color={semantic.accent}>
+            {perfText}
+          </AppText>
+        </View>
+      ) : null}
+
       <ScrollView
         ref={scrollRef}
         scrollEnabled={!gridDragging}
