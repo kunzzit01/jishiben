@@ -8,8 +8,8 @@
 // - 组内「新增 / 拖动排序 / 删除」这些管理动作留在原「选择类别页」（T15 换成二级页 ScreenHeader），
 //   抽屉底部给一个「管理类别」入口 —— 既有功能不删除，只是入口收敛到一处。
 
-import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { InteractionManager, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/useTheme';
 import { useT } from '../../i18n/LanguageContext';
@@ -53,6 +53,40 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
   // 抽屉是「选择器」：空分组（自定义空组，编辑模式才需要）不显示
   const visibleSections = useMemo(() => sections.filter((s) => s.items.length > 0), [sections]);
 
+  /* 一次性把 10 个分节、40 多行（每行一个渐变球）全部建出来，会让**抽屉的打开动画**掉帧
+   * （用户 2026-10-30：点「全部」就开始卡）。改成：先只建 2 个分节，等打开动画结束
+   * （InteractionManager）再每 48ms 补 2 个分节 —— 动画期间几乎零成本，视觉上只是列表继续往下长。 */
+  const [renderedCount, setRenderedCount] = useState(2);
+  useEffect(() => {
+    const total = visibleSections.length;
+    if (renderedCount >= total) return;
+    let cancelled = false;
+    let fired = false;
+    const bump = () => {
+      if (cancelled || fired) return;
+      fired = true;
+      setRenderedCount((n) => Math.min(n + 3, total));
+    };
+    // 正常路径：等打开动画结束再补
+    const handle = InteractionManager.runAfterInteractions(() => {
+      setTimeout(bump, 32);
+    });
+    // 兜底：InteractionManager 在某些情况下不回调（例如动画由 reanimated 驱动），
+    // 220ms 后无论如何继续补，避免抽屉永远只显示前 2 个分节
+    const fallback = setTimeout(bump, 160);
+    return () => {
+      cancelled = true;
+      handle.cancel();
+      clearTimeout(fallback);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderedCount, visibleSections.length]);
+
+  const shownSections = useMemo(
+    () => visibleSections.slice(0, Math.max(2, renderedCount)),
+    [visibleSections, renderedCount]
+  );
+
   return (
     <BottomSheet visible onClose={onClose} title={t('addTx.selectCategory')} testID="category-picker">
       <ScrollView
@@ -61,7 +95,7 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {visibleSections.map(({ group, items }) => (
+        {shownSections.map(({ group, items }) => (
           <ListSection key={group} title={getGroupLabel(group, t)} style={styles.group}>
             {items.map((c) => (
               <ListRow
