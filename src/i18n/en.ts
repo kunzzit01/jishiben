@@ -607,6 +607,10 @@ export const en = {
     dayListCollapse: 'Collapse',
     emptyTitle: 'No accounts yet',
     emptyHint: 'Add an account to see balances and statements here',
+    // No accounts match the type filter — never leave a blank glass card
+    emptyFilteredTitle: 'No accounts in this category',
+    emptyFilteredHint: 'Switch back to All to see your other accounts',
+    showAllAccounts: 'Show all',
     accountDetail: 'Account',
     // Detail sheet segments (transactions / monthly / settings) + header actions
     // 英文短标签：320 视口三等分每格只有 91，'Transactions' / 'Transfer' 会被省略号截断

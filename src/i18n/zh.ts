@@ -611,6 +611,10 @@ export const zh = {
     dayListCollapse: '收起',
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
+    // 类型筛选后 0 个账户：不能留一张空白玻璃卡（用户 2026-10-30 截图就是这个）
+    emptyFilteredTitle: '这个分类下还没有账户',
+    emptyFilteredHint: '切换回「全部」可以看到其它账户',
+    showAllAccounts: '查看全部',
     accountDetail: '账户详情',
     // 账户详情三段（交易记录 / 月度统计 / 账户设置）+ 头部三动作（转账 / 编辑 / 更多）
     tabTransactions: '交易记录',

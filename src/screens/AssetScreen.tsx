@@ -1416,7 +1416,30 @@ export default function AssetScreen() {
               ))}
             </GlassView>
           </View>
-        ) : activeAssets.length === 0 ? null : (
+        ) : groupedAssets.length === 0 ? (
+          /* 筛选后 0 个账户：给出空态 + 「查看全部」，绝不渲染一张空白玻璃卡
+             （2026-10-30 用户截图：选「现金」后列表只剩一条模糊的玻璃边）
+             注意判据是 groupedAssets（筛选后的结果），不是 activeAssets —— 后者只看是否归档 */
+          <View style={{ paddingHorizontal: pagePadding, marginTop: spacing.xl }}>
+            <Card>
+              <EmptyState
+                icon="wallet-outline"
+                title={accountFilter === 'all' ? t('asset.emptyTitle') : t('asset.emptyFilteredTitle')}
+                description={
+                  accountFilter === 'all' ? t('asset.emptyHint') : t('asset.emptyFilteredHint')
+                }
+                actionLabel={
+                  accountFilter === 'all' ? t('asset.addAccount') : t('asset.showAllAccounts')
+                }
+                onAction={() => {
+                  if (accountFilter === 'all') navigation.navigate(ROUTES.ADD_ASSET);
+                  else setAccountFilter('all');
+                }}
+                testID="asset-empty-filtered"
+              />
+            </Card>
+          </View>
+        ) : (
           // ---------- 浏览模式：所有币种组放进**同一张玻璃卡**（V2.2c），
           // 组之间用卡内小节标题（币种胶囊 + 合计）+ hairline 分隔 ----------
           <View style={[styles.groupsCardWrap, { paddingHorizontal: pagePadding }]}>
