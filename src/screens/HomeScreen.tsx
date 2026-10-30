@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SectionList, Modal, TextInput, Platform, Keyboard, InteractionManager, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SectionList, Modal, TextInput, Platform, Keyboard, InteractionManager, BackHandler, useWindowDimensions } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent, TextStyle, ViewStyle } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -923,7 +923,11 @@ function CalPointerGate({
   );
   return (
     <Reanimated.View
-      pointerEvents={open ? 'auto' : 'none'}
+      /* box-none：这一层只负责定位，**自己不参与命中测试**，只有子节点（日历卡）吃触摸。
+       * 原来是 'auto' —— 而这一层的矩形是从 hero 卡底边开始的整条带子（高度=日历卡），
+       * 卡片还有进场位移，视觉在下面、命中盒在上面，于是上面那排「支出/收入/转账/扫码」
+       * 全被吃掉：点了完全没反应（用户 2026-10-30 反馈）。 */
+      pointerEvents={open ? 'box-none' : 'none'}
       style={[style, painted ? null : calGateStyles.hidden]}
     >
       {children}
@@ -2579,6 +2583,20 @@ export default function HomeScreen({ navigation }: any) {
     startSheets(open);
     runOnJS(afterCalTap)(open);
   }, [calTarget, calReady, startSheets, afterCalTap, toggleCalendarJS]);
+
+  /* 安卓返回键：日历开着时先关日历，而不是直接退出 App。
+   * 之前没有任何 BackHandler，日历开着按返回 → 系统直接 finish 掉 Activity
+   * （用户 2026-10-30 实测：返回后回到桌面，日历根本没关）。
+   * 只有当日历确实打开（calTarget=1）时才拦，其它情况交回系统默认行为。 */
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (calTarget.value !== 1) return false;
+      runOnUI(toggleCalUI)();
+      return true;
+    });
+    return () => sub.remove();
+  }, [calTarget, toggleCalUI]);
+
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() + 1 };
