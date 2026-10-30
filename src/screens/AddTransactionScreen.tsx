@@ -926,8 +926,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 只铺「完整放得下」的行数：以前 Math.max(2, …) 在小屏/矮屏上会强行塞两行，
   // 那两行塞不进可见高度 → 网格出现可滚动溢出（用户反馈看到 overflow 迹象）。
   // 现在最少 1 行，剩下的类别由末尾「全部」磁贴进完整列表，功能不丢。
+  // 起始行数按 74 估（单行标签），随后用**实测**内容高度自我收敛：
+  // 放不下就少一行、还塞得下一行就多一行（用户 2026-10-30：不要滚动，屏幕能放多少就多少）。
+  // 上下都封 3 步，保证不会来回抖动。
+  const [gridRowAdjust, setGridRowAdjust] = useState(0);
   const gridVisibleRows =
-    gridH == null ? null : Math.max(1, Math.min(3, Math.floor(gridH / CAT_CELL_ROW_HEIGHT)));
+    gridH == null
+      ? null
+      : Math.max(1, Math.floor(gridH / CAT_CELL_ROW_HEIGHT) + gridRowAdjust);
   const gridMaxCount = gridVisibleRows == null ? null : gridVisibleRows * gridColumns - 1;
   // ---------- 网格顺序冻结（T15 修正）----------
   // 进入页面 / 切换支出·收入 / 列表数据落地（catListsGen）/ 保存后重进页面（resetAll）时重建一次；
@@ -1146,6 +1152,13 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     if (!selectedCategory || gridPinned.some((c) => c.id === selectedCategory.id)) return gridPinned;
     return [selectedCategory, ...gridPinned];
   }, [gridPinned, selectedCategory]);
+
+  /** 真正铺到网格里的类别：只铺完整行放得下的数量，「全部」永远占最后一格。
+   *  网格不再滚动 —— 超出的历史类别只能从「全部」进入完整列表（功能不丢）。 */
+  const gridCategories = useMemo(
+    () => (gridMaxCount == null ? displayCategories : displayCategories.slice(0, gridMaxCount)),
+    [displayCategories, gridMaxCount]
+  );
 
   // 计算器键盘和浮空 Tab bar 在同一块屏幕区域，键盘展开时强制把 Tab bar 收起，
   // 键盘收起（按完成、或者切到别的表单）时恢复——避免两者叠在一起互相挡住点击
@@ -2690,15 +2703,34 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           contentContainerStyle={[styles.catGridContent, isShort && styles.catGridContentShort]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // 用户 2026-10-30：网格不许滚动，屏幕能放多少行就放多少行
+          scrollEnabled={false}
           onLayout={(e) => {
-            // 实测网格区可见高度 → 决定铺多少格（至少 2 行）；超出的历史类别靠网格自身滚动
+            // 实测网格区可见高度 → 决定铺多少行（至少 1 行，不封顶）
             const h = e.nativeEvent.layout.height;
-            setGridH((prev) => (prev == null || Math.abs(prev - h) > 0.5 ? h : prev));
+            setGridH((prev) => {
+              if (prev != null && Math.abs(prev - h) <= 0.5) return prev;
+              setGridRowAdjust(0); // 屏高变了，重新从估算值开始收敛
+              return h;
+            });
+          }}
+          onContentSizeChange={(_w, h) => {
+            if (gridH == null || h <= 0) return;
+            // 实测行高 = 内容高 / 已铺行数（含末尾「全部」那格）
+            const rows = Math.max(1, Math.ceil((gridCategories.length + 1) / gridColumns));
+            const rowH = h / rows;
+            if (h > gridH + 1) {
+              // 溢出 → 少一行
+              if (gridRowAdjust > -3) setGridRowAdjust((a) => a - 1);
+            } else if (h + rowH <= gridH + 1) {
+              // 还塞得下一整行 → 多一行
+              if (gridRowAdjust < 3) setGridRowAdjust((a) => a + 1);
+            }
           }}
         >
           {/* 每格外包一层 View 承载百分比宽度 —— RN Web 里百分比宽度必须落在 flex 直接子项上
               （PressableScale 的 Pressable 宽度是内容自适应，百分比给不到它内部那层） */}
-          {displayCategories.map((c) => {
+          {gridCategories.map((c) => {
             const active = categoryId === c.id;
             // 用户定版：不要"其它图标发蒙"的压暗方案 —— 选中感全部交给选中项自己的
             // 贴边描边 + 光晕（见 IconCircle 的 selected）。未选中项保持原样不透明。
