@@ -1012,6 +1012,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       setCatSheetOpen(false);
       return true;
     }
+    // 选类别是同屏 step（不是独立路由）：硬件返回回表单，别把正在记的这笔一起弹掉
+    if (step === 'category') {
+      setStep('detail');
+      return true;
+    }
     return false;
   };
   useEffect(() => {
