@@ -442,7 +442,7 @@ function devCalLog(label: string) {
 
 /** 列表格子统一的过渡包装：淡出 × 上升 × 日历下沉。所有格子共用同一份计算，没有逐行错峰。
  *  纯 UI 线程 useAnimatedStyle，不用 entering / exiting 属性（Fabric 下会 addViewAt 崩） */
-function ListFx({ outP, rise, listY, listO, shiftX, children }: { outP: SharedValue<number>; rise: SharedValue<number>; listY: SharedValue<number>; listO: SharedValue<number>; shiftX: SharedValue<number>; children: React.ReactNode }) {
+function ListFx({ outP, rise, listY, listO, shiftX, children, pointerEvents }: { outP: SharedValue<number>; rise: SharedValue<number>; listY: SharedValue<number>; listO: SharedValue<number>; shiftX: SharedValue<number>; children: React.ReactNode; /** 日历模式下账单行不吃点击（安卓上必须逐行关，父层关会连头部一起关掉） */ pointerEvents?: 'none' | 'auto' }) {
   const style = useAnimatedStyle(() => {
     const r = rise.value;
     return {
@@ -452,7 +452,11 @@ function ListFx({ outP, rise, listY, listO, shiftX, children }: { outP: SharedVa
       transform: [{ translateX: shiftX.value }, { translateY: (1 - r) * LIST_RISE_LIFT + listY.value }],
     };
   });
-  return <Reanimated.View style={style}>{children}</Reanimated.View>;
+  return (
+    <Reanimated.View pointerEvents={pointerEvents} style={style}>
+      {children}
+    </Reanimated.View>
+  );
 }
 
 /** 净资产胶囊里的一个币种文字：按「当前页距离」淡入淡出，纯 UI 线程（拖动中不 setState） */
@@ -2286,8 +2290,11 @@ export default function HomeScreen({ navigation }: any) {
     );
   }, [t, getCategoryById, getAssetById, navigation, activeCurrency, transferView]);
 
+  /** 日历模式下账单行是否吃点击（状态在下方声明，这里用 ref 读渲染期的当前值，避免声明顺序问题） */
+  const calBlockRowsRef = useRef(false);
+
   const renderTxRow = useCallback(({ item, index, section }: { item: Transaction; index: number; section: TxDaySection }) => (
-    <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX}>
+    <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
       {buildTxRow(item, index, section, item.id === flashTxId)}
     </ListFx>
     // 依赖：渲染期读到的都列进来；stable 的 renderItem 让 VirtualizedList 的 CellRenderer
@@ -2345,7 +2352,7 @@ export default function HomeScreen({ navigation }: any) {
   // 列表内的日期头：切币种过渡时跟着列表淡出 / 上滑（吸顶条 / pinnedHeader 仍直接用 renderDayHeader，不动）
   const renderSectionHeaderEntering = useCallback(
     ({ section }: { section: TxDaySection }) => (
-      <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX}>
+      <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
         {renderDayHeader({ section })}
       </ListFx>
     ),
@@ -2436,6 +2443,9 @@ export default function HomeScreen({ navigation }: any) {
   const pinnedFadeStyle = useAnimatedStyle(() => ({ opacity: listO.value }));
   // 列表始终挂着（日历模式下它 opacity 0）；日历打开后（calClamp 为真，只在动画结束时变一次）把列表内容高度夹成「头部 + 日历」，
   // 不会滚进一大片空白，也不会让头部被滚走。切换过程只有两次 React 更新（见 afterCalTap / finishToggle）：
+  // 渲染期把「账单行是否吃点击」同步给列表行（见 renderTxRow 的 pointerEvents）
+  calBlockRowsRef.current = calHitInert || calClamp;
+
   // 点按那一刻翻 calHitInert（命中测试），动画结束才翻 calClamp（高度夹取）。
   const calContentH = calH > 0 ? heroH + calH + tabClearance + 12 : 0;
   const listContentStyle = useMemo(() => {
@@ -2454,11 +2464,13 @@ export default function HomeScreen({ navigation }: any) {
             // 从 382 起就被 opacity 0 的日期头接走，所以点文字时不灵敏、下半颗完全点不动）。
           }
         : null),
-      // 这里把整层关掉命中测试；头部层（含日历卡、hero、开关按钮）用 JSX 的 pointerEvents="auto"
-      // 显式打开 —— pointer-events:none 的祖先不会连带禁掉显式声明 auto 的子树。
-      // ⚠ 条件里必须带 calHitInert：夹取（calClamp）要等动画结束，而命中测试从点击那一刻就得关掉，
-      //   否则进场动画期间点日历卡的按钮会掉到下面 opacity 0 的账单行上（「点了没反应」）。
-      ...(calHitInert || clamped ? { pointerEvents: 'none' as const } : null),
+      /* ⚠ 这里**不能**再整层关命中测试。
+       * 之前的写法是给内容容器 pointerEvents:'none'，指望头部层用 'auto' 把自己打开 ——
+       * 那是 CSS/Web 的语义；**安卓原生上父节点 none 会连子树一起关掉**，子节点的 auto 救不回来。
+       * 后果：日历一打开，整个内容容器（含 hero、快捷入口、右上角日历开关）全部不吃触摸，
+       * 看着没变但点哪都没反应，连关闭都点不了（用户 2026-10-30 反馈）。
+       * 现在改为只关「列表行/日期头」的命中测试（见 renderTxRow / renderSectionHeaderEntering），
+       * 头部始终可点。 */
     };
   }, [calClamp, calContentH, tabClearance, calHitInert]);
   // JS 兜底：预热没到就点了 —— 先挂上日历卡（藏着），两帧后在 UI 线程起动画
@@ -2481,7 +2493,16 @@ export default function HomeScreen({ navigation }: any) {
       // 动画结束的回调进来时目标已经被再次点按改掉了：这次收尾作废
       if ((calTarget.value === 1) !== open) return;
       if (finishHandleRef.current) finishHandleRef.current.cancel();
-      finishHandleRef.current = InteractionManager.runAfterInteractions(() => {
+
+      /* ⚠ 收尾绝不能只靠 InteractionManager：它不回调时（实测 Web 上就不回调），
+       * setCalHitInert(false) 永远不执行 → contentContainerStyle 一直是 pointerEvents:'none'
+       * → 而「支出/收入/转账/扫码」和右上角日历开关都在 ListHeaderComponent 里，
+       * 等于整块头部永久不吃触摸：看着没变，点哪都没反应（用户 2026-10-30 反馈）。
+       * 所以 InteractionManager 与定时器双保险，谁先到用谁，且只执行一次。 */
+      let settled = false;
+      const runOnce = () => {
+        if (settled) return;
+        settled = true;
         finishHandleRef.current = null;
         if ((calTarget.value === 1) !== open) return;
         React.startTransition(() => {
@@ -2489,7 +2510,16 @@ export default function HomeScreen({ navigation }: any) {
           // 收尾同时对齐「列表不吃点击」：打开=保持关；关闭=动画走完再把点击还给列表
           setCalHitInert(open);
         });
-      });
+      };
+      const interaction = InteractionManager.runAfterInteractions(runOnce);
+      // 动画 180ms；320ms 兜底足够，宁可早一点还回点击权，也不能永久锁死
+      const fallbackTimer = setTimeout(runOnce, 320);
+      finishHandleRef.current = {
+        cancel: () => {
+          interaction.cancel();
+          clearTimeout(fallbackTimer);
+        },
+      };
     },
     [calTarget]
   );
@@ -3021,7 +3051,7 @@ export default function HomeScreen({ navigation }: any) {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           // 日历模式不显示空状态（列表为空是刻意的）；真没账单时才给「记第一笔」
-          <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX}>
+          <ListFx outP={listOutP} rise={listInT} listY={listY} listO={listO} shiftX={listShiftX} pointerEvents={calBlockRowsRef.current ? 'none' : 'auto'}>
             {renderEmptyState()}
           </ListFx>
         }
