@@ -16,6 +16,7 @@ import { useTheme } from '../../theme/useTheme';
 import { useLayout } from '../../theme/useLayout';
 import { useT } from '../../i18n/LanguageContext';
 import AppText from '../ui/AppText';
+import BackButton from '../ui/BackButton';
 import GlassView from '../ui/GlassView';
 import PressableScale from '../PressableScale';
 import SegmentedControl from '../SegmentedControl';
@@ -65,17 +66,7 @@ export function TransactionTypeHeader({
     <View style={[styles.header, isShort && styles.headerShort]}>
       <View style={styles.headerRow}>
         {/* 返回：44 玻璃圆钮（稿） */}
-        <PressableScale
-          onPress={onBack}
-          activeScale={0.94}
-          hitSlop={0}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.back')}
-        >
-          <GlassView radius={999} style={styles.glassRound}>
-            <Ionicons name="chevron-back" size={20} color={semantic.textPrimary} />
-          </GlassView>
-        </PressableScale>
+        <BackButton onPress={onBack} accessibilityLabel={t('common.back')} />
         {/* 标题居中、text.primary（稿 17/600）；放不下也不缩字、不省略 */}
         <AppText
           variant="headline"

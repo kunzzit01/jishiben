@@ -24,7 +24,7 @@ import { Spacing } from '../../theme/theme';
 import { useTheme } from '../../theme/useTheme';
 import { useT } from '../../i18n/LanguageContext';
 import AppText from './AppText';
-import IconButton from './IconButton';
+import BackButton from './BackButton';
 
 export interface ScreenHeaderProps {
   /** 页头形态：root = Tab 根页大标题 · compact = 二级页（默认） */
@@ -118,27 +118,12 @@ export function ScreenHeader({
     );
   }
 
-  // 返回键：36 圆 + 浅底 + 发丝边（与首页顶部那组圆形工具键同一套语言）
+  // 返回键：统一走 ui/BackButton（2026-10-30 全 App 一颗返回钮）
   const backButton = onBack ? (
-    <View
-      style={{
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: semantic.surfaceElevated,
-        borderWidth: 1,
-        borderColor: semantic.hairline,
-        boxShadow: '0px 2px 8px 0px rgba(7,28,73,0.10)',
-      }}
-    >
-      <IconButton
-        icon="chevron-back"
-        accessibilityLabel={backAccessibilityLabel ?? tr('common.back')}
-        onPress={onBack}
-      />
-    </View>
+    <BackButton
+      onPress={onBack}
+      accessibilityLabel={backAccessibilityLabel ?? tr('common.back')}
+    />
   ) : null;
 
   // 版式 2：顶栏只有返回键 + 右侧动作，标题在下方左对齐占满整行

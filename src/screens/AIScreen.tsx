@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
+import BackButton from '../components/ui/BackButton';
 import PressableScale from '../components/PressableScale';
 import { useTheme } from '../theme/useTheme';
 import { useTabClearance } from '../hooks/useTabClearance';
@@ -545,18 +546,10 @@ export default function AIScreen({ navigation }: any) {
     >
       {/* 头部:与其他二级页同款——圆框返回键(40×40、1.5px link 描边) + 标题居中 */}
       <View style={styles.headerRow}>
-        <PressableScale
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          activeScale={0.92}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.back')}
-          hitSlop={{ top: 2, bottom: 2, left: 2, right: 2 }}
-        >
-          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-        </PressableScale>
+        <BackButton onPress={() => navigation.goBack()} accessibilityLabel={t('common.back')} />
         <Text style={styles.headerTitle}>{t('ai.title')}</Text>
-        <View style={{ width: 40 }} />
+        {/* 与返回键同宽（44）保持标题真居中 */}
+        <View style={{ width: 44 }} />
       </View>
       <ScrollView
         onScroll={onTabScroll ?? undefined}

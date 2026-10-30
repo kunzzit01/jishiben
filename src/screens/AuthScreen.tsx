@@ -31,6 +31,7 @@ import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
 import SegmentedControl from '../components/SegmentedControl';
+import BackButton from '../components/ui/BackButton';
 import { AppText, GlassView, HeroGradient, withAlpha } from '../components/ui';
 
 type Mode = 'signin' | 'signup';
@@ -238,16 +239,7 @@ export default function AuthScreen({ navigation }: any) {
 
       {/* 玻璃二级页头：稿里这条只有返回圆钮（大标题在页内，未登录视图用稿的 30/600 大标题） */}
       <View style={styles.headerRow}>
-        <PressableScale
-          onPress={() => navigation.goBack()}
-          activeScale={0.9}
-          accessibilityRole="button"
-          accessibilityLabel={tr('common.back')}
-        >
-          <GlassView intensity={WEB_GLASS_INTENSITY} radius={999} style={styles.headerGlassBtn}>
-            <Ionicons name="chevron-back" size={20} color={semantic.textPrimary} />
-          </GlassView>
-        </PressableScale>
+        <BackButton onPress={() => navigation.goBack()} accessibilityLabel={tr('common.back')} />
       </View>
 
       {user ? (
