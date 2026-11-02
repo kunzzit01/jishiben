@@ -171,6 +171,10 @@ reminderEnabled 仍是 0，需要在 App 里重新打开一次开关。
 
 ## 九、执行记录 · 2026-11-02 15:55（web）/ 16:02（OTA）
 
+> 后续修正：开关说明文案改成「账单日当天 + 还款日前 3/2/1 天」（提交 69407e61）后，
+> 16:24 重建 web（bundle index-1b82c301…）、16:25 重发 OTA（updateId `20261102082525`，
+> manifest id `0190469d-…`，bundle index-e65aeec5…，5,196,577 字节，sha256 已与线上下载比对一致）。
+
 前提：用户已把 `1cdfb819` 推到 main；VPS `git pull` 后 HEAD = 1cdfb819。
 
 ### web
