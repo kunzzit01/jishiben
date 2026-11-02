@@ -10,8 +10,9 @@
 //
 // 另外删掉首页式的「minHeight: 视口高 + 130」撑高写法（计划 G4）：内容短时不再滚出大片空白。
 //
-// 信用卡账单口径（computeCreditStatement）已改为按账户上的真实账单日 / 还款日计算
-// （creditStatement.ts 的纯函数）；本月流水（computeAssetFlowStats）的计算照旧。
+// 信用卡账单口径（computeCreditStatement）按自然月计算：本期已刷 = 本月 1 号到今天（含今天），
+// 上期账单金额 = 上一个自然月整月。账户上的账单日 / 还款日只做记载，不参与任何计算。
+// 本月流水（computeAssetFlowStats）的计算照旧。
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -36,7 +37,6 @@ import { useT } from '../i18n/LanguageContext';
 import { useDialog } from '../components/AppDialog';
 import { useApp } from '../context/AppContext';
 import { ROUTES } from '../navigation/routes';
-import { periodForDate, dueDateFor, statementDayInMonth } from '../utils/creditStatement';
 import { getAssetDisplayBalance } from '../utils/creditCard';
 import { formatMoney } from '../utils/formatMoney';
 import { AssetType } from '../types';
@@ -637,44 +637,32 @@ function SheetInfoRow({
 }
 
 interface CreditStatement {
-  currentCycleSpend: number; // 未出账（本期已刷）：最近一次账单日的次日到今天（含今天）
-  lastStatementAmount: number; // 上期账单金额：[上一个账单日的次日, 本账单日] 整段
-  dueDate: Date; // 上期账单的应还日
+  currentCycleSpend: number; // 本期已刷：本月 1 号到今天（含今天）
+  lastStatementAmount: number; // 上期账单金额：上一个自然月整月
   available: number; // 可用额度
 }
 
-// 账期口径来自账户上的账单日 / 还款日，逐月边界交给 creditStatement.ts 的纯函数裁决
-// （2 月没有 30 号这类短月裁剪在里面，不在这里自己算月末）：
-//   close = 最近一次账单日；上期账单金额 = [上一个账单日的次日, close]
-//   未出账（本期已刷）= close 的次日到今天（含今天）
+// 信用卡账单的固定标准：每月 1 号结算，结算区间为上一个自然月（1 号到月末）。
+// 不使用账户上的账单日 / 还款日字段（这两个日期只做记载）；本期已刷 = 本月 1 号到今天（含今天）
 function computeCreditStatement(
-  asset: { creditLimit?: number; statementDay?: number; dueDay?: number },
+  asset: { creditLimit?: number },
   balance: number,
   spendInRange: (start: Date, end: Date) => number
 ): CreditStatement | null {
   const today = new Date();
-  // 历史数据可能没设账单日 / 还款日：退化成 1 号账单日、5 号还款日，不崩也不出 NaN
-  const statementDay = asset.statementDay ?? 1;
-  const dueDay = asset.dueDay ?? 5;
+  // 两个结算日：本月 1 号（最近一次）和上月 1 号（上一次）
+  const closeDate = new Date(today.getFullYear(), today.getMonth(), 1);
+  const prevCloseDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  // 本期区间含今天：结束取到明天 0 点（用年月日分量 +1 天，夏令时切换那天也不会偏一小时）
+  const cycleEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
 
-  const { close } = periodForDate(today, statementDay);
-  // 上一个账单日同样交给短月裁剪求（账单日 30、2 月 → 落到 28 号，不滚到 3 月 2 日）
-  const prevClose = statementDayInMonth(close.getFullYear(), close.getMonth() - 1, statementDay);
-
-  // 用年月日分量 +1 天：getTime() + 86400000 在夏令时切换那天会偏一小时、落到前一天 23 点
-  const dayAfter = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-  const periodStart = dayAfter(prevClose); // 上期第一天 = 上一个账单日的次日
-  const periodEnd = dayAfter(close); // 含账单日当天 → 结束取到次日 0 点
-  const openEnd = dayAfter(today); // 本期区间含今天：结束取到明天 0 点
-
-  const lastStatementAmount = spendInRange(periodStart, periodEnd);
-  // 未出账从账单日的次日开始：账单日当天的支出算上一期账单
-  const currentCycleSpend = spendInRange(periodEnd, openEnd);
+  const currentCycleSpend = spendInRange(closeDate, cycleEnd);
+  const lastStatementAmount = spendInRange(prevCloseDate, closeDate);
 
   const totalOwed = Math.max(0, -balance); // balance 是负数代表欠款
   const available = (asset.creditLimit ?? 0) - totalOwed;
 
-  return { currentCycleSpend, lastStatementAmount, dueDate: dueDateFor(close, statementDay, dueDay), available };
+  return { currentCycleSpend, lastStatementAmount, available };
 }
 
 interface AssetFlowStats {
@@ -1770,15 +1758,6 @@ export default function AssetScreen() {
                               weight="600"
                             />
                           }
-                          separator
-                        />
-                        <SheetInfoRow
-                          label={t('asset.dueDate')}
-                          value={
-                            <AppText variant="subhead" weight="600" color={semantic.textPrimary}>
-                              {toDateStr(viewingStatement.dueDate)}
-                            </AppText>
-                          }
                         />
                       </View>
                     )
@@ -1936,6 +1915,26 @@ export default function AssetScreen() {
                           />
                         </PressableScale>
                       </View>
+                    </View>
+                  )}
+
+                  {/* 还款提醒（仅信用卡）：即时切换，走与账单日同一套 updateAsset 写库路径，不另造保存机制 */}
+                  {sheetAsset.type === 'credit' && (
+                    <View style={styles.sheetList}>
+                      <ListRow
+                        title={t('asset.reminderToggle')}
+                        subtitle={t('asset.reminderToggleHint')}
+                        trailing={
+                          <Switch
+                            value={!!sheetAsset.reminderEnabled}
+                            onValueChange={(next) => {
+                              void updateAsset(sheetAsset.id, { reminderEnabled: next });
+                            }}
+                            accessibilityLabel={t('asset.reminderToggle')}
+                          />
+                        }
+                        testID="asset-detail-reminder"
+                      />
                     </View>
                   )}
 

@@ -25,7 +25,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AppProvider, useApp } from './src/context/AppContext';
-import { AuthProvider } from './src/context/AuthContext';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { AppLockProvider, AppLockOverlay } from './src/context/AppLockContext';
 import { AppDialogProvider } from './src/components/AppDialog';
 import { useSyncManager } from './src/hooks/useSyncManager';
@@ -36,6 +36,7 @@ import { LanguageProvider, useT } from './src/i18n/LanguageContext';
 import ComponentGallery from './src/screens/_preview/ComponentGallery';
 import { useNotificationSetup } from './src/hooks/useNotificationSetup';
 import { usePaymentReminders } from './src/hooks/usePaymentReminders';
+import { useCreditCardReminders } from './src/hooks/useCreditCardReminders';
 import { useBottomSystemInset } from './src/hooks/useBottomSystemInset';
 import { AndroidNavBarAppearance } from './src/hooks/useAndroidNavBarAppearance';
 import {
@@ -312,11 +313,14 @@ function useAfterFirstPaint(): boolean {
   return ready;
 }
 
-/** 后台服务挂载点（只在首屏之后渲染一次，逻辑与原先 AppContent 里的三个 hook 完全一致） */
+/** 后台服务挂载点（只在首屏之后渲染一次；各 hook 的挂载顺序与原先 AppContent 里一致，信用卡提醒排在最后） */
 function DeferredServices() {
+  const { user } = useAuth();
   useNotificationSetup();
   useSyncManager();
   usePaymentReminders();
+  // 信用卡还款提醒：跨账本、按 userId+账户+还款日+提前天数 去重；登出时由 AuthContext 清理
+  useCreditCardReminders(user ? String(user.id) : null);
   useEffect(() => {
     devMark('deferred services started');
   }, []);

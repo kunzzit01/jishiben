@@ -79,6 +79,7 @@ public class AssetService {
         }
         applyCredit(asset, request.creditLimit(), request.statementDay(), request.dueDay(),
                 request.interestRate());
+        applyReminder(asset, request.reminderEnabled());
         asset.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         applyDefault(ownerId, asset, request.defaultAsset());
         applyArchived(asset, request.archived());
@@ -112,6 +113,7 @@ public class AssetService {
         }
         applyCredit(asset, request.creditLimit(), request.statementDay(), request.dueDay(),
                 request.interestRate());
+        applyReminder(asset, request.reminderEnabled());
         if (request.sortOrder() != null) {
             asset.setSortOrder(request.sortOrder());
         }
@@ -141,6 +143,17 @@ public class AssetService {
             throw ApiException.validation("interestRate must not be negative");
         }
         asset.setInterestRate(credit && interestRate != null ? Money.scaleRate(interestRate) : null);
+    }
+
+    /**
+     * Never persists NULL. An omitted value keeps the current one (PATCH semantics, same as the
+     * default/archived flags) and a legacy NULL row heals to false on its next write.
+     * Non-credit accounts store false too: the flag only means "reminder on".
+     */
+    private static void applyReminder(Asset asset, Boolean reminderEnabled) {
+        asset.setReminderEnabled(reminderEnabled != null
+                ? reminderEnabled
+                : Boolean.TRUE.equals(asset.getReminderEnabled()));
     }
 
     private void applyDefault(long ownerId, Asset asset, Boolean makeDefault) {
@@ -180,6 +193,7 @@ public class AssetService {
                 Checks.unbox(asset.getStatementDay()),
                 Checks.unbox(asset.getDueDay()),
                 asset.getInterestRate(),
+                Boolean.TRUE.equals(asset.getReminderEnabled()),
                 asset.isDefaultAsset(),
                 asset.getSortOrder(),
                 asset.getArchivedAt() != null,

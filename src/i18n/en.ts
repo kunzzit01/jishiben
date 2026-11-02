@@ -609,6 +609,13 @@ export const en = {
     dueDayValue: 'Due day %{day}',
     dayValue: 'Day %{day}',
     dayListCollapse: 'Collapse',
+    // Payment reminder (credit cards): states only how many days remain until the due day
+    reminderToggle: 'Payment reminder',
+    reminderToggleHint: 'Remind me 3, 2 and 1 day before the due date',
+    reminderOn3: '%{name} is due in 3 days. Please check your statement and arrange payment.',
+    reminderOn2: '%{name} is due in 2 days. Remember to arrange payment.',
+    reminderOn1: '%{name} is due tomorrow. Please confirm whether you have repaid.',
+    reminderHint: 'If already repaid, please ignore this reminder',
     emptyTitle: 'No accounts yet',
     emptyHint: 'Add an account to see balances and statements here',
     // No accounts match the type filter — never leave a blank glass card

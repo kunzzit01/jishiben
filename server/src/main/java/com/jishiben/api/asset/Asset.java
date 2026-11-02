@@ -66,6 +66,10 @@ public class Asset {
     @Column(name = "interest_rate", columnDefinition = "decimal(9,6)")
     private BigDecimal interestRate;
 
+    /** Repayment reminder switch. Legacy rows may hold NULL; readers treat NULL as false. */
+    @Column(name = "reminder_enabled")
+    private Boolean reminderEnabled;
+
     @Column(name = "is_default", nullable = false)
     private boolean defaultAsset;
 
@@ -205,6 +209,14 @@ public class Asset {
 
     public void setInterestRate(BigDecimal interestRate) {
         this.interestRate = interestRate;
+    }
+
+    public Boolean getReminderEnabled() {
+        return reminderEnabled;
+    }
+
+    public void setReminderEnabled(Boolean reminderEnabled) {
+        this.reminderEnabled = reminderEnabled;
     }
 
     public boolean isDefaultAsset() {

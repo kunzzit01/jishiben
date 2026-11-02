@@ -339,6 +339,7 @@ export interface AssetDto {
   creditLimit: number | string | null;
   statementDay: number | null;
   dueDay: number | null;
+  reminderEnabled?: boolean | null;
   defaultAsset: boolean;
   sortOrder: number;
   archived: boolean;
@@ -359,6 +360,7 @@ export interface AssetUpsert {
   creditLimit?: number | null;
   statementDay?: number | null;
   dueDay?: number | null;
+  reminderEnabled?: boolean | null;
   defaultAsset?: boolean;
   sortOrder?: number;
   archived?: boolean;

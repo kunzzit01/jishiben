@@ -613,6 +613,13 @@ export const zh = {
     dueDayValue: '还款日 %{day} 号',
     dayValue: '%{day} 号',
     dayListCollapse: '收起',
+    // 还款提醒（信用卡）：文案只陈述「距设定还款日还有几天」，不做任何还款状态判断
+    reminderToggle: '还款提醒',
+    reminderToggleHint: '还款日前 3、2、1 天各提醒一次',
+    reminderOn3: '%{name} 还有 3 天到设定还款日，请核对账单并安排还款。',
+    reminderOn2: '%{name} 还有 2 天到设定还款日，请记得处理还款。',
+    reminderOn1: '明天是 %{name} 的设定还款日，请确认是否已完成还款。',
+    reminderHint: '如已还款，请忽略本次提醒',
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
     // 类型筛选后 0 个账户：不能留一张空白玻璃卡（用户 2026-10-30 截图就是这个）

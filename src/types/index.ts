@@ -141,6 +141,8 @@ export interface Asset {
   creditLimit?: number; // 额度
   statementDay?: number; // 账单日，1-28
   dueDay?: number; // 还款日，1-28（若小于等于账单日，视为下个月的这一天）
+  // 仅信用卡使用：还款日前 3/2/1 天提醒
+  reminderEnabled?: boolean;
   // 默认账户：记一笔时自动带出这个账户。同一时间最多一个资产是默认（由 setDefaultAsset 保证）
   isDefault?: boolean;
   // 归档时间（ISO）：有值 = 已归档。归档账户不出现在账户列表/记账选择/净资产里，

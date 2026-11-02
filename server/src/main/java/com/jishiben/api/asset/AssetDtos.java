@@ -23,6 +23,7 @@ public final class AssetDtos {
             Integer statementDay,
             Integer dueDay,
             BigDecimal interestRate,
+            Boolean reminderEnabled,
             Boolean defaultAsset,
             Integer sortOrder,
             Boolean archived) {
@@ -40,6 +41,7 @@ public final class AssetDtos {
             Integer statementDay,
             Integer dueDay,
             BigDecimal interestRate,
+            Boolean reminderEnabled,
             Boolean defaultAsset,
             Integer sortOrder,
             Boolean archived) {
@@ -59,6 +61,7 @@ public final class AssetDtos {
             Integer statementDay,
             Integer dueDay,
             BigDecimal interestRate,
+            Boolean reminderEnabled,
             boolean defaultAsset,
             int sortOrder,
             boolean archived,

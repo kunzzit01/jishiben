@@ -40,11 +40,13 @@ export function usePaymentReminders() {
         const trigger = new Date(next);
         trigger.setHours(9, 0, 0, 0); // 到期日早上 9:00 提醒
         if (trigger <= now) return;
-        void scheduleLocalNotification(
+        // 调度函数返回通知 id,但本 hook 不取消自己发的提醒(排期完就交给系统);
+        // 它内部已兜底不会 reject,这里显式接管 Promise,不再把 Promise<string|null> 当成 void 丢掉
+        scheduleLocalNotification(
           `${p.name} · ${days === 0 ? '今天' : `还有 ${days} 天`}到期`,
           `金额 ${formatMoney(p.amount, { decimals: decimalPlaces })},请确认付款计划。`,
           trigger
-        );
+        ).catch(() => {});
       });
     };
 

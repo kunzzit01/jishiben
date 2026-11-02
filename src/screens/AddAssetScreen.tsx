@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   BackHandler,
+  Switch,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -96,6 +97,8 @@ export default function AddAssetScreen({ route }: any) {
   // （用户 2026-10-29：「我要怎么设置还款日期？」）。取值 1–30（用户要求上限到 30 号；31 号不入选项）。
   const [statementDay, setStatementDay] = useState<number>(editAsset?.statementDay ?? 1);
   const [dueDay, setDueDay] = useState<number>(editAsset?.dueDay ?? 5);
+  // 还款提醒（仅信用卡）：默认关闭；编辑模式按存档回填，保存时写入 reminderEnabled
+  const [reminderEnabled, setReminderEnabled] = useState<boolean>(editAsset?.reminderEnabled ?? false);
   const [daySheet, setDaySheet] = useState<'statement' | 'due' | null>(null);
   // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
   const [keypadHeight, setKeypadHeight] = useState(0);
@@ -296,6 +299,8 @@ export default function AddAssetScreen({ route }: any) {
         // 仅信用卡带账单日/还款日；类型切走后清空，避免残留
         statementDay: isCredit ? statementDay : undefined,
         dueDay: isCredit ? dueDay : undefined,
+        // 还款提醒同样只属于信用卡：类型切走后显式关掉，避免残留
+        reminderEnabled: isCredit ? reminderEnabled : undefined,
         name: name.trim(),
         icon: typeInfo?.icon ?? editAsset.icon,
         color: typeInfo?.color ?? editAsset.color,
@@ -307,7 +312,7 @@ export default function AddAssetScreen({ route }: any) {
       });
     } else {
       await addAsset({
-        ...(isCredit ? { statementDay, dueDay } : {}),
+        ...(isCredit ? { statementDay, dueDay, reminderEnabled } : {}),
         name: name.trim(),
         icon: typeInfo!.icon,
         color: typeInfo!.color,
@@ -517,6 +522,32 @@ export default function AddAssetScreen({ route }: any) {
                   <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
                 </PressableScale>
               </View>
+            </View>
+          </View>
+        )}
+
+        {/* 还款提醒（仅信用卡）：放在账单日 / 还款日下方，沿用上方「信用额度」卡的容器与行间距
+            （creditFrame 卡片 + creditRow 行），只补横向排布，不另造一套卡片样式；
+            默认关闭，编辑模式按存档回填，随「保存」一并写入 reminderEnabled */}
+        {selectedType === 'credit' && (
+          <View style={[styles.creditFrame, { marginBottom: spacing.lg }]} testID="add-asset-reminder-card">
+            <View
+              style={[styles.creditRow, { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm }]}
+            >
+              <View style={{ flexShrink: 1, flexGrow: 1 }}>
+                <AppText variant="footnote" color={semantic.textSecondary} weight="600">
+                  {t('asset.reminderToggle')}
+                </AppText>
+                <AppText variant="footnote" color={semantic.textTertiary} style={{ marginTop: spacing.xs }}>
+                  {t('asset.reminderToggleHint')}
+                </AppText>
+              </View>
+              <Switch
+                value={reminderEnabled}
+                onValueChange={setReminderEnabled}
+                accessibilityLabel={t('asset.reminderToggle')}
+                testID="add-asset-reminder"
+              />
             </View>
           </View>
         )}

@@ -246,6 +246,7 @@ interface AppContextValue {
     creditLimit?: number;
     statementDay?: number;
     dueDay?: number;
+    reminderEnabled?: boolean;
   }) => Promise<void>;
   updateAsset: (id: string, updates: Partial<Omit<Asset, 'id' | 'createdAt' | 'ledgerId'>>) => Promise<void>;
   /**

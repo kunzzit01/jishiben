@@ -11,6 +11,7 @@ import {
 } from '../services/sessionStore';
 import { INACTIVITY_LIMIT_MS } from '../config/apiConfig';
 import { fullSync, getSyncState, subscribeSyncState, SyncStatus } from '../services/syncService';
+import { cancelCreditCardRemindersForUser } from '../hooks/useCreditCardReminders';
 
 // 距上次"上线"（打开 App）超过该时长 → 会话作废，要求重新登录
 const LAST_ACTIVE_KEY = '@jizhang/lastActiveAt';
@@ -163,6 +164,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 只退出登录，本机数据保留（离线照常用）；下次登录同账号会自动合并。
     // 后端没有"吊销本会话"的端点（只有 logout-all 会踢掉所有设备），所以这里只清本地令牌，
     // 与旧版语义一致；需要踢掉全部设备时用 authApi.logoutAll()。
+
+    // 退出前先撤掉这个账号已排的信用卡还款提醒：换账号后不该继续收到上一个账号的还款通知。
+    // 只取消本 hook 自己映射里记着的通知 id，计划付款提醒的 id 不在其中，不会被误伤。
+    await cancelCreditCardRemindersForUser(userRef.current ? String(userRef.current.id) : null);
     await clearSession();
     setSessionExpired(false);
   };

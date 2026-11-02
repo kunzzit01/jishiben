@@ -306,6 +306,7 @@ interface AssetRow extends Row {
   creditLimit: string | null;
   statementDay: number | null;
   dueDay: number | null;
+  reminderEnabled: boolean | null;
   defaultAsset: boolean;
   sortOrder: number;
   archived: boolean;
@@ -426,6 +427,7 @@ function assetToRow(a: Asset, index: number, fallbackLedgerId: string, fallbackC
     creditLimit: a.creditLimit != null ? amountKey(a.creditLimit) : null,
     statementDay: a.statementDay ?? null,
     dueDay: a.dueDay ?? null,
+    reminderEnabled: a.reminderEnabled === true,
     defaultAsset: a.isDefault === true,
     sortOrder: index,
     archived: Boolean(a.archivedAt),
@@ -446,6 +448,7 @@ function assetFromDto(d: AssetDto): Asset {
     creditLimit: optionalAmount(d.creditLimit),
     statementDay: d.statementDay ?? undefined,
     dueDay: d.dueDay ?? undefined,
+    reminderEnabled: d.reminderEnabled ?? undefined,
     isDefault: d.defaultAsset ? true : undefined,
     // 归档时间只在"确实已归档"时保留；未归档 = 活跃账户（App 用 undefined 判断活跃）
     archivedAt: d.archived ? d.archivedAt ?? new Date().toISOString() : undefined,
@@ -1159,6 +1162,7 @@ function toApiBody(table: TableName, row: Row): unknown {
         creditLimit: r.creditLimit != null ? Number(r.creditLimit) : null,
         statementDay: r.statementDay,
         dueDay: r.dueDay,
+        reminderEnabled: r.reminderEnabled ?? null,
         defaultAsset: r.defaultAsset,
         sortOrder: r.sortOrder,
         archived: r.archived,

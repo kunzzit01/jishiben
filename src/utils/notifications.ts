@@ -151,16 +151,17 @@ export function addNotificationListeners(
 
 /**
  * 本地通知调度(不依赖推送 token):财务规划的付款提醒等本地提醒用这个。
+ * 返回系统分配的 notification id:只有拿到它才能事后取消,所以调用方要留存。
  * Expo Go 里安静跳过;development build 正常。
  */
 export async function scheduleLocalNotification(
   title: string,
   body: string,
   triggerDate: Date
-): Promise<void> {
-  if (!NotificationsModule) return;
+): Promise<string | null> {
+  if (!NotificationsModule) return null;
   try {
-    await NotificationsModule.scheduleNotificationAsync({
+    return await NotificationsModule.scheduleNotificationAsync({
       content: { title, body },
       // DateTriggerInput 的 type 是数字枚举,直接用模块内引用保证类型一致
       trigger: {
@@ -170,5 +171,44 @@ export async function scheduleLocalNotification(
     });
   } catch (e) {
     console.warn('本地通知调度失败', e);
+    return null;
+  }
+}
+
+/**
+ * 按 id 取消一条还没触发的通知。
+ * id 可能已经触发过或被系统清理掉,取消失败只记日志:取消是清理动作,
+ * 不该因为某条已不存在就让调用方中断后续清理。
+ */
+export async function cancelScheduledNotification(id: string): Promise<void> {
+  if (!NotificationsModule) return;
+  try {
+    await NotificationsModule.cancelScheduledNotificationAsync(id);
+  } catch (e) {
+    console.warn('取消本地通知失败', id, e);
+  }
+}
+
+/**
+ * 批量取消。逐条走 cancelScheduledNotification,单条失败不影响其余 id。
+ */
+export async function cancelScheduledNotifications(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    await cancelScheduledNotification(id);
+  }
+}
+
+/**
+ * 读出当前所有已排期通知的 id,给清理/去重逻辑用。
+ * 模块不可用(Expo Go)时返回空数组,调用方不用自己判断环境。
+ */
+export async function getScheduledNotificationIds(): Promise<string[]> {
+  if (!NotificationsModule) return [];
+  try {
+    const scheduled = await NotificationsModule.getAllScheduledNotificationsAsync();
+    return scheduled.map((request) => request.identifier);
+  } catch (e) {
+    console.warn('读取已排期通知失败', e);
+    return [];
   }
 }
