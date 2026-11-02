@@ -16,6 +16,8 @@ export interface ReminderRule {
   source: ReminderSource;
   /** 主体名（卡名 / 计划名；每日与月末为空） */
   label: string;
+  /** 规则名（还款日提醒 / 账单日提醒 / 记一笔提醒 …） */
+  titleKey: string;
   /** 节奏描述（i18n 键 + 参数） */
   detailKey: string;
   detailParams: Record<string, string | number>;
@@ -79,6 +81,7 @@ export function buildReminderRules(inputs: BuildInputs, items: ReminderItem[]): 
         id: ruleId,
         source: 'credit',
         label: sample.label,
+        titleKey: isStatement ? 'reminder.ruleCreditStatementTitle' : 'reminder.ruleCreditPaydayTitle',
         detailKey: isStatement ? 'reminder.ruleCreditStatement' : 'reminder.ruleCreditPayday',
         detailParams: { day: day ?? '' },
         nextAt: next,
@@ -90,6 +93,7 @@ export function buildReminderRules(inputs: BuildInputs, items: ReminderItem[]): 
         id: ruleId,
         source: 'plan',
         label: sample.label,
+        titleKey: 'reminder.sourcePlan',
         detailKey: monthly ? 'reminder.rulePlanMonthly' : 'reminder.rulePlanOther',
         detailParams: monthly ? { day: plan?.dayOfMonth ?? '' } : {},
         nextAt: next,
@@ -99,6 +103,7 @@ export function buildReminderRules(inputs: BuildInputs, items: ReminderItem[]): 
         id: ruleId,
         source: 'daily',
         label: '',
+        titleKey: 'reminder.rowDaily',
         detailKey: 'reminder.ruleDaily',
         detailParams: { hour: daily.dailyHour },
         nextAt: next,
@@ -108,6 +113,7 @@ export function buildReminderRules(inputs: BuildInputs, items: ReminderItem[]): 
         id: ruleId,
         source: 'monthEnd',
         label: '',
+        titleKey: 'reminder.rowMonthEnd',
         detailKey: 'reminder.ruleMonthEnd',
         detailParams: {},
         nextAt: next,
@@ -121,6 +127,7 @@ export function buildReminderRules(inputs: BuildInputs, items: ReminderItem[]): 
       id: 'daily',
       source: 'daily',
       label: '',
+      titleKey: 'reminder.rowDaily',
       detailKey: 'reminder.ruleDaily',
       detailParams: { hour: daily.dailyHour },
       nextAt: null,

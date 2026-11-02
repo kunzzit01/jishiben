@@ -61,9 +61,8 @@ export default function ReminderCenterScreen({ navigation }: any) {
 
   const ruleTitle = useCallback(
     (rule: ReminderRule): string => {
-      if (rule.source === 'daily') return t('reminder.rowDaily');
-      if (rule.source === 'monthEnd') return t('reminder.rowMonthEnd');
-      return rule.label;
+      const name = t(rule.titleKey);
+      return rule.label ? `${rule.label} · ${name}` : name;
     },
     [t]
   );
