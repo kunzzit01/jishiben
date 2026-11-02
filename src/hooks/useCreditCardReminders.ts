@@ -24,6 +24,7 @@ import {
   cancelScheduledNotifications,
   scheduleLocalNotification,
 } from '../utils/notifications';
+import { loadMutedKeys } from '../utils/reminderMute';
 
 /** key -> notificationId 的映射（键名带版本号：以后换结构整块换新键，老键自然废弃） */
 const STORAGE_KEY = '@jizhang/creditCardReminders.v1';
@@ -211,7 +212,7 @@ async function saveReminderMap(map: ReminderMap): Promise<void> {
  * 通知文案。还款日节点带提前天数、body 附「如已还款请忽略」；
  * 账单日节点只提醒核对本期账单，那句免责话不属于它。
  */
-function reminderMessage(
+export function creditCardReminderMessage(
   t: TranslateFunction,
   node: CreditCardReminderNode
 ): { title: string; body: string } {
@@ -226,7 +227,9 @@ function reminderMessage(
 async function doReconcile(params: ReconcileParams): Promise<void> {
   const { userId, assets, t } = params;
   const now = params.now ?? new Date();
-  const nodes = buildCreditCardReminderNodes(userId, assets, now);
+  // 用户单条删掉的提醒不再重排：排期每轮全量重算，不过滤的话删掉的会立刻回来
+  const muted = await loadMutedKeys(now);
+  const nodes = buildCreditCardReminderNodes(userId, assets, now).filter((node) => !muted.has(node.key));
   const desiredKeys = new Set(nodes.map((node) => node.key));
   const stored = await loadReminderMap();
 
@@ -243,7 +246,7 @@ async function doReconcile(params: ReconcileParams): Promise<void> {
   // 2) 缺失的节点：补排并记下 id（调度失败返回 null，不记记录，下一轮还会再试）
   for (const node of nodes) {
     if (next[node.key]) continue;
-    const { title, body } = reminderMessage(t, node);
+    const { title, body } = creditCardReminderMessage(t, node);
     const id = await scheduleLocalNotification(title, body, node.at);
     if (id) next[node.key] = id;
   }
@@ -267,6 +270,20 @@ export function reconcileCreditCardReminders(params: ReconcileParams): Promise<v
   const run = () => doReconcile(params).catch((e) => console.warn('信用卡还款提醒调度失败', e));
   reconcileChain = reconcileChain.then(run, run);
   return reconcileChain;
+}
+
+/**
+ * 取消单条已排的提醒并抹掉它的映射（提醒中心里点删除时用）。
+ * 只动这一条：同卡的其它节点、别的卡的节点都不受影响。
+ */
+export async function cancelCreditCardReminderNode(key: string): Promise<void> {
+  const stored = await loadReminderMap();
+  const id = stored[key];
+  if (!id) return;
+  await cancelScheduledNotification(id);
+  const next: ReminderMap = { ...stored };
+  delete next[key];
+  await saveReminderMap(next);
 }
 
 /**

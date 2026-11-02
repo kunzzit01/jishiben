@@ -478,11 +478,15 @@ export const zh = {
   // 提醒中心（信用卡提醒的可视化）：排期由 useCreditCardReminders 里的纯函数现算，这里只负责展示
   reminder: {
     title: '提醒中心',
-    sectionTitle: '未来 3 个月',
-    sectionFooter: '提醒由系统通知在当天 09:00 发出；关掉某张卡的「还款提醒」，这里对应条目会立即消失。',
-    kindStatement: '账单日当天',
-    kindPayday: '还款日前 %{days} 天',
+    nextTitle: '下次提醒',
+    expandTitle: '全部排期（%{count} 条）',
+    collapse: '收起',
+    sectionFooter: '提醒由系统通知在当天 09:00 发出。删掉的提醒不会再弹，可随时恢复。',
+    kindStatement: '今天账单日',
+    kindPayday: '还有 %{days} 天',
     rowSubtitle: '%{date} %{time} · %{name}',
+    deleteRow: '删除这条提醒',
+    restoreAll: '恢复已删除的提醒',
     emptyTitle: '还没有开启提醒的信用卡',
     emptyDesc: '在「资产 → 信用卡 → 账户设置」里打开「还款提醒」，这里会列出将来会发出的提醒。',
     // 未登录时排期本身不会发生（hook 需要 userId），别让空态把人指去开开关
@@ -635,12 +639,12 @@ export const zh = {
     reminderToggle: '还款提醒',
     // 单行契约（AssetScreen 用 ListRow.subtitle），两个节点都要说清又不许长
     reminderToggleHint: '账单日当天 + 还款日前 3/2/1 天',
-    reminderOn3: '%{name} 还有 3 天到设定还款日，请核对账单并安排还款。',
-    reminderOn2: '%{name} 还有 2 天到设定还款日，请记得处理还款。',
-    reminderOn1: '明天是 %{name} 的设定还款日，请确认是否已完成还款。',
+    reminderOn3: '%{name} 还有 3 天就是还款日，可以提前安排一下～',
+    reminderOn2: '%{name} 后天就是还款日，别忘了哦～',
+    reminderOn1: '明天是 %{name} 的还款日，记得还款哦～',
     // 账单日当天：只提醒核对本期账单，不附「如已还款请忽略」（那句只属于还款日提醒）
-    reminderOnStatement: '%{name} 今天是账单日，请核对本期账单。',
-    reminderHint: '如已还款，请忽略本次提醒',
+    reminderOnStatement: '今天是 %{name} 的账单日，顺手看一眼本期账单吧～',
+    reminderHint: '已经还过的话，忽略这条就好～',
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
     // 类型筛选后 0 个账户：不能留一张空白玻璃卡（用户 2026-10-30 截图就是这个）

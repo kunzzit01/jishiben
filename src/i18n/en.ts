@@ -475,11 +475,15 @@ export const en = {
   // notification hook uses, so this page only shows what would really be scheduled
   reminder: {
     title: 'Reminders',
-    sectionTitle: 'Next 3 months',
-    sectionFooter: 'Sent as system notifications at 09:00 on the day. Turn off a card’s payment reminder and its entries disappear immediately.',
-    kindStatement: 'Statement date',
-    kindPayday: '%{days} day(s) before due',
+    nextTitle: 'Next reminder',
+    expandTitle: 'All reminders (%{count})',
+    collapse: 'Collapse',
+    sectionFooter: 'Sent as system notifications at 09:00 on the day. Deleted reminders stay silent, and you can restore them anytime.',
+    kindStatement: 'Statement day',
+    kindPayday: '%{days} days to go',
     rowSubtitle: '%{date} %{time} · %{name}',
+    deleteRow: 'Delete this reminder',
+    restoreAll: 'Restore deleted reminders',
     emptyTitle: 'No card has reminders turned on',
     emptyDesc: 'Turn on “Payment reminder” under Assets → Credit card → Account settings to list upcoming reminders here.',
     // Reminders are scheduled per account (the hook needs a userId), so a local-only
@@ -632,12 +636,12 @@ export const en = {
     reminderToggle: 'Payment reminder',
     // Single-line contract (AssetScreen uses ListRow.subtitle): name both nodes, stay short
     reminderToggleHint: 'On statement date + 3/2/1 days before due',
-    reminderOn3: '%{name} is due in 3 days. Please check your statement and arrange payment.',
-    reminderOn2: '%{name} is due in 2 days. Remember to arrange payment.',
-    reminderOn1: '%{name} is due tomorrow. Please confirm whether you have repaid.',
+    reminderOn3: '%{name} is due in 3 days — just a friendly heads-up.',
+    reminderOn2: '%{name} is due the day after tomorrow — don’t forget.',
+    reminderOn1: '%{name} is due tomorrow — remember to pay.',
     // Statement date: check this period only — the "already repaid" hint belongs to due-day reminders
-    reminderOnStatement: '%{name}: today is your statement date. Please check this period.',
-    reminderHint: 'If already repaid, please ignore this reminder',
+    reminderOnStatement: 'Today is statement day for %{name} — take a quick look.',
+    reminderHint: 'Already paid? Just ignore this message.',
     emptyTitle: 'No accounts yet',
     emptyHint: 'Add an account to see balances and statements here',
     // No accounts match the type filter — never leave a blank glass card
