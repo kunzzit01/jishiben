@@ -617,9 +617,10 @@ export const zh = {
     dueDayValue: '还款日 %{day} 号',
     dayValue: '%{day} 号',
     dayListCollapse: '收起',
-    // 还款提醒（信用卡）：文案只陈述「距设定还款日还有几天」，不做任何还款状态判断
+    // 还款提醒（信用卡）：还款日前 3/2/1 天 + 账单日当天；文案只陈述日期，不做任何还款状态判断
     reminderToggle: '还款提醒',
-    reminderToggleHint: '还款日前 3、2、1 天各提醒一次',
+    // 单行契约（AssetScreen 用 ListRow.subtitle），两个节点都要说清又不许长
+    reminderToggleHint: '账单日当天 + 还款日前 3/2/1 天',
     reminderOn3: '%{name} 还有 3 天到设定还款日，请核对账单并安排还款。',
     reminderOn2: '%{name} 还有 2 天到设定还款日，请记得处理还款。',
     reminderOn1: '明天是 %{name} 的设定还款日，请确认是否已完成还款。',

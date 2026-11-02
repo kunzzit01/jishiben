@@ -612,9 +612,10 @@ export const en = {
     dueDayValue: 'Due day %{day}',
     dayValue: 'Day %{day}',
     dayListCollapse: 'Collapse',
-    // Payment reminder (credit cards): states only how many days remain until the due day
+    // Payment reminder (credit cards): on the statement date and 3/2/1 days before the due day
     reminderToggle: 'Payment reminder',
-    reminderToggleHint: 'Remind me 3, 2 and 1 day before the due date',
+    // Single-line contract (AssetScreen uses ListRow.subtitle): name both nodes, stay short
+    reminderToggleHint: 'On statement date + 3/2/1 days before due',
     reminderOn3: '%{name} is due in 3 days. Please check your statement and arrange payment.',
     reminderOn2: '%{name} is due in 2 days. Remember to arrange payment.',
     reminderOn1: '%{name} is due tomorrow. Please confirm whether you have repaid.',
