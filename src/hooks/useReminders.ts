@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { useT } from '../i18n/LanguageContext';
 import { cancelScheduledNotification, scheduleLocalNotification } from '../utils/notifications';
 import { loadMutedKeys } from '../utils/reminderMute';
+import { loadDisabledRules } from '../reminders/rules';
 import { useReminderItems } from '../reminders/useReminderItems';
 import type { ReminderItem } from '../reminders/types';
 import type { TranslateFunction } from '../i18n';
@@ -76,10 +77,14 @@ export interface ReconcileInput {
 
 async function doReconcile({ items, t, decimals }: ReconcileInput): Promise<void> {
   await migrateLegacyOnce();
-  // 已删除集合每次都从磁盘现读，不信调用方传进来的 UI 状态：
-  // 页面里刚删掉一条时，App 层那个 hook 的内存快照还是旧的，照旧算会把这条重新排回去
-  const muted = await loadMutedKeys();
-  const desired = new Set(items.filter((item) => !muted.has(item.key)).map((item) => item.key));
+  // 已删除集合与规则开关每次都从磁盘现读，不信调用方传进来的 UI 状态：
+  // 页面里刚关掉一条规则时，App 层那个 hook 的内存快照还是旧的，照旧算会把这条重新排回去
+  const [muted, disabledRules] = await Promise.all([loadMutedKeys(), loadDisabledRules()]);
+  const desired = new Set(
+    items
+      .filter((item) => !muted.has(item.key) && !disabledRules.has(item.ruleId))
+      .map((item) => item.key)
+  );
   const stored = await loadMap(STORAGE_KEY);
 
   // 1) 已经不该存在的：账户删了 / 关开关 / 节点过去 → 撤销并丢记录
@@ -94,7 +99,7 @@ async function doReconcile({ items, t, decimals }: ReconcileInput): Promise<void
 
   // 2) 还没有的：补排（失败返回 null 就不记，下一轮再试）
   for (const item of items) {
-    if (!desired.has(item.key)) continue;
+    if (!desired.has(item.key)) continue; // 被关掉的规则 / 被删掉的实例不补排
     if (next[item.key]) continue;
     const { title, body } = renderText(t, item, decimals);
     const id = await scheduleLocalNotification(title, body, item.at);

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,22 +9,19 @@ import { useApp } from '../context/AppContext';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler } from '../context/TabBarAutoHideContext';
 import { useReminderItems } from '../reminders/useReminderItems';
-import type { ReminderItem } from '../reminders/types';
-import { cancelReminderItem, reconcileReminders } from '../hooks/useReminders';
-import { muteReminderKey, unmuteAllReminders } from '../utils/reminderMute';
+import { useBudgetAlerts } from '../reminders/useBudgetAlerts';
+import { reconcileReminders } from '../hooks/useReminders';
+import type { ReminderRule } from '../reminders/rules';
 import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHeader, Switch } from '../components/ui';
 import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
-import { useBudgetAlerts } from '../reminders/useBudgetAlerts';
 
 /**
- * 统一提醒中心：信用卡（还款日 + 账单日）、计划付款、每日记账、月末总结。
+ * 提醒中心：展示的是"规则"，不是排期实例。
  *
- * 条目来自 src/reminders/build.ts 的纯函数 —— 页面显示与通知排期共用同一份计算，
- * 所以"页面上有这条"和"系统里排了这条"不会分叉。
- *
- * 删除语义：撤掉这条通知 + 记住"这条不再提醒"。不记住的话排期每轮全量重算，
- * 删掉的下一轮就会原样排回来（见 utils/reminderMute.ts）。
+ * 为什么：每月 5 号的还款日提醒是一条规则；系统里为了不漏，会把它物化成未来 3 个月、
+ * 每次提前 3/2/1 天的十几条通知。把实例铺给用户看，屏幕上就是"还有 3 天／还有 2 天…"
+ * 刷屏，谁都不想读。所以这里一条规则一行，右边一个开关；具体时刻只在"下次提醒"里出现。
  */
 export default function ReminderCenterScreen({ navigation }: any) {
   const { semantic, spacing } = useTheme();
@@ -34,38 +31,25 @@ export default function ReminderCenterScreen({ navigation }: any) {
   const { decimalPlaces } = useApp();
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
-  const { items, allItems, prefs, setPrefs, muted, reloadMuted, loading } = useReminderItems();
-  // 预算超支是事件型提醒：不预先排期，达到阈值的那一刻才弹，所以单独取
+  const { items, allItems, rules, disabledRules, toggleRule, loading } = useReminderItems();
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
-  const [expanded, setExpanded] = useState(false);
 
   const next = items[0];
   const userId = user ? String(user.id) : null;
 
-  /** 列表短标题：信用卡的提前量编码在文案键里（reminderOn3/2/1），这里翻译成天数 */
-  const rowTitle = useCallback(
-    (item: ReminderItem): string => {
-      if (item.source === 'credit') {
-        if (item.titleKey === 'asset.reminderOn3') return t('reminder.kindPayday', { days: 3 });
-        if (item.titleKey === 'asset.reminderOn2') return t('reminder.kindPayday', { days: 2 });
-        if (item.titleKey === 'asset.reminderOn1') return t('reminder.kindPayday', { days: 1 });
-        return t('reminder.kindStatement');
-      }
-      if (item.source === 'plan') {
-        return item.titleKey === 'reminder.planToday'
-          ? t('reminder.rowPlanToday')
-          : t('reminder.rowPlanLead', { days: item.titleParams.days ?? '' });
-      }
-      if (item.source === 'daily') return t('reminder.rowDaily');
-      return t('reminder.rowMonthEnd');
+  /** 关掉/打开某条规则后要立刻重排，否则要等下一次数据变化 */
+  const handleToggle = useCallback(
+    async (rule: ReminderRule, enabled: boolean) => {
+      await toggleRule(rule.id, enabled);
+      await reconcileReminders({ items: allItems, t, decimals: decimalPlaces });
     },
-    [t]
+    [allItems, decimalPlaces, t, toggleRule]
   );
 
-  const sourceIcon = (item: ReminderItem) => {
-    switch (item.source) {
+  const sourceIcon = useCallback((rule: ReminderRule) => {
+    switch (rule.source) {
       case 'credit':
-        return item.titleKey === 'asset.reminderOnStatement' ? 'document-text-outline' : 'card-outline';
+        return rule.detailKey === 'reminder.ruleCreditStatement' ? 'document-text-outline' : 'card-outline';
       case 'plan':
         return 'repeat-outline';
       case 'daily':
@@ -73,55 +57,27 @@ export default function ReminderCenterScreen({ navigation }: any) {
       default:
         return 'calendar-outline';
     }
-  };
+  }, []);
 
-  const handleDelete = useCallback(
-    async (key: string) => {
-      await cancelReminderItem(key);
-      await muteReminderKey(key);
-      await reloadMuted();
+  const ruleTitle = useCallback(
+    (rule: ReminderRule): string => {
+      if (rule.source === 'daily') return t('reminder.rowDaily');
+      if (rule.source === 'monthEnd') return t('reminder.rowMonthEnd');
+      return rule.label;
     },
-    [reloadMuted]
+    [t]
   );
 
-  const handleRestore = useCallback(async () => {
-    await unmuteAllReminders();
-    await reloadMuted();
-    // 恢复后立刻重排，否则要等下一次条目变化
-    await reconcileReminders({ items: allItems, t, decimals: decimalPlaces });
-  }, [allItems, decimalPlaces, reloadMuted, t]);
-
-  const renderRow = (item: ReminderItem) => {
-    const time = `${String(item.at.getHours()).padStart(2, '0')}:${String(item.at.getMinutes()).padStart(2, '0')}`;
-    const subtitle = item.label
-      ? t('reminder.rowSubtitle', {
-          date: formatDate(item.at, langMode, { style: 'monthDay', relative: false }),
-          time,
-          name: item.label,
-        })
-      : `${formatDate(item.at, langMode, { style: 'monthDay', relative: false })} ${time}`;
-    return (
-      <ListRow
-        key={item.key}
-        icon={sourceIcon(item)}
-        title={rowTitle(item)}
-        subtitle={subtitle}
-        trailing={
-          <Pressable
-            onPress={() => void handleDelete(item.key)}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel={t('reminder.deleteRow')}
-            testID={`reminder-delete-${item.key}`}
-            style={styles.deleteButton}
-          >
-            <Ionicons name="trash-outline" size={18} color={semantic.textTertiary} />
-          </Pressable>
-        }
-        testID={`reminder-row-${item.source}-${item.at.getTime()}`}
-      />
-    );
-  };
+  const ruleSubtitle = useCallback(
+    (rule: ReminderRule): string => {
+      const detail = t(rule.detailKey, rule.detailParams);
+      if (!rule.nextAt) return detail;
+      return `${detail} · ${t('reminder.ruleNext', {
+        date: formatDate(rule.nextAt, langMode, { style: 'monthDay' }),
+      })}`;
+    },
+    [langMode, t]
+  );
 
   const header = <ScreenHeader variant="compact" title={t('reminder.title')} onBack={() => navigation.goBack()} />;
 
@@ -149,7 +105,26 @@ export default function ReminderCenterScreen({ navigation }: any) {
         scrollEventThrottle={16}
         contentContainerStyle={[styles.content, { paddingBottom: tabClearance, paddingHorizontal: spacing.xl }]}
       >
-        {!loading && !next ? (
+        {next ? (
+          <Card testID="reminder-next-card">
+            <AppText variant="footnote" color={semantic.textSecondary}>
+              {t('reminder.nextTitle')}
+            </AppText>
+            <View style={styles.nextWhenRow}>
+              <AppText variant="title3" weight="600">
+                {formatDate(next.at, langMode, { style: 'monthDay' })}
+              </AppText>
+              <AppText variant="headline" color={semantic.textSecondary}>
+                {String(next.at.getHours()).padStart(2, '0')}:{String(next.at.getMinutes()).padStart(2, '0')}
+              </AppText>
+            </View>
+            <AppText variant="subhead" color={semantic.textPrimary} style={styles.nextMessage}>
+              {t(next.titleKey, next.titleParams)}
+            </AppText>
+          </Card>
+        ) : null}
+
+        {!loading && rules.length === 0 ? (
           <EmptyState
             icon="notifications-off-outline"
             title={t('reminder.emptyTitle')}
@@ -158,44 +133,30 @@ export default function ReminderCenterScreen({ navigation }: any) {
           />
         ) : null}
 
-        {next ? (
-          <>
-            <Card testID="reminder-next-card">
-              <AppText variant="footnote" color={semantic.textSecondary}>
-                {t('reminder.nextTitle')}
-              </AppText>
-              <View style={styles.nextWhenRow}>
-                <AppText variant="title3" weight="600">
-                  {formatDate(next.at, langMode, { style: 'monthDay' })}
-                </AppText>
-                <AppText variant="headline" color={semantic.textSecondary}>
-                  {String(next.at.getHours()).padStart(2, '0')}:{String(next.at.getMinutes()).padStart(2, '0')}
-                </AppText>
-              </View>
-              <AppText variant="subhead" color={semantic.textPrimary} style={styles.nextMessage}>
-                {t(next.titleKey, next.titleParams)}
-              </AppText>
-            </Card>
-
-            <Pressable
-              onPress={() => setExpanded((v) => !v)}
-              accessibilityRole="button"
-              accessibilityLabel={t('reminder.expandTitle', { count: items.length })}
-              testID="reminder-expand"
-              style={styles.expandRow}
-            >
-              <AppText variant="footnote" color={semantic.textSecondary}>
-                {t('reminder.expandTitle', { count: items.length })}
-              </AppText>
-              <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={semantic.textSecondary} />
-            </Pressable>
-
-            {expanded ? (
-              <ListSection footer={t('reminder.sectionFooter')} testID="reminder-list">
-                {items.map(renderRow)}
-              </ListSection>
-            ) : null}
-          </>
+        {rules.length > 0 ? (
+          <ListSection
+            title={t('reminder.rulesSectionTitle')}
+            footer={t('reminder.sectionFooter')}
+            testID="reminder-rules"
+          >
+            {rules.map((rule) => (
+              <ListRow
+                key={rule.id}
+                icon={sourceIcon(rule)}
+                iconColor={disabledRules.has(rule.id) ? semantic.textTertiary : undefined}
+                title={ruleTitle(rule)}
+                subtitle={ruleSubtitle(rule)}
+                trailing={
+                  <Switch
+                    value={!disabledRules.has(rule.id)}
+                    onValueChange={(v) => void handleToggle(rule, v)}
+                    accessibilityLabel={ruleTitle(rule)}
+                    testID={`reminder-rule-${rule.id}`}
+                  />
+                }
+              />
+            ))}
+          </ListSection>
         ) : null}
 
         {/* 预算超支：本月已经触发的阈值，删掉 = 这个月不再为它提醒 */}
@@ -234,36 +195,6 @@ export default function ReminderCenterScreen({ navigation }: any) {
             })}
           </ListSection>
         ) : null}
-
-        {/* 每日记账：开关就放在中心里，不必再翻设置 */}
-        <ListSection>
-          <ListRow
-            icon="create-outline"
-            title={t('reminder.dailyRow')}
-            subtitle={t('reminder.dailyRowHint', { hour: prefs.dailyHour })}
-            trailing={
-              <Switch
-                value={prefs.dailyEnabled}
-                onValueChange={(v) => void setPrefs({ ...prefs, dailyEnabled: v })}
-                accessibilityLabel={t('reminder.dailyRow')}
-                testID="reminder-daily-switch"
-              />
-            }
-          />
-        </ListSection>
-
-        {muted.size > 0 ? (
-          <Pressable
-            onPress={() => void handleRestore()}
-            accessibilityRole="button"
-            testID="reminder-restore"
-            style={styles.restoreRow}
-          >
-            <AppText variant="footnote" color={semantic.accentText}>
-              {t('reminder.restoreAll')}
-            </AppText>
-          </Pressable>
-        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -274,7 +205,5 @@ const styles = StyleSheet.create({
   content: { paddingTop: 8, gap: 12 },
   nextWhenRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 },
   nextMessage: { marginTop: 8 },
-  expandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
   deleteButton: { padding: 6 },
-  restoreRow: { alignItems: 'center', paddingVertical: 10 },
 });

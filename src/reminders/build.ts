@@ -35,6 +35,8 @@ function buildCreditItems(inputs: BuildInputs): ReminderItem[] {
           : 'asset.reminderOn1';
     return {
       key: node.key,
+      // 每张卡两类规则：还款日提醒、账单日提醒
+      ruleId: `credit|${node.key.split('|')[1]}|${isStatement ? 'statement' : 'payday'}`,
       source: 'credit' as const,
       at: node.at,
       titleKey,
@@ -69,6 +71,7 @@ function buildPlanItems(inputs: BuildInputs): ReminderItem[] {
         if (day.getTime() <= now.getTime()) continue;
         items.push({
           key: `plan|${plan.id}|${dueStamp}|${lead}`,
+          ruleId: `plan|${plan.id}`,
           source: 'plan',
           at: day,
           titleKey: lead === 0 ? 'reminder.planToday' : 'reminder.planLead',
@@ -96,6 +99,7 @@ function buildDailyItems(inputs: BuildInputs): ReminderItem[] {
     if (day.getTime() <= now.getTime()) continue;
     items.push({
       key: `daily|${stampOf(day)}`,
+      ruleId: 'daily',
       source: 'daily',
       at: day,
       titleKey: 'reminder.dailyTitle',
@@ -123,6 +127,7 @@ function buildMonthEndItems(inputs: BuildInputs): ReminderItem[] {
     if (at.getTime() <= now.getTime()) continue;
     items.push({
       key: `monthEnd|${stampOf(at)}`,
+      ruleId: 'monthEnd',
       source: 'monthEnd',
       at,
       titleKey: 'reminder.monthEndTitle',

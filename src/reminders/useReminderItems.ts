@@ -10,13 +10,18 @@ import {
   type ReminderPrefs,
 } from '../utils/reminderPrefs';
 import { buildReminderItems } from './build';
+import { buildReminderRules, loadDisabledRules, setRuleEnabled, type ReminderRule } from './rules';
 import type { ReminderItem } from './types';
 
 export interface ReminderItemsState {
-  /** 已排除用户删掉的条目，按时间升序 */
+  /** 应该排期的条目（已排除被关掉的规则与被删掉的实例） */
   items: ReminderItem[];
-  /** 全部条目（不排除删掉的），用于"恢复已删除"和排期对账 */
+  /** 全部条目（含被关掉规则的），用于规则清单显示下次时间 */
   allItems: ReminderItem[];
+  /** 用户看到的规则清单 */
+  rules: ReminderRule[];
+  disabledRules: Set<string>;
+  toggleRule: (ruleId: string, enabled: boolean) => Promise<void>;
   prefs: ReminderPrefs;
   setPrefs: (next: ReminderPrefs) => Promise<void>;
   muted: Set<string>;
@@ -25,23 +30,25 @@ export interface ReminderItemsState {
 }
 
 /**
- * 提醒条目的唯一来源：页面显示与通知排期都从这里取，避免两处各算一遍算出不同结果。
- * prefs 走模块级 store（不是本地 state）：页面里改开关，App 层的排期 hook 必须立刻看到。
+ * 提醒的唯一来源：规则清单给页面、条目集合给排期，两者由同一份计算产出。
+ * prefs / 规则开关走模块级 store 或磁盘，App 层 hook 与页面读的是同一份。
  */
 export function useReminderItems(): ReminderItemsState {
   const { assets, paymentPlans, loading: appLoading } = useApp();
   const { user } = useAuth();
   const prefs = useSyncExternalStore(subscribeReminderPrefs, getReminderPrefsSnapshot, getReminderPrefsSnapshot);
   const [muted, setMuted] = useState<Set<string>>(new Set());
-  const [mutedReady, setMutedReady] = useState(false);
+  const [disabledRules, setDisabledRules] = useState<Set<string>>(new Set());
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     void hydrateReminderPrefs();
     let alive = true;
-    void loadMutedKeys().then((keys) => {
+    void Promise.all([loadMutedKeys(), loadDisabledRules()]).then(([mutedKeys, disabled]) => {
       if (!alive) return;
-      setMuted(keys);
-      setMutedReady(true);
+      setMuted(mutedKeys);
+      setDisabledRules(disabled);
+      setReady(true);
     });
     return () => {
       alive = false;
@@ -50,25 +57,53 @@ export function useReminderItems(): ReminderItemsState {
 
   const userId = user ? String(user.id) : null;
 
-  const allItems = useMemo(
-    () =>
-      userId
-        ? buildReminderItems({
-            userId,
-            assets,
-            paymentPlans,
-            daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour },
-            now: new Date(),
-          })
-        : [],
+  const buildInputs = useMemo(
+    () => ({
+      userId: userId ?? '',
+      assets,
+      paymentPlans,
+      daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour },
+      now: new Date(),
+    }),
     [userId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour]
   );
 
-  const items = useMemo(() => allItems.filter((item) => !muted.has(item.key)), [allItems, muted]);
+  const allItems = useMemo(
+    () => (userId ? buildReminderItems(buildInputs) : []),
+    [userId, buildInputs]
+  );
+
+  const rules = useMemo(() => (userId ? buildReminderRules(buildInputs, allItems) : []), [userId, buildInputs, allItems]);
+
+  const items = useMemo(
+    () => allItems.filter((item) => !disabledRules.has(item.ruleId) && !muted.has(item.key)),
+    [allItems, disabledRules, muted]
+  );
+
+  const toggleRule = useCallback(async (ruleId: string, enabled: boolean) => {
+    await setRuleEnabled(ruleId, enabled);
+    setDisabledRules((prev) => {
+      const next = new Set(prev);
+      if (enabled) next.delete(ruleId);
+      else next.add(ruleId);
+      return next;
+    });
+  }, []);
 
   const reloadMuted = useCallback(async () => {
     setMuted(await loadMutedKeys());
   }, []);
 
-  return { items, allItems, prefs, setPrefs: setReminderPrefs, muted, reloadMuted, loading: appLoading || !mutedReady };
+  return {
+    items,
+    allItems,
+    rules,
+    disabledRules,
+    toggleRule,
+    prefs,
+    setPrefs: setReminderPrefs,
+    muted,
+    reloadMuted,
+    loading: appLoading || !ready,
+  };
 }

@@ -13,6 +13,11 @@ export type ReminderSource = 'credit' | 'plan' | 'daily' | 'monthEnd';
 export interface ReminderItem {
   /** 全局唯一键：删除记忆、去重、对账都靠它 */
   key: string;
+  /**
+   * 这条属于哪条"规则"（每月 5 号的还款日提醒 = 一条规则）。
+   * 用户看到的是规则，系统里排的是这条规则的若干实例；开关按规则关。
+   */
+  ruleId: string;
   source: ReminderSource;
   /** 触发时刻 */
   at: Date;
