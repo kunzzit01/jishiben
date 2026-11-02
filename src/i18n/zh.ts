@@ -487,8 +487,30 @@ export const zh = {
     rowSubtitle: '%{date} %{time} · %{name}',
     deleteRow: '删除这条提醒',
     restoreAll: '恢复已删除的提醒',
-    emptyTitle: '还没有开启提醒的信用卡',
-    emptyDesc: '在「资产 → 信用卡 → 账户设置」里打开「还款提醒」，这里会列出将来会发出的提醒。',
+    // 列表里的短标题（通知正文另有 asset.reminderOn* / reminder.plan* 那套完整句子）
+    rowDaily: '记一笔提醒',
+    rowMonthEnd: '月末总结',
+    rowPlanToday: '今天到期',
+    rowPlanLead: '还有 %{days} 天到期',
+    // 计划付款的通知正文
+    planToday: '%{name} 今天到期，记得确认付款～',
+    planLead: '%{name} 还有 %{days} 天到期，可以提前安排一下～',
+    planBody: '金额 %{amount}，别忘了这笔计划付款哦～',
+    // 每日记账
+    dailyTitle: '今天还没记账吧？',
+    dailyBody: '顺手记一笔，别等月底才发现漏了～',
+    dailyRow: '每天提醒记一笔',
+    dailyRowHint: '每天 %{hour}:00 提醒一次',
+    // 月末总结
+    monthEndTitle: '这个月要结束啦',
+    monthEndBody: '看一眼本月收支，心里有个数～',
+    // 来源标签（行副标题里用）
+    sourceCredit: '信用卡',
+    sourcePlan: '计划付款',
+    sourceDaily: '每日记账',
+    sourceMonthEnd: '月末总结',
+    emptyTitle: '暂时没有要提醒的事',
+    emptyDesc: '在信用卡的「账户设置」里打开「还款提醒」，或打开下面的「每天提醒记一笔」，这里就会列出将来的提醒。',
     // 未登录时排期本身不会发生（hook 需要 userId），别让空态把人指去开开关
     signInTitle: '登录后才会排提醒',
     signInDesc: '提醒排期按账号计算；当前是本机模式（未登录），所以不会有提醒。',

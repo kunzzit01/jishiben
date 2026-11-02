@@ -35,8 +35,7 @@ import { LanguageProvider, useT } from './src/i18n/LanguageContext';
 //   后续每一批都用它做回归截图，**T32 清理任务时才删**（本行 + App() 里的 galleryMode 守卫 + 预览页文件）。
 import ComponentGallery from './src/screens/_preview/ComponentGallery';
 import { useNotificationSetup } from './src/hooks/useNotificationSetup';
-import { usePaymentReminders } from './src/hooks/usePaymentReminders';
-import { useCreditCardReminders } from './src/hooks/useCreditCardReminders';
+import { useReminders } from './src/hooks/useReminders';
 import { useBottomSystemInset } from './src/hooks/useBottomSystemInset';
 import { AndroidNavBarAppearance } from './src/hooks/useAndroidNavBarAppearance';
 import {
@@ -320,9 +319,9 @@ function DeferredServices() {
   const { user } = useAuth();
   useNotificationSetup();
   useSyncManager();
-  usePaymentReminders();
-  // 信用卡还款提醒：跨账本、按 userId+账户+还款日+提前天数 去重；登出时由 AuthContext 清理
-  useCreditCardReminders(user ? String(user.id) : null);
+  // 统一提醒：信用卡还款/账单日 + 计划付款 + 每日记账 + 月末总结，一个映射对账；
+  // 登出时由 AuthContext 调 cancelRemindersForUser 清理
+  useReminders();
   useEffect(() => {
     devMark('deferred services started');
   }, []);
