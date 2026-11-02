@@ -306,7 +306,6 @@ interface AssetRow extends Row {
   creditLimit: string | null;
   statementDay: number | null;
   dueDay: number | null;
-  interestRate: string | null;
   defaultAsset: boolean;
   sortOrder: number;
   archived: boolean;
@@ -427,7 +426,6 @@ function assetToRow(a: Asset, index: number, fallbackLedgerId: string, fallbackC
     creditLimit: a.creditLimit != null ? amountKey(a.creditLimit) : null,
     statementDay: a.statementDay ?? null,
     dueDay: a.dueDay ?? null,
-    interestRate: a.interestRate != null ? rateKey(a.interestRate) : null,
     defaultAsset: a.isDefault === true,
     sortOrder: index,
     archived: Boolean(a.archivedAt),
@@ -448,7 +446,6 @@ function assetFromDto(d: AssetDto): Asset {
     creditLimit: optionalAmount(d.creditLimit),
     statementDay: d.statementDay ?? undefined,
     dueDay: d.dueDay ?? undefined,
-    interestRate: optionalRate(d.interestRate),
     isDefault: d.defaultAsset ? true : undefined,
     // 归档时间只在"确实已归档"时保留；未归档 = 活跃账户（App 用 undefined 判断活跃）
     archivedAt: d.archived ? d.archivedAt ?? new Date().toISOString() : undefined,
@@ -1162,7 +1159,6 @@ function toApiBody(table: TableName, row: Row): unknown {
         creditLimit: r.creditLimit != null ? Number(r.creditLimit) : null,
         statementDay: r.statementDay,
         dueDay: r.dueDay,
-        interestRate: r.interestRate != null ? Number(r.interestRate) : null,
         defaultAsset: r.defaultAsset,
         sortOrder: r.sortOrder,
         archived: r.archived,
@@ -1591,8 +1587,10 @@ function makeLedgerRecord(name: string): Ledger {
  * 2. 账本表全空时：只有「服务端确实 0 本」才真的建一本空的——这是真·空账号，
  *    建一本合理；拉取失败根本走不到这里（不会凭空造）。
  * 3. 选当前账本（优先级从高到低）：
- *    profile.activeLedgerUid（服务端记住的）> 账号标记的默认账本 > 本地当前选择仍然有效
+ *    本地当前选择仍然有效 > 账号标记的默认账本 > profile.activeLedgerUid（服务端记住的）
  *    > 有资产的（避免一进来就是空账本）> 第一本
+ *    本地优先：冷启动时本机已按「默认账本」落点（AppContext loadFromStorage），
+ *    会话中则是用户刚切的那本 —— 云端记的值只在本机没有有效选择时才用，绝不把用户拽走
  * 4. 挂在占位账本 id（PENDING_LEDGER_ID）下的流水/账户改挂到真正的当前账本。
  */
 function reconcileLedgers(merged: LocalSnapshot, pull: CloudPull, localActiveId: string): LocalSnapshot {
@@ -1631,13 +1629,15 @@ function reconcileLedgers(merged: LocalSnapshot, pull: CloudPull, localActiveId:
 
   const preferred = pull.cloud.profile?.activeLedgerUid ?? null;
   let activeLedgerId: string;
-  if (preferred && ids.has(preferred)) {
-    activeLedgerId = preferred;
-  } else if (localActiveId && ids.has(localActiveId)) {
-    // 服务端没记住当前账本（或记的那本已不存在）时，不要打掉本机用户刚选的账本
+  if (localActiveId && ids.has(localActiveId)) {
+    // 本机有效选择优先：冷启动时它就是「默认账本」（loadFromStorage 按 defaultLedgerId 落点），
+    // 会话中则是用户刚切的那本。云端记的 activeLedgerUid 是"上次停留"，不能覆盖它 ——
+    // 否则杀掉后台重开，用户指定的默认账本会被上次的浏览位置顶掉
     activeLedgerId = localActiveId;
   } else if (pull.defaultLedgerUid && ids.has(pull.defaultLedgerUid)) {
     activeLedgerId = pull.defaultLedgerUid;
+  } else if (preferred && ids.has(preferred)) {
+    activeLedgerId = preferred;
   } else {
     activeLedgerId = pickAssetsFirst();
   }

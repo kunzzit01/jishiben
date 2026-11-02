@@ -10,8 +10,8 @@
 //
 // 另外删掉首页式的「minHeight: 视口高 + 130」撑高写法（计划 G4）：内容短时不再滚出大片空白。
 //
-// 信用卡账单口径（computeCreditStatement）与本月流水（computeAssetFlowStats）的计算一字未动，
-// 与 creditCard.ts 的 getAssetDisplayBalance 一样原样复用。
+// 信用卡账单口径（computeCreditStatement）已改为按账户上的真实账单日 / 还款日计算
+// （creditStatement.ts 的纯函数）；本月流水（computeAssetFlowStats）的计算照旧。
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -36,7 +36,7 @@ import { useT } from '../i18n/LanguageContext';
 import { useDialog } from '../components/AppDialog';
 import { useApp } from '../context/AppContext';
 import { ROUTES } from '../navigation/routes';
-import { parseInterestRate, sanitizeInterestRateInput } from '../utils/interestRate';
+import { periodForDate, dueDateFor, statementDayInMonth } from '../utils/creditStatement';
 import { getAssetDisplayBalance } from '../utils/creditCard';
 import { formatMoney } from '../utils/formatMoney';
 import { AssetType } from '../types';
@@ -637,41 +637,44 @@ function SheetInfoRow({
 }
 
 interface CreditStatement {
-  currentCycleSpend: number; // 本期（还没结算）已刷金额：本月 1 号到今天
-  lastStatementAmount: number; // 上一期已结算账单金额：上个自然月整月
-  isOverdue: boolean;
-  overdueDays: number;
-  estimatedInterest: number;
+  currentCycleSpend: number; // 未出账（本期已刷）：最近一次账单日的次日到今天（含今天）
+  lastStatementAmount: number; // 上期账单金额：[上一个账单日的次日, 本账单日] 整段
+  dueDate: Date; // 上期账单的应还日
   available: number; // 可用额度
 }
 
-// 信用卡账单的固定标准：每月 1 号结算，结算区间为上一个自然月（1 号到月末）。
-// 不使用账户上的账单日/还款日字段；本期已刷 = 本月 1 号到今天（含今天）
+// 账期口径来自账户上的账单日 / 还款日，逐月边界交给 creditStatement.ts 的纯函数裁决
+// （2 月没有 30 号这类短月裁剪在里面，不在这里自己算月末）：
+//   close = 最近一次账单日；上期账单金额 = [上一个账单日的次日, close]
+//   未出账（本期已刷）= close 的次日到今天（含今天）
 function computeCreditStatement(
-  asset: { creditLimit?: number; interestRate?: number },
+  asset: { creditLimit?: number; statementDay?: number; dueDay?: number },
   balance: number,
   spendInRange: (start: Date, end: Date) => number
 ): CreditStatement | null {
   const today = new Date();
-  // 两个结算日：本月 1 号（最近一次）和上月 1 号（上一次）
-  const closeDate = new Date(today.getFullYear(), today.getMonth(), 1);
-  const prevCloseDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  // 本期区间含今天：结束取到明天 0 点
-  const cycleEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  // 历史数据可能没设账单日 / 还款日：退化成 1 号账单日、5 号还款日，不崩也不出 NaN
+  const statementDay = asset.statementDay ?? 1;
+  const dueDay = asset.dueDay ?? 5;
 
-  const currentCycleSpend = spendInRange(closeDate, cycleEnd);
-  const lastStatementAmount = spendInRange(prevCloseDate, closeDate);
+  const { close } = periodForDate(today, statementDay);
+  // 上一个账单日同样交给短月裁剪求（账单日 30、2 月 → 落到 28 号，不滚到 3 月 2 日）
+  const prevClose = statementDayInMonth(close.getFullYear(), close.getMonth() - 1, statementDay);
+
+  // 用年月日分量 +1 天：getTime() + 86400000 在夏令时切换那天会偏一小时、落到前一天 23 点
+  const dayAfter = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  const periodStart = dayAfter(prevClose); // 上期第一天 = 上一个账单日的次日
+  const periodEnd = dayAfter(close); // 含账单日当天 → 结束取到次日 0 点
+  const openEnd = dayAfter(today); // 本期区间含今天：结束取到明天 0 点
+
+  const lastStatementAmount = spendInRange(periodStart, periodEnd);
+  // 未出账从账单日的次日开始：账单日当天的支出算上一期账单
+  const currentCycleSpend = spendInRange(periodEnd, openEnd);
 
   const totalOwed = Math.max(0, -balance); // balance 是负数代表欠款
-  // 上期账单已出（已进入新月份）仍没还：欠款还覆盖着上期账单金额就视为逾期
-  const isOverdue = lastStatementAmount > 0 && totalOwed >= lastStatementAmount;
-  const overdueDays = isOverdue ? Math.floor((today.getTime() - closeDate.getTime()) / 86400000) : 0;
-  const estimatedInterest =
-    isOverdue && asset.interestRate ? lastStatementAmount * (asset.interestRate / 100 / 365) * overdueDays : 0;
-
   const available = (asset.creditLimit ?? 0) - totalOwed;
 
-  return { currentCycleSpend, lastStatementAmount, isOverdue, overdueDays, estimatedInterest, available };
+  return { currentCycleSpend, lastStatementAmount, dueDate: dueDateFor(close, statementDay, dueDay), available };
 }
 
 interface AssetFlowStats {
@@ -732,6 +735,7 @@ export default function AssetScreen() {
     categories,
     getAssetBalance,
     deleteAsset,
+    deleteAssetDeep,
     archiveAsset,
     unarchiveAsset,
     assetRecordCount,
@@ -840,14 +844,31 @@ export default function AssetScreen() {
     });
   };
 
+  // 删除入口：没有流水 → 直接真删（与改动前完全一致）；有流水 → 三选一。
+  // 为什么分成两档：有流水时 deleteAsset 只会归档（历史交易不会变孤儿），
+  // 但用户确实可能需要「把自己建的钱包连同流水一起删掉」，那是 deleteAssetDeep。
   const handleDelete = (id: string, assetName: string) => {
+    const count = assetRecordCount(id);
+    if (count === 0) {
+      dialog.alert({
+        title: t('asset.deleteAssetTitle', { name: assetName }),
+        message: t('asset.deleteAssetMsg'),
+        buttons: [
+          { text: t('common.cancel'), style: 'cancel' },
+          // 删除后账户已不存在：连带关闭详情抽屉，避免留下空壳抽屉（删除入口在抽屉内）
+          { text: t('common.delete'), style: 'destructive', onPress: () => { closeDetail(); hapticWarning(); deleteAsset(id); } },
+        ],
+      });
+      return;
+    }
     dialog.alert({
-      title: t('asset.deleteAssetTitle', { name: assetName }),
-      message: t('asset.deleteAssetMsg'),
+      title: t('asset.deleteDeepTitle', { name: assetName }),
+      message: t('asset.deleteDeepMsg', { n: count }),
       buttons: [
         { text: t('common.cancel'), style: 'cancel' },
-        // 删除后账户已不存在：连带关闭详情抽屉，避免留下空壳抽屉（删除入口在抽屉内）
-        { text: t('common.delete'), style: 'destructive', onPress: () => { closeDetail(); hapticWarning(); deleteAsset(id); } },
+        // 归档 = 隐藏但留历史（与账户详情「更多」里的归档同一条路）
+        { text: t('asset.archiveAction'), style: 'default', onPress: () => { closeDetail(); archiveAsset(id); } },
+        { text: t('asset.deleteDeepAction'), style: 'destructive', onPress: () => { closeDetail(); hapticWarning(); deleteAssetDeep(id); } },
       ],
     });
   };
@@ -871,8 +892,6 @@ export default function AssetScreen() {
 
   const [viewName, setViewName] = useState('');
   const [viewBalanceStr, setViewBalanceStr] = useState('');
-  /** 账户设置里的年利率输入态（字符串：保住 "18." 中间态；空 = 未设置） */
-  const [viewInterestStr, setViewInterestStr] = useState('');
   const [viewKeypadOpen, setViewKeypadOpen] = useState(false);
   const balanceExpr = useAmountExpression();
 
@@ -977,9 +996,6 @@ export default function AssetScreen() {
       setViewBalanceStr(
         String(asset.type === 'credit' ? asset.creditLimit ?? 0 : getAssetBalance(asset.id)),
       );
-      setViewInterestStr(
-        asset.type === 'credit' && asset.interestRate != null ? String(asset.interestRate) : ''
-      );
     }
     setViewKeypadOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1004,8 +1020,7 @@ export default function AssetScreen() {
   // 未保存修改检测：名称、余额目标值、默认勾选任一变化即视为脏
   const viewEditDirty =
     !!viewingAsset &&
-    (parseInterestRate(viewInterestStr) !== viewingAsset.interestRate ||
-      viewName.trim() !== viewingAsset.name ||
+    (viewName.trim() !== viewingAsset.name ||
       viewSetDefault !== !!viewingAsset.isDefault ||
       (parseFloat(viewBalanceStr) || 0) !==
         (viewingAsset.type === 'credit'
@@ -1086,8 +1101,6 @@ export default function AssetScreen() {
       await updateAsset(viewingAsset.id, {
         name: viewName.trim(),
         creditLimit: typed,
-        // 清空 → undefined（键消失），不是 0
-        interestRate: parseInterestRate(viewInterestStr),
       });
     } else {
       // 输入的是"想让当前余额变成的数"：差额写回起始余额，保存后当前余额即变为输入值
@@ -1757,21 +1770,16 @@ export default function AssetScreen() {
                               weight="600"
                             />
                           }
-                          separator={viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0}
+                          separator
                         />
-                        {viewingStatement.isOverdue && viewingStatement.estimatedInterest > 0 && (
-                          <SheetInfoRow
-                            label={t('asset.estInterest')}
-                            value={
-                              <MoneyText
-                                value={viewingStatement.estimatedInterest}
-                                variant="subhead"
-                                kind="expense"
-                                weight="600"
-                              />
-                            }
-                          />
-                        )}
+                        <SheetInfoRow
+                          label={t('asset.dueDate')}
+                          value={
+                            <AppText variant="subhead" weight="600" color={semantic.textPrimary}>
+                              {toDateStr(viewingStatement.dueDate)}
+                            </AppText>
+                          }
+                        />
                       </View>
                     )
                   ) : (
@@ -1874,7 +1882,7 @@ export default function AssetScreen() {
                     </PressableScale>
                   </View>
 
-                  {/* 账单日 / 还款日（仅信用卡）：点开 1–28 弹层，选中即写库并同步到列表/详情 */}
+                  {/* 账单日 / 还款日（仅信用卡）：点开 1–30 弹层，选中即写库并同步到列表/详情 */}
                   {sheetAsset.type === 'credit' && (
                     <View style={styles.creditCycleBlock} testID="asset-detail-credit-cycle">
                       <View style={styles.creditCycleCol}>
@@ -1931,7 +1939,7 @@ export default function AssetScreen() {
                     </View>
                   )}
 
-                  {/* 1–28 选择列表：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层） */}
+                  {/* 1–30 选择列表：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层） */}
                   {sheetAsset.type === 'credit' && sheetDaySheet !== null && (
                     <View style={styles.creditDayList} testID="asset-detail-day-list">
                       <PressableScale
@@ -1947,7 +1955,7 @@ export default function AssetScreen() {
                         <Ionicons name="chevron-up" size={14} color={semantic.textTertiary} />
                       </PressableScale>
                       <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
-                        {Array.from({ length: 28 }, (_, k) => k + 1).map((day) => {
+                        {Array.from({ length: 30 }, (_, k) => k + 1).map((day) => {
                           const current = sheetDaySheet === 'due' ? sheetAsset.dueDay ?? 5 : sheetAsset.statementDay ?? 1;
                           return (
                             <ListRow
@@ -1964,40 +1972,6 @@ export default function AssetScreen() {
                           );
                         })}
                       </ScrollView>
-                    </View>
-                  )}
-
-                  {/* 年利率（仅信用卡）：与名称/额度同款胶囊框，右侧 `%` 后缀。
-                      空 = 未设置（保存时写 undefined，键消失）；逾期估算利息靠它 */}
-                  {sheetAsset.type === 'credit' && (
-                    <View>
-                      <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldLabelInline}>
-                        {t('asset.interestRateLabel')}
-                      </AppText>
-                      <View
-                        style={[
-                          styles.nameInput,
-                          styles.interestRow,
-                          { backgroundColor: semantic.bg, borderColor: semantic.hairline },
-                        ]}
-                      >
-                        <TextInput
-                          style={[styles.interestInput, { color: semantic.textPrimary }]}
-                          value={viewInterestStr}
-                          onChangeText={(v) => setViewInterestStr(sanitizeInterestRateInput(v))}
-                          placeholder={t('asset.interestRateHint')}
-                          placeholderTextColor={semantic.textTertiary}
-                          selectionColor={semantic.accent}
-                          keyboardType="decimal-pad"
-                          inputMode="decimal"
-                          maxLength={6}
-                          returnKeyType="done"
-                          testID="asset-detail-interest-rate"
-                        />
-                        <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
-                          %
-                        </AppText>
-                      </View>
                     </View>
                   )}
 
@@ -2239,15 +2213,6 @@ function makeStyles(
       borderWidth: 1,
     },
     fieldLabelInline: { marginTop: spacing.lg, marginBottom: spacing.xs, marginLeft: spacing.lg },
-    // 年利率行：复用 nameInput 的胶囊外形，内部「输入 + %」横排
-    interestRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
-    interestInput: {
-      flex: 1,
-      padding: 0,
-      textAlign: 'right',
-      fontSize: typography.body.fontSize,
-      lineHeight: typography.body.lineHeight,
-    },
     nameInput: {
       minHeight: 44,
       // 胶囊框（V2.2c）：与 radius.full 一致的圆角，不用矩形输入框

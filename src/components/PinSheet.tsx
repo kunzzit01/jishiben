@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import PressableScale from './PressableScale';
 import { useTheme } from '../theme/useTheme';
 import { useT } from '../i18n/LanguageContext';
 import { useAppLock } from '../context/AppLockContext';
@@ -33,9 +35,16 @@ interface PinSheetProps {
 }
 
 const PIN_LENGTH = 6;
+/** 3 列标准数字盘（1-2-3 / 4-5-6 / 7-8-9）：与所有手机拨号盘一致，底行 C / 0 / ⌫ 单独渲染 */
+const KEY_ROWS: string[][] = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+];
 
 export default function PinSheet({ visible, mode, onClose, onSuccess, onVerified }: PinSheetProps) {
-  const { colors, semantic } = useTheme();
+  const { semantic } = useTheme();
+  const insets = useSafeAreaInsets();
   const tr = useT();
   const { verifyPin, setPin } = useAppLock();
 
@@ -141,19 +150,25 @@ export default function PinSheet({ visible, mode, onClose, onSuccess, onVerified
     setError(null);
   }, [busy]);
 
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={[styles.overlay, { backgroundColor: semantic.scrim }]} activeOpacity={1} onPress={onClose}>
         <View
-          style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: semantic.homeCard,
+              borderColor: semantic.hairline,
+              // 底部跟随安全区：手势条机型上最下面一排键不会被压住
+              paddingBottom: insets.bottom + 16,
+            },
+          ]}
           onStartShouldSetResponder={() => true}
         >
           <View style={styles.handle} />
           {/* 右上角 ✕ 关闭钮（用户定版：取消改为 ✕ 并放到右侧上方，与账本弹层/账户弹层同语言） */}
           <TouchableOpacity
-            style={[styles.closeBtn, { backgroundColor: colors.bg }]}
+            style={[styles.closeBtn, { backgroundColor: semantic.surfaceSunken }]}
             onPress={onClose}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             disabled={busy}
@@ -161,13 +176,13 @@ export default function PinSheet({ visible, mode, onClose, onSuccess, onVerified
             accessibilityRole="button"
             accessibilityLabel={tr('common.cancel')}
           >
-            <Ionicons name="close" size={18} color={colors.textSecondary} />
+            <Ionicons name="close" size={18} color={semantic.textSecondary} />
           </TouchableOpacity>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text style={[styles.title, { color: semantic.textPrimary }]}>
             {title}
           </Text>
           {error ? null : (
-            <Text style={[styles.subtitle, { color: colors.textTertiary }]}>{tr('pin.subtitle')}</Text>
+            <Text style={[styles.subtitle, { color: semantic.textSecondary }]}>{tr('pin.subtitle')}</Text>
           )}
 
           {/* 6 位圆点 */}
@@ -177,58 +192,65 @@ export default function PinSheet({ visible, mode, onClose, onSuccess, onVerified
                 key={i}
                 style={[
                   styles.dot,
-                  { borderColor: colors.link },
-                  i < pinValue.length && { backgroundColor: colors.link },
+                  { borderColor: semantic.accent },
+                  i < pinValue.length && { backgroundColor: semantic.accent },
                 ]}
               />
             ))}
           </View>
 
-          {/* 键盘：3×4 网格，底行 左=清空 中=0 右=退格 */}
+          {/* 键盘：3 列标准数字盘。原来是 4 列（1-2-3-4…），与手机拨号盘的肌肉记忆相反，
+              C（清空）还夹在 9 和 0 之间 —— 想按 0 容易误触清空，这是"卡手"的主因 */}
           <View style={styles.keypad}>
-            {keys.map((k) => (
-              <TouchableOpacity
-                key={k}
-                style={[styles.key, { backgroundColor: colors.bg, borderColor: colors.dividerHair }]}
-                onPress={() => handleDigit(k)}
-                disabled={busy}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={k}
-              >
-                <Text style={[styles.keyText, { color: colors.textPrimary }]}>{k}</Text>
-              </TouchableOpacity>
+            {KEY_ROWS.map((row) => (
+              <View key={row.join('')} style={styles.keyRow}>
+                {row.map((k) => (
+                  <PressableScale
+                    key={k}
+                    style={[styles.key, { backgroundColor: semantic.surfaceElevated, borderColor: semantic.hairline }]}
+                    activeScale={0.96}
+                    onPress={() => handleDigit(k)}
+                    disabled={busy}
+                    accessibilityRole="button"
+                    accessibilityLabel={k}
+                  >
+                    <Text style={[styles.keyText, { color: semantic.textPrimary }]}>{k}</Text>
+                  </PressableScale>
+                ))}
+              </View>
             ))}
-            <TouchableOpacity
-              style={[styles.key, styles.keyGhost]}
-              onPress={handleClearPress}
-              disabled={busy || pinValue.length === 0}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="clear"
-            >
-              <Text style={[styles.keyGhostText, { color: colors.textSecondary }]}>C</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.key, { backgroundColor: colors.bg, borderColor: colors.dividerHair }]}
-              onPress={() => handleDigit('0')}
-              disabled={busy}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="0"
-            >
-              <Text style={[styles.keyText, { color: colors.textPrimary }]}>0</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.key, styles.keyGhost]}
-              onPress={handleBackspace}
-              disabled={busy || pinValue.length === 0}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="backspace"
-            >
-              <Ionicons name="backspace-outline" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
+            <View style={styles.keyRow}>
+              <PressableScale
+                style={styles.keyGhost}
+                activeScale={0.9}
+                onPress={handleClearPress}
+                disabled={busy || pinValue.length === 0}
+                accessibilityRole="button"
+                accessibilityLabel="clear"
+              >
+                <Text style={[styles.keyGhostText, { color: semantic.textSecondary }]}>C</Text>
+              </PressableScale>
+              <PressableScale
+                style={[styles.key, { backgroundColor: semantic.surfaceElevated, borderColor: semantic.hairline }]}
+                activeScale={0.96}
+                onPress={() => handleDigit('0')}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="0"
+              >
+                <Text style={[styles.keyText, { color: semantic.textPrimary }]}>0</Text>
+              </PressableScale>
+              <PressableScale
+                style={styles.keyGhost}
+                activeScale={0.9}
+                onPress={handleBackspace}
+                disabled={busy || pinValue.length === 0}
+                accessibilityRole="button"
+                accessibilityLabel="backspace"
+              >
+                <Ionicons name="backspace-outline" size={24} color={semantic.textSecondary} />
+              </PressableScale>
+            </View>
           </View>
         </View>
       </TouchableOpacity>
@@ -245,9 +267,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 24,
-    paddingTop: 10,
-    paddingBottom: 34,
+    // 左右 20：键盘总宽 3×84 + 2×12 = 276，390 屏上两侧各留 57 —— 拇指不用横向跨
+    // 底部内衬改在渲染期给（insets.bottom + 16），手势条机型最下面一排键不会被压住
+    paddingHorizontal: 20,
+    paddingTop: 8,
   },
   handle: {
     alignSelf: 'center',
@@ -257,7 +280,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(128,128,140,0.4)',
     marginBottom: 14,
   },
-  title: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  title: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   subtitle: { fontSize: 12, marginTop: 4, textAlign: 'center' },
   // 右上角 ✕ 关闭钮（账户弹层 accountPickerClose 同款规格：30×30 圆底）
   closeBtn: {
@@ -274,31 +297,30 @@ const styles = StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 14,
-    marginTop: 18,
-    marginBottom: 20,
+    gap: 16,
+    marginTop: 16,
+    marginBottom: 24,
   },
+  // 14 圆点：比 12 更清楚看出「已输入几位」，又不会喧宾夺主
   dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 1.5,
   },
-  keypad: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 14,
-  },
+  // 三列盘：行距 / 列距都是 12（spacing.md），不再用 flexWrap 让 4 列自己折行
+  keypad: { gap: 12 },
+  keyRow: { flexDirection: 'row', justifyContent: 'center', gap: 12 },
   key: {
-    width: 72,
-    height: 56,
+    width: 84,
+    height: 60,
     borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  keyGhost: { backgroundColor: 'transparent', borderColor: 'transparent' },
-  keyText: { fontSize: 22, fontWeight: '600' },
+  // C / ⌫ 不做底：数字盘两侧留白，误触概率更低（按下去只有触感）
+  keyGhost: { width: 84, height: 60, alignItems: 'center', justifyContent: 'center' },
+  keyText: { fontSize: 24, fontWeight: '600' },
   keyGhostText: { fontSize: 18, fontWeight: '700' },
 });

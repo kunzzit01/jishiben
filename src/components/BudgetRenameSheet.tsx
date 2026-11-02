@@ -58,9 +58,15 @@ export function BudgetRenameSheet({ visible, initialName, fallbackName, onClose,
         <AppText variant="caption2" color={semantic.textTertiary}>
           {t('home.budgetRenameHint')}
         </AppText>
+        {/* 外层各包一层 flex:1：Button 的 style 落在 PressableScale 内层，
+            直接写 flex:1 不会让外层按压容器等分，按钮会缩成文字宽 */}
         <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-          <Button title={t('common.cancel')} variant="secondary" onPress={onClose} style={{ flex: 1 }} />
-          <Button title={t('common.save')} onPress={() => onSubmit(text)} style={{ flex: 1 }} testID="budget-rename-save" />
+          <View style={{ flex: 1 }}>
+            <Button title={t('common.cancel')} variant="secondary" onPress={onClose} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button title={t('common.save')} onPress={() => onSubmit(text)} testID="budget-rename-save" />
+          </View>
         </View>
         {onClear ? (
           <Button title={t('home.budgetClear')} variant="destructive" onPress={onClear} testID="budget-rename-clear" />

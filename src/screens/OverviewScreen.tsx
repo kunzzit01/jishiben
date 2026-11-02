@@ -75,6 +75,7 @@ export default function OverviewScreen({ navigation }: any) {
     transactions,
     budgets,
     activeAssets,
+    assetBelongsToActiveLedger,
     activeLedgerId,
     currency,
     getAssetBalance,
@@ -99,9 +100,11 @@ export default function OverviewScreen({ navigation }: any) {
   const now = new Date();
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
+  // activeAssets 已按 assetBelongsToActiveLedger 过滤过；这里再收窄 ledgerId 会把孤儿/占位期钱包
+  // （ledgerId 为空或指向已回收账本）全部去掉，所以只复用同一个谓词，不加严格等式
   const ledgerAssets = useMemo(
-    () => activeAssets.filter((a) => a.ledgerId === activeLedgerId),
-    [activeAssets, activeLedgerId]
+    () => activeAssets.filter((a) => assetBelongsToActiveLedger(a)),
+    [activeAssets, assetBelongsToActiveLedger]
   );
 
   const ledgerTransactions = useMemo(

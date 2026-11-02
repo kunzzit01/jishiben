@@ -26,13 +26,10 @@ import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import PressableScale from '../components/PressableScale';
 import { useAmountExpression } from '../hooks/useAmountExpression';
-import { useDialog } from '../components/AppDialog';
 import { formatMoney } from '../utils/formatMoney';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { hapticSuccess } from '../utils/haptics';
-// 年利率的清洗/解析与账户设置页共用同一份实现（src/utils/interestRate.ts）
-import { parseInterestRate, sanitizeInterestRateInput } from '../utils/interestRate';
 import { AppText, BottomSheet, Button, HeroGradient, ListRow, ScreenHeader } from '../components/ui';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -62,7 +59,7 @@ const NAME_PLACEHOLDER_KEY: Record<AssetType, string> = {
 
 // 计算器键盘当前在给哪个金额字段打字；null = 键盘收起
 // （信用卡模式下这个字段就是"信用额度"，现金/银行卡是"起始余额"）
-/** 金额字段：balance = 起始余额 / 信用额度；available = 信用卡「现在还剩多少额度」 */
+/** 金额字段：balance = 起始余额 / 信用额度；available = 信用卡「已用额度（现在欠多少）」 */
 type AmountField = 'balance' | 'available';
 
 // 底部抽屉当前打开的是哪一个；null = 都收起（类型 / 货币都走统一 BottomSheet）
@@ -75,7 +72,6 @@ export default function AddAssetScreen({ route }: any) {
   const { addAsset, updateAsset, getAssetById, currency } = useApp();
   const { colors, semantic, typography, spacing, motion } = useTheme();
   const { pagePadding } = useLayout();
-  const dialog = useDialog();
   const { height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
@@ -97,15 +93,10 @@ export default function AddAssetScreen({ route }: any) {
   const [selectedCurrency, setSelectedCurrency] = useState(editAsset?.currency ?? currency);
 
   // 账单日 / 还款日（仅信用卡）：原来这两个值只能靠默认值写进数据，界面无处可改
-  // （用户 2026-10-29：「我要怎么设置还款日期？」）。取值 1–28，避免小月不存在 29/30/31。
+  // （用户 2026-10-29：「我要怎么设置还款日期？」）。取值 1–30（用户要求上限到 30 号；31 号不入选项）。
   const [statementDay, setStatementDay] = useState<number>(editAsset?.statementDay ?? 1);
   const [dueDay, setDueDay] = useState<number>(editAsset?.dueDay ?? 5);
   const [daySheet, setDaySheet] = useState<'statement' | 'due' | null>(null);
-  // 年利率（%）：逾期时 AssetScreen 的「预估逾期利息」靠它算。存输入态字符串，
-  // 编辑已有账户时回填；空串 = 未设置（保存成 undefined，不是 0）
-  const [interestRateText, setInterestRateText] = useState<string>(
-    editAsset?.interestRate != null ? String(editAsset.interestRate) : ''
-  );
   // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
   const [keypadHeight, setKeypadHeight] = useState(0);
   const scrollRef = useRef<any>(null);
@@ -126,12 +117,13 @@ export default function AddAssetScreen({ route }: any) {
   // 金额格自绘光标（距显示串尾部的偏移，0=最末尾）：按键在光标处生效
   const [balanceCursor, setBalanceCursor] = useState(0);
 
-  // 信用卡第二个数值（用户 2026-10-29）：银行给的初始额度 与 现在还剩下多少额度。
-  // 存法不变：creditLimit = 初始额度；initialBalance = 现有额度 − 初始额度（负数=已用掉的额度），
-  // 于是「可用额度」= creditLimit + balance，和 utils/creditCard 的既有口径完全一致。
+  // 信用卡第二个数值 = 已用额度（现在欠多少）。标识符沿用旧名 available*（连同 testID），语义已换：
+  // 存法 creditLimit = 信用额度；initialBalance = −已用额度，
+  // 于是「可用额度」= creditLimit + balance = 额度 − 已用，和 utils/creditCard 的既有口径完全一致。
+  // 编辑预填由存档反推：建档时 initialBalance = 可用 − 额度，故 −initialBalance = 额度 − 可用 = 当时已用。
   const availableExpr = useAmountExpression();
   const [availableValue, setAvailableValue] = useState(
-    editAsset && editAsset.type === 'credit' ? (editAsset.creditLimit ?? 0) + editAsset.initialBalance : 0,
+    editAsset && editAsset.type === 'credit' ? Math.max(0, -editAsset.initialBalance) : 0,
   );
   const [availableCursor, setAvailableCursor] = useState(0);
 
@@ -178,7 +170,7 @@ export default function AddAssetScreen({ route }: any) {
     nameInputRef.current?.blur();
     // 金额模式已开着：只收系统键盘/切换光标，不重置算式
     if (amountField === 'balance') return;
-    // 反向切换同理：把「当前可用」已输入的值先落库
+    // 反向切换同理：把「已用额度」已输入的值先落库
     if (amountField === 'available' && availableDirtyRef.current) {
       setAvailableValue(availableExpr.confirm());
       availableDirtyRef.current = false;
@@ -204,12 +196,6 @@ export default function AddAssetScreen({ route }: any) {
 
   // 计算器键盘上的 Enter（下一项）箭头已由小数点键取代（标准金额录入）
   const nameInputRef = useRef<TextInput>(null);
-
-  // 金额的"实时有效值"：正在编辑的那一格取算式实时结果，否则取已落库值。
-  // 「已用额度」= 总信用 − 当前可用，必须跟着输入实时变，不能等「完成」。
-  const liveBalance = amountField === 'balance' ? balanceExpr.total : balanceValue;
-  const liveAvailable = amountField === 'available' ? availableExpr.total : availableValue;
-  const liveUsed = Math.max(0, liveBalance - liveAvailable);
 
   // 键盘当前作用在哪个金额字段上
   const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
@@ -293,31 +279,23 @@ export default function AddAssetScreen({ route }: any) {
 
     // 类型不在 TYPE_OPTIONS 里时（如旧数据的投资/其他类型账户）保持原图标颜色，避免查不到而崩溃
     const typeInfo = TYPE_OPTIONS.find((t) => t.type === selectedType);
-    // 信用卡只填"信用额度"：初始余额从 0 开始，填的数字存成 creditLimit；
-    // 现金/银行卡填的数字就是初始余额。账单日/还款日/年利率不在此填写
+    // 信用卡两格：第一格填的数字存成 creditLimit（信用额度），第二格是已用额度；
+    // 现金/银行卡填的数字就是初始余额。账单日/还款日不在此填写
     // 保存前先把两格的实时输入提交，避免"最后一格输完直接点保存"丢失刚敲的数字
     const liveBal = amountField === 'balance' ? balanceExpr.confirm() : balanceValue;
     const liveAvail = amountField === 'available' ? availableExpr.confirm() : availableValue;
     const bal = overrideBalance ?? liveBal;
-    // 信用卡两个数值 → 既有模型：creditLimit 存「银行给的初始额度」，
-    // initialBalance 存「现有额度 − 初始额度」（负数 = 已用掉多少），
-    // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
-    if (isCredit && bal > 0 && liveAvail > bal) {
-      dialog.alert({ title: t('addTx.creditAvailableTooHigh'), message: t('addTx.creditAvailableTooHighMsg') });
-      return;
-    }
-    const available = Math.max(liveAvail, 0);
-    const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
-    // 空 → undefined：JSON 落库时该键直接消失（不是 0），AssetScreen 那边就当作"没设置利率"
-    const interestRate = isCredit ? parseInterestRate(interestRateText) : undefined;
+    // 已用额度 → 既有模型：initialBalance = −已用额度（负数 = 欠多少），只取负，不另做换算。
+    // 这样 utils/creditCard 的 可用额度 = creditLimit + balance = 额度 − 已用 仍然成立，历史数据不用迁移。
+    // 已用额度为负按 0 处理（余额字段的既有约定）；已用 > 额度**不拦**：超限要在详情页照实显示负的可用额度。
+    const used = Math.max(liveAvail, 0);
+    const creditInitial = isCredit ? Number((-used).toFixed(2)) : 0;
 
     if (isEdit && editAsset) {
       await updateAsset(editAsset.id, {
         // 仅信用卡带账单日/还款日；类型切走后清空，避免残留
         statementDay: isCredit ? statementDay : undefined,
         dueDay: isCredit ? dueDay : undefined,
-        // 年利率只属于信用卡：类型切走或清空都要变回 undefined（键消失）
-        interestRate,
         name: name.trim(),
         icon: typeInfo?.icon ?? editAsset.icon,
         color: typeInfo?.color ?? editAsset.color,
@@ -329,7 +307,7 @@ export default function AddAssetScreen({ route }: any) {
       });
     } else {
       await addAsset({
-        ...(isCredit ? { statementDay, dueDay, interestRate } : {}),
+        ...(isCredit ? { statementDay, dueDay } : {}),
         name: name.trim(),
         icon: typeInfo!.icon,
         color: typeInfo!.color,
@@ -346,7 +324,7 @@ export default function AddAssetScreen({ route }: any) {
   // 键盘上的「完成」＝先把当前算式求值落进字段，再直接保存（新增＝创建账户，编辑＝更新账户，与"记一笔"的完成语义一致）
   const handleKeypadConfirm = () => {
     if (amountField === 'available') {
-      // 只提交「现有额度」这一格，不触发保存（保存仍走右上角「保存」/额度格的完成）
+      // 只提交「已用额度」这一格，不触发保存（保存仍走右上角「保存」）
       const val = availableExpr.confirm();
       setAvailableValue(val);
       setAmountField(null);
@@ -422,7 +400,7 @@ export default function AddAssetScreen({ route }: any) {
           }}
         >
         {/* 金额区（用户 2026-10-29 重排：原来信用卡是上下两张巨型卡，占满一屏且第二张抢主角）
-              信用卡 → 一张卡里并排两列「初始额度 / 现有可用」，点哪列编哪列，下面直接给「已用」，
+              信用卡 → 一张卡里上下两行「信用额度 / 已用额度」，点哪行编哪行，
                        不用先填 A 再回想 B 是多少；其它类型保持原来的单张「起始余额」。 */}
         {selectedType === 'credit' ? (
           /* 信用卡金额区：**一张统一外框**，内部上下两个独立金额输入区。
@@ -463,7 +441,7 @@ export default function AddAssetScreen({ route }: any) {
               testID="add-asset-available"
             >
               <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
-                {t('addTx.creditAvailableLabel')}
+                {t('addTx.creditUsedLabel')}
               </AppText>
               <View style={styles.amountRow}>
                 <CursorAmountText
@@ -478,30 +456,6 @@ export default function AddAssetScreen({ route }: any) {
                 />
               </View>
             </PressableScale>
-
-            <View style={styles.creditRowSeparator} />
-
-            {/* 底部辅助信息：已用额度（公式收进 ⓘ） */}
-            <View style={styles.creditUsedRow}>
-              <View style={styles.creditUsedLeft}>
-                <AppText variant="caption" color={semantic.textTertiary}>
-                  {t('addTx.creditUsedLabel')}
-                </AppText>
-                <PressableScale
-                  activeScale={0.9}
-                  hitSlop={8}
-                  onPress={() => dialog.alert({ title: t('addTx.creditUsedLabel'), message: t('addTx.creditUsedHint') })}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('addTx.creditUsedLabel')}
-                  testID="add-asset-credit-used-info"
-                >
-                  <Ionicons name="information-circle-outline" size={16} color={semantic.textTertiary} />
-                </PressableScale>
-              </View>
-              <AppText variant="caption" color={semantic.textSecondary}>
-                {formatMoney(liveUsed)}
-              </AppText>
-            </View>
           </View>
         ) : (
           <PressableScale
@@ -562,42 +516,6 @@ export default function AddAssetScreen({ route }: any) {
                   </AppText>
                   <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
                 </PressableScale>
-              </View>
-            </View>
-
-            {/* 年利率：两列下方、同一信用卡区块内，一条发丝线与上面隔开。
-                逾期时 AssetScreen 用它算「预估逾期利息」；空 = 未设置（存 undefined，不是 0）。 */}
-            <View style={styles.interestDivider} />
-            <View style={styles.interestRow}>
-              <AppText
-                variant="subhead"
-                weight="600"
-                color={semantic.textSecondary}
-                numberOfLines={1}
-                style={styles.interestLabel}
-              >
-                {t('asset.interestRateLabel')}
-              </AppText>
-              <View style={styles.interestValueWrap}>
-                <TextInput
-                  style={styles.interestInput}
-                  value={interestRateText}
-                  onChangeText={(v) => setInterestRateText(sanitizeInterestRateInput(v))}
-                  onFocus={() => setSysKeyboardVisible(true)}
-                  onBlur={() => setSysKeyboardVisible(false)}
-                  placeholder={t('asset.interestRateHint')}
-                  placeholderTextColor={semantic.textTertiary}
-                  selectionColor={semantic.accent}
-                  keyboardType="decimal-pad"
-                  inputMode="decimal"
-                  returnKeyType="done"
-                  maxLength={6}
-                  accessibilityLabel={t('asset.interestRateLabel')}
-                  testID="add-asset-interest-rate"
-                />
-                <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
-                  %
-                </AppText>
               </View>
             </View>
           </View>
@@ -730,7 +648,7 @@ export default function AddAssetScreen({ route }: any) {
       {/* 币种抽屉：统一 BottomSheet（把手 + 遮罩 + 下拉收起 + 安全区都由组件负责）。
           ⚠ 挂在页面根（SafeAreaView）的最后一个子节点上，不能放进 ScrollView —— 组件按 absoluteFill
           铺满父容器，放进滚动容器里会跟着内容滚走 */}
-      {/* 账单日 / 还款日选择：1–28（避开小月没有 29–31 的坑） */}
+      {/* 账单日 / 还款日选择：1–30（31 号不入选项：小月没有 31 号） */}
       <BottomSheet
         visible={daySheet !== null}
         onClose={() => setDaySheet(null)}
@@ -738,7 +656,7 @@ export default function AddAssetScreen({ route }: any) {
         testID="add-asset-day-sheet"
       >
         <ScrollView style={{ maxHeight: sheetListMaxHeight }} showsVerticalScrollIndicator={false}>
-          {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => {
+          {Array.from({ length: 30 }, (_, i) => i + 1).map((day) => {
             const active = (daySheet === 'due' ? dueDay : statementDay) === day;
             return (
               <ListRow
@@ -948,15 +866,6 @@ function makeStyles(
       textAlign: 'right',
     },
     creditFieldCursor: { width: 2, height: typography.amountEntry.lineHeight, backgroundColor: semantic.accentText, marginLeft: 1 },
-    // 已用额度行：**不带任何上边框**（上方已有 creditRowSeparator，两条会叠成双线）
-    creditUsedRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.xs,
-    },
-    creditUsedLeft: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs },
     // 账单日 / 还款日：两个等宽列，标签各自在控件上方
     dayCol: { flex: 1, minWidth: 0 },
     creditColLabel: { marginBottom: spacing.xs },
@@ -979,35 +888,6 @@ function makeStyles(
     // 账单日 / 还款日两行
     dayRows: { marginTop: spacing.md, marginBottom: spacing.lg },
     dayRowInner: { flexDirection: 'row', columnGap: 10 },
-    // 年利率行（账单日/还款日下方）：发丝线隔开，标签左、数值 + % 右，
-    // 与卡内其它行的排布同族；数值字号取 body（17），低于金额行的 amountEntry 档位
-    interestDivider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: semantic.hairline,
-      marginTop: spacing.md,
-    },
-    interestRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      columnGap: spacing.sm,
-      paddingTop: spacing.sm,
-    },
-    // 窄屏：标签先截断（numberOfLines=1），不动右侧输入区
-    interestLabel: { flexShrink: 1, minWidth: 0 },
-    interestValueWrap: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.xs, flexShrink: 1 },
-    interestInput: {
-      width: 88,
-      flexShrink: 1,
-      paddingVertical: 0,
-      paddingHorizontal: 0,
-      textAlign: 'right',
-      fontSize: typography.body.fontSize,
-      lineHeight: typography.body.lineHeight,
-      fontWeight: '600',
-      color: semantic.textPrimary,
-      fontVariant: ['tabular-nums'],
-    },
     daySelect: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
     amountLabel: {
       fontSize: 14,

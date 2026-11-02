@@ -339,7 +339,6 @@ export interface AssetDto {
   creditLimit: number | string | null;
   statementDay: number | null;
   dueDay: number | null;
-  interestRate: number | string | null;
   defaultAsset: boolean;
   sortOrder: number;
   archived: boolean;
@@ -360,7 +359,6 @@ export interface AssetUpsert {
   creditLimit?: number | null;
   statementDay?: number | null;
   dueDay?: number | null;
-  interestRate?: number | null;
   defaultAsset?: boolean;
   sortOrder?: number;
   archived?: boolean;

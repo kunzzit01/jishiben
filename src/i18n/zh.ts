@@ -257,12 +257,8 @@ export const zh = {
     balanceLabel: '起始余额',
     creditLimitLabel: '信用额度',
     creditTotalLabel: '总信用额度',
-    creditAvailableLabel: '当前可用',
     creditUsedLabel: '已用额度',
-    creditUsedHint: '已用额度 = 总信用额度 − 当前可用。记一笔刷这张卡时，当前可用会自动减少。',
     creditAvailableHint: '已用 %{used}（初始额度 − 现有额度）',
-    creditAvailableTooHigh: '现有额度不能大于初始额度',
-    creditAvailableTooHighMsg: '请检查：现有可用额度不能超过银行给的初始额度。',
     accountName: '账户名称',
     accountNamePlaceholder: '例如：银行卡尾号****',
     // 账户名称输入提示按账户类型分档（现金 / 银行卡 / 信用卡 / 电子钱包 / 投资 / 其他）
@@ -522,7 +518,7 @@ export const zh = {
     ledgerName: '账本',
     notificationTitle: '消息通知',
     notificationMsg: '这个功能还在开发中',
-    editLedger: '重命名账本',
+    editLedger: '账本编辑',
     deleteLedger: '删除账本',
     deleteLedgerMsg: '「%{name}」名下的 %{tx} 笔交易、%{assets} 项资产、%{plans} 个缴费计划将一并永久删除，此操作不可撤销。',
     deleteLedgerEmptyMsg: '「%{name}」将被永久删除，此操作不可撤销。',
@@ -613,9 +609,6 @@ export const zh = {
     perMonthDay: '每月 %{day} 日',
     statementDayLabel: '账单日',
     dueDayLabel: '还款日',
-    // 添加/编辑信用卡时的年利率（%）：逾期未还时用于估算利息，空 = 未设置
-    interestRateLabel: '年利率',
-    interestRateHint: '未设置',
     statementDayValue: '账单日 %{day} 号',
     dueDayValue: '还款日 %{day} 号',
     dayValue: '%{day} 号',
@@ -659,6 +652,11 @@ export const zh = {
     currentTag: '当前',
     deleteAssetTitle: '删除资产"%{name}"？',
     deleteAssetMsg: '与该资产相关的转账记录仍会保留，但资产余额将无法再查看',
+    // 有流水的钱包：删除入口的三选一（归档 / 彻底删除）
+    deleteDeepTitle: '删除钱包「%{name}」？',
+    deleteDeepMsg: '这个钱包有 %{n} 笔流水（含转账对侧记录），彻底删除会一并永久删除且不可撤销；只想隐藏它请选「归档」。',
+    archiveAction: '归档（保留历史）',
+    deleteDeepAction: '彻底删除',
     liabilityLabel: '负债（信用卡欠款）',
     myAccounts: '我的账户',
     accountsCount: ' · %{count} 个',
@@ -671,7 +669,6 @@ export const zh = {
     lastStatement: '上期账单金额',
     dueDate: '应还日期',
     overdueDays: '（已逾期%{days}天）',
-    estInterest: '预估逾期利息',
     currentBalance: '当前余额',
     inflow: '本月流入',
     inflowCount: ' （%{count} 笔）',
@@ -698,6 +695,8 @@ export const zh = {
     iconLabel: '选图标',
     colorLabel: '选颜色',
     create: '创建账本',
+    editTitle: '账本编辑',
+    editNameLabel: '账本名称',
   },
   profile: {
     // Tab 根页大标题（与 Tab 名「设置」一致；改成根页后去掉返回键，不再叫「个人设置」）
@@ -725,11 +724,22 @@ export const zh = {
     general: '通用',
     // 「功能」分组（AI 专区等能力型入口）
     features: '功能',
+    // 「数据」分组（清空所有数据）：既不是界面配置也不是能力入口，单独成组
+    data: '数据',
+    clearData: '清空所有数据',
+    clearDataSub: '删除全部账本、钱包、流水、预算与缴费计划',
     support: '支持',
     help: '帮助与反馈',
     about: '关于应用',
     // 页脚版本号（中文按用户定版写「版本 1.0.0」）
     version: '版本 %{version}',
+  },
+  // 清空所有数据（设置页 → 数据分组）：确认框 + PIN 验证两处文案
+  data: {
+    clearTitle: '清空所有数据？',
+    clearMsg: '将永久删除 %{ledgers} 本账本、%{assets} 个钱包、%{tx} 笔流水、%{budgets} 条预算、%{plans} 个缴费计划，并新建一本空白账本。此操作不可撤销。',
+    clearConfirm: '清空',
+    cleared: '已清空',
   },
   theme: {
     system: '跟随系统',

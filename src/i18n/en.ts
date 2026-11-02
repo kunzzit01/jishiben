@@ -255,12 +255,8 @@ export const en = {
     balanceLabel: 'Opening Balance',
     creditLimitLabel: 'Credit Limit',
     creditTotalLabel: 'Total limit',
-    creditAvailableLabel: 'Available',
-    creditUsedLabel: 'Used',
-    creditUsedHint: 'Used = total limit − available. Spending on this card lowers the available amount automatically.',
+    creditUsedLabel: 'Used Credit',
     creditAvailableHint: 'Used %{used} (limit − available)',
-    creditAvailableTooHigh: 'Available exceeds the limit',
-    creditAvailableTooHighMsg: 'Available credit cannot be larger than the bank limit.',
     accountName: 'Account Name',
     accountNamePlaceholder: 'e.g. Bank card ****',
     // 账户名称输入提示按账户类型分档（现金 / 银行卡 / 信用卡 / 电子钱包 / 投资 / 其他）
@@ -519,7 +515,7 @@ export const en = {
     ledgerName: 'Ledger',
     notificationTitle: 'Notifications',
     notificationMsg: 'This feature is under development',
-    editLedger: 'Rename ledger',
+    editLedger: 'Edit ledger',
     deleteLedger: 'Delete Ledger',
     deleteLedgerMsg: '"%{name}" contains %{tx} transactions, %{assets} assets and %{plans} payment plans. They will be permanently deleted together. This cannot be undone.',
     deleteLedgerEmptyMsg: '"%{name}" will be permanently deleted. This cannot be undone.',
@@ -609,8 +605,6 @@ export const en = {
     perMonthDay: 'Day %{day} of each month',
     statementDayLabel: 'Statement day',
     dueDayLabel: 'Due day',
-    interestRateLabel: 'Interest rate (APR)',
-    interestRateHint: 'Not set',
     statementDayValue: 'Statement day %{day}',
     dueDayValue: 'Due day %{day}',
     dayValue: 'Day %{day}',
@@ -654,6 +648,11 @@ export const en = {
     currentTag: 'Current',
     deleteAssetTitle: 'Delete asset "%{name}"?',
     deleteAssetMsg: 'Related transfer records are kept, but the asset balance can no longer be viewed',
+    // Wallet with records: the three-way delete entry (archive / delete permanently)
+    deleteDeepTitle: 'Delete wallet "%{name}"?',
+    deleteDeepMsg: 'This wallet has %{n} records (including the other side of transfers). Deleting it permanently removes them and cannot be undone; choose Archive to keep the history.',
+    archiveAction: 'Archive (keep history)',
+    deleteDeepAction: 'Delete permanently',
     liabilityLabel: 'Liabilities (credit card debt)',
     myAccounts: 'My Accounts',
     accountsCount: ' · %{count}',
@@ -666,7 +665,6 @@ export const en = {
     lastStatement: 'Last Statement Amount',
     dueDate: 'Due Date',
     overdueDays: ' (overdue %{days} days)',
-    estInterest: 'Estimated Interest',
     currentBalance: 'Current Balance',
     inflow: 'Inflow this month',
     inflowCount: ' (%{count} items)',
@@ -693,6 +691,8 @@ export const en = {
     iconLabel: 'Icon',
     colorLabel: 'Color',
     create: 'Create Ledger',
+    editTitle: 'Edit ledger',
+    editNameLabel: 'Ledger name',
   },
   profile: {
     title: 'Settings',
@@ -719,11 +719,22 @@ export const en = {
     general: 'General',
     // "Features" section (capability entries such as the AI Zone)
     features: 'Features',
+    // "Data" section (clear all data): neither an appearance setting nor a capability entry
+    data: 'Data',
+    clearData: 'Clear all data',
+    clearDataSub: 'Remove every ledger, wallet, transaction, budget and payment plan',
     support: 'Support',
     help: 'Help & Feedback',
     about: 'About',
     // Footer version line (Chinese reads「版本 1.0.0」)
     version: 'Version %{version}',
+  },
+  // Clear all data (Settings -> Data section): confirmation dialog + PIN sheet copy
+  data: {
+    clearTitle: 'Clear all data?',
+    clearMsg: 'This permanently deletes %{ledgers} ledgers, %{assets} wallets, %{tx} transactions, %{budgets} budgets and %{plans} payment plans, then creates one empty ledger. This cannot be undone.',
+    clearConfirm: 'Clear',
+    cleared: 'Cleared',
   },
   theme: {
     system: 'System default',

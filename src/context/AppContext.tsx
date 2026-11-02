@@ -211,8 +211,18 @@ interface AppContextValue {
   renameBudget: (categoryId: string, name: string, currency?: string) => Promise<void>;
   getCategoryById: (id: string) => Category | undefined;
   addLedger: (name: string, icon: string, color?: string) => Promise<void>;
+  /**
+   * 一次改掉账本的外观字段（名称 / 颜色 / 图标）。名称会 trim，空名直接忽略（不写入）。
+   * 只动本地 state，落盘与云同步仍由既有 effect 处理。
+   */
+  updateLedger: (id: string, updates: { name?: string; color?: string; icon?: string }) => Promise<void>;
   renameLedger: (id: string, name: string) => Promise<void>;
   deleteLedger: (id: string) => Promise<void>;
+  /**
+   * 清空所有数据：账本 / 钱包 / 流水 / 预算 / 缴费计划全部清掉，只落一本全新的空账本。
+   * 分类与全部界面设置（货币、周期、日期格式、周起始、小数位、语言/主题）保持不变。
+   */
+  clearAllData: () => Promise<void>;
   setActiveLedgerId: (id: string) => Promise<void>;
   /** 把某本账本设为默认（同一时间只有一本，设置新的会自动清掉旧的） */
   setDefaultLedger: (id: string) => Promise<void>;
@@ -236,7 +246,6 @@ interface AppContextValue {
     creditLimit?: number;
     statementDay?: number;
     dueDay?: number;
-    interestRate?: number;
   }) => Promise<void>;
   updateAsset: (id: string, updates: Partial<Omit<Asset, 'id' | 'createdAt' | 'ledgerId'>>) => Promise<void>;
   /**
@@ -244,6 +253,12 @@ interface AppContextValue {
    * 返回 'archived'；没有记录时真删除，返回 'deleted'。调用前可用 assetRecordCount 决定文案。
    */
   deleteAsset: (id: string) => Promise<'deleted' | 'archived'>;
+  /**
+   * 彻底删除账户：连引用它的全部流水一起删（assetId / fromAssetId / toAssetId 任一命中）。
+   * 转账两条腿记在同一笔上，只删一侧会留下金额对不上的孤儿记录，所以必须整笔删。
+   * 与 deleteAsset 不同：这里不看记录数，确认文案由调用方负责。
+   */
+  deleteAssetDeep: (id: string) => Promise<void>;
   /** 归档账户：从账户列表/记账选择/净资产隐藏，历史交易保持不变；同时取消默认账户 */
   archiveAsset: (id: string) => Promise<void>;
   /** 恢复已归档账户 */
@@ -711,11 +726,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLedgers((prev) => [...prev, { id: genId(), name, icon, color: color ?? LEDGER_DEFAULT_COLOR, createdAt: Date.now() }]);
   };
 
-  const renameLedger: AppContextValue['renameLedger'] = async (id, name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setLedgers((prev) => prev.map((l) => (l.id === id ? { ...l, name: trimmed } : l)));
+  const updateLedger: AppContextValue['updateLedger'] = async (id, updates) => {
+    const trimmed = updates.name?.trim();
+    if (updates.name !== undefined && !trimmed) return;
+    setLedgers((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, ...updates, ...(trimmed ? { name: trimmed } : {}) } : l))
+    );
   };
+
+  // 老 API 保留（别处仍在调 renameLedger）：薄包装，行为与 updateLedger(name) 完全一致
+  const renameLedger: AppContextValue['renameLedger'] = async (id, name) => updateLedger(id, { name });
 
   const deleteLedger: AppContextValue['deleteLedger'] = async (id) => {
     // 用户定版：任何账本都能删（含原名「默认账本」那条），删到一本不剩也允许。
@@ -733,6 +753,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAssets((prev) => prev.filter((a) => a.ledgerId !== id));
     setPaymentPlans((prev) => prev.filter((p) => p.ledgerId !== id));
     setLedgers(next);
+  };
+
+  // 清空所有数据（设置页入口）：清数据、留一本空白账本 —— 与 deleteLedger 删空后的回落同一写法，
+  // 免得界面出现「一本账本都没有」的空态。分类与全部界面设置不在这里清（它们是应用配置而非用户数据），
+  // 云端删除仍由既有快照 diff 推送负责，这里不碰同步代码。
+  const clearAllData: AppContextValue['clearAllData'] = async () => {
+    const fresh = makeLedger(translate('home.emptyLedgerName'));
+    setTransactions([]);
+    setAssets([]);
+    setBudgets([]);
+    setPaymentPlans([]);
+    setLedgers([fresh]);
+    setActiveLedgerIdState(fresh.id);
+    setDefaultLedgerIdState(fresh.id);
   };
 
   // 设为默认账本（与「设为默认账户」同规格）：本地立即生效并持久化，离线也成立；
@@ -828,6 +862,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 无交易的账户可以真删；但计划付款若仍指向它，到期会生成指向已删账户的孤儿交易，先解除关联
     setPaymentPlans((prev) => prev.map((p) => (p.assetId === id ? { ...p, assetId: undefined } : p)));
     return 'deleted';
+  };
+
+  // 彻底删除：用户明确要求连历史流水一起删（归档之外的另一条路，见资产页三选一弹窗）。
+  // 交易先按三个引用字段整笔过滤（转账两条腿在同一笔上，只删一侧余额就对不上），
+  // 再摘账户；缴费计划不能指向已删账户，与 deleteAsset 同款解除关联。
+  const deleteAssetDeep: AppContextValue['deleteAssetDeep'] = async (id) => {
+    setTransactions((prev) => prev.filter((t) => t.assetId !== id && t.fromAssetId !== id && t.toAssetId !== id));
+    setPaymentPlans((prev) => prev.map((p) => (p.assetId === id ? { ...p, assetId: undefined } : p)));
+    setAssets((prev) => prev.filter((a) => a.id !== id));
   };
 
   const getAssetById = (id: string) => assets.find((a) => a.id === id);
@@ -1080,8 +1123,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         renameBudget,
         getCategoryById,
         addLedger,
+        updateLedger,
         renameLedger,
         deleteLedger,
+        clearAllData,
         setActiveLedgerId,
         setDefaultLedger,
         setCurrency,
@@ -1092,6 +1137,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addAsset,
         updateAsset,
         deleteAsset,
+        deleteAssetDeep,
         archiveAsset,
         unarchiveAsset,
         assetRecordCount,

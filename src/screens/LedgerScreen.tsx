@@ -22,21 +22,9 @@ import { useTabClearance } from '../hooks/useTabClearance';
 import { useT } from '../i18n/LanguageContext';
 import { hapticSuccess } from '../utils/haptics';
 import { AppText, GlassView, HeroGradient, IconCircle, ScreenHeader } from '../components/ui';
+import { LEDGER_COLOR_OPTIONS, LEDGER_DEFAULT_ICON } from '../constants/ledgerColors';
 
 type IconName = keyof typeof Ionicons.glyphMap;
-
-// 图标选择行已移除：账本数据模型必须有 icon 字段，创建时统一用默认图标，
-// 顶部的大预览图标就是它的实时预览（以后若恢复选图标，换回这里的值即可）
-const DEFAULT_LEDGER_ICON: IconName = 'book-outline';
-// 预设 10 个账本颜色，固定 5 列 × 2 行
-// 预设 25 个账本颜色，固定 5 列 × 5 行：每行一个色系（蓝 / 橙红粉 / 紫 / 青绿 / 大地色）
-const COLOR_OPTIONS = [
-  '#4C9AFF', '#2F7BE0', '#1565C0', '#5C6BC0', '#7986CB',
-  '#FF7A5C', '#FF9F43', '#F4511E', '#EF5DA8', '#FF6F91',
-  '#B983FF', '#9575CD', '#6A1B9A', '#BA68C8', '#CE93D8',
-  '#26C6DA', '#66BB6A', '#4DB6AC', '#81C784', '#558B2F',
-  '#F9A825', '#8D6E63', '#A1887F', '#FFB300', '#795548',
-];
 
 /** UI V2.1 玻璃二级页头：ScreenHeader 的返回键是透明 44 触控区，这里在它底下垫一枚 44 玻璃圆钮（稿） */
 function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -58,7 +46,7 @@ export default function LedgerScreen() {
   const t = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState(COLOR_OPTIONS[0]);
+  const [newColor, setNewColor] = useState(LEDGER_COLOR_OPTIONS[0]);
 
   const handleAdd = async (name: string, icon: IconName, color: string) => {
     if (!name.trim()) {
@@ -71,7 +59,7 @@ export default function LedgerScreen() {
     }
     await addLedger(name.trim(), icon, color);
     setNewName('');
-    setNewColor(COLOR_OPTIONS[0]);
+    setNewColor(LEDGER_COLOR_OPTIONS[0]);
     // 用户定版：创建成功后给明确的交互反馈——主题化成功弹窗，按钮直接回到
     // 选择账本弹层（首页），否则用户不知道账本是否已加上
     hapticSuccess();
@@ -110,7 +98,7 @@ export default function LedgerScreen() {
             >
               <View style={styles.previewRow}>
                 {/* 中心预览：立体光泽球（§5），创建时用的默认图标 + 当前选中色 */}
-                <IconCircle size={72} color={newColor} icon={DEFAULT_LEDGER_ICON} />
+                <IconCircle size={72} color={newColor} icon={LEDGER_DEFAULT_ICON} />
               </View>
 
               <TextInput
@@ -126,7 +114,7 @@ export default function LedgerScreen() {
               </AppText>
               {[0, 1, 2, 3, 4].map((row) => (
                 <View key={row} style={styles.colorRow}>
-                  {COLOR_OPTIONS.slice(row * 5, row * 5 + 5).map((color) => (
+                  {LEDGER_COLOR_OPTIONS.slice(row * 5, row * 5 + 5).map((color) => (
                     <View key={color} style={styles.colorCell}>
                     <PressableScale
                       style={[
@@ -152,7 +140,7 @@ export default function LedgerScreen() {
 
           {/* 创建账本按钮钉在页面最底部（避开浮空Tab栏），不再随内容滚动 */}
           <PressableScale
-            onPress={() => handleAdd(newName, DEFAULT_LEDGER_ICON, newColor)}
+            onPress={() => handleAdd(newName, LEDGER_DEFAULT_ICON, newColor)}
             activeScale={0.97}
             style={[styles.saveBtn, { marginBottom: tabClearance + spacing.sm }]}
             accessibilityRole="button"

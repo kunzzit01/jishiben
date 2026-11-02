@@ -36,9 +36,10 @@ import PinSheet, { PinSheetMode } from '../components/PinSheet';
 import { useDialog } from '../components/AppDialog';
 import { useAuth } from '../context/AuthContext';
 import { useAppLock } from '../context/AppLockContext';
+import { useApp } from '../context/AppContext';
 import { useLanguage, LangMode } from '../i18n/LanguageContext';
 import { useT } from '../i18n/LanguageContext';
-import { hapticSelection } from '../utils/haptics';
+import { hapticSelection, hapticSuccess } from '../utils/haptics';
 import {
   AppText,
   Badge,
@@ -72,6 +73,8 @@ export default function ProfileScreen({ navigation }: any) {
   const styles = useMemo(() => makeStyles(semantic, spacing, layout), [semantic, spacing, layout]);
   // ── 账号与同步 ──
   const { user, authInitializing, syncStatus, lastSyncAt } = useAuth();
+  // ── 数据分组：清空所有数据。数量文案与清空动作都走 AppContext（不在这里自己拼 state）──
+  const { ledgers, assets, transactions, budgets, paymentPlans, clearAllData } = useApp();
 
   // 同步状态一句话：同步中 / 上次同步时间 / 尚未同步 / 失败
   // (错误文案 authErrorText 与 退出登录/立即同步 都已搬进"我的账户"账号页 AuthScreen)
@@ -114,6 +117,10 @@ export default function ProfileScreen({ navigation }: any) {
   const pinClearModeRef = useRef(false);
   // 「为开生物锁而创建 PIN」标记：PinSheet 创建成功后自动开启生物锁
   const bioPendingEnableRef = useRef(false);
+  // 「清空所有数据」意图标记：确认后置位，**PIN 验证通过**才真正执行；取消/关闭面板零副作用
+  const wipeIntentRef = useRef(false);
+  // create→verify 切换标记：PinSheet 的 finishCreate 会尾随触发一次程序性 onClose，消费掉它让弹层保持打开
+  const wipeSwitchingRef = useRef(false);
 
   // 二级密码行：未设 → 直接进 create；已设 → 主题化弹窗选择「更改 / 清除」（用户定版）
   const handlePinRowPress = () => {
@@ -145,6 +152,42 @@ export default function ProfileScreen({ navigation }: any) {
   const openPinChange = () => {
     setPinSheetMode('change');
     setPinSheetVisible(true);
+  };
+
+  // 清空所有数据：先报真实数量，确认后走同一个 PinSheet（已设 PIN → 验证一次；
+  // 未设 → 先创建两遍，完成后再验证一次，与首页删除账本同一套规则）
+  const requestClearAll = () => {
+    dialog.alert({
+      title: tr('data.clearTitle'),
+      message: tr('data.clearMsg', {
+        ledgers: ledgers.length,
+        assets: assets.length,
+        tx: transactions.length,
+        budgets: budgets.length,
+        plans: paymentPlans.length,
+      }),
+      buttons: [
+        { text: tr('common.cancel'), style: 'cancel' },
+        {
+          text: tr('data.clearConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            wipeIntentRef.current = true;
+            setPinSheetMode(hasPin ? 'verify' : 'create');
+            setPinSheetVisible(true);
+          },
+        },
+      ],
+    });
+  };
+
+  // 真正清空：只在 PinSheet 的 verify 阶段通过后调用（create 刚设完 PIN 不算验证）
+  const performClearAll = async () => {
+    await clearAllData();
+    hapticSuccess();
+    wipeIntentRef.current = false;
+    setPinSheetVisible(false);
+    dialog.alert({ title: tr('data.clearTitle'), message: tr('data.cleared') });
   };
 
   // 版本号读 app.json 的 expo.version，不硬编码
@@ -299,6 +342,19 @@ export default function ProfileScreen({ navigation }: any) {
           />
         </ListSection>
 
+        {/* 数据分组：清空所有数据。夹在「通用」与「功能」之间 —— 它既不是界面配置也不是能力入口，
+            单独成组；这是不可回退的危险操作，所以确认框 + PIN 双重把关（两者都过才动手） */}
+        <ListSection title={tr('profile.data')} style={styles.section} testID="profile-data">
+          <ListRow
+            leading={<RowIcon icon="trash-outline" />}
+            title={tr('profile.clearData')}
+            subtitle={tr('profile.clearDataSub')}
+            chevron
+            onPress={requestClearAll}
+            testID="profile-clear-data-row"
+          />
+        </ListSection>
+
         {/* 功能分组：AI 专区入口 —— AIScreen 已双注册在 HomeStack / ProfileStack
             （App.tsx 的 ROUTES.AI），但全仓一直没有 navigate(ROUTES.AI)，等于「有页面、没入口」；
             这里补上设置页的正式入口。行规格直接复用 ListRow（同高 / 同内衬 / 同 chevron），不另画。 */}
@@ -363,11 +419,29 @@ export default function ProfileScreen({ navigation }: any) {
         visible={pinSheetVisible}
         mode={pinSheetMode}
         onClose={() => {
+          // create→verify 切换瞬间 PinSheet 会尾随触发一次程序性 onClose，跳过它让弹层留在 verify
+          if (wipeSwitchingRef.current) {
+            wipeSwitchingRef.current = false;
+            return;
+          }
           setPinSheetVisible(false);
           pinClearModeRef.current = false;
           bioPendingEnableRef.current = false;
+          // 取消/关闭 = 放弃清空：清掉意图标记，clearAllData 不会被调用
+          wipeIntentRef.current = false;
         }}
         onSuccess={() => {
+          // 清空所有数据：只有 verify 阶段通过才算「验证通过」。未设 PIN 时 create 刚设完 PIN 不算验证，
+          // 先切到 verify 再输一次（PinSheet 内部 finishCreate 尾随的 onClose 由 wipeSwitchingRef 消费）
+          if (wipeIntentRef.current) {
+            if (pinSheetMode === 'verify') {
+              void performClearAll();
+            } else {
+              wipeSwitchingRef.current = true;
+              setPinSheetMode('verify');
+            }
+            return;
+          }
           // create/change 完成后无需额外处理（PinSheet 内部已 setPin）；
           // 若本轮是"为开生物锁而建 PIN"，建完自动开启
           if (bioPendingEnableRef.current) {

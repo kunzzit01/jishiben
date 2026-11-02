@@ -34,6 +34,7 @@ import PressableScale from '../components/PressableScale';
 import { AppText, BottomSheet, Button, EmptyState, GlassView, HeroGradient, IconButton, IconCircle, ListSection, MoneyText, StatusBarGlass } from '../components/ui';
 import { MonthlyBudgetSheet } from '../components/MonthlyBudgetSheet';
 import { BudgetRenameSheet } from '../components/BudgetRenameSheet';
+import { LedgerEditPanel } from '../components/LedgerEditPanel';
 import { TransactionSearchSheet, type SearchRow } from '../components/TransactionSearchSheet';
 import { withAlpha } from '../components/ui/color';
 import { FolderAssetCard } from '../components/home/FolderAssetCard';
@@ -152,27 +153,23 @@ function formatDateTs(ts: number) {
 }
 
 // ── 账本抽屉的单行（T10 / H11，UI V2 换圆图标）──
-// 结构：42 圆图标（IconCircle）+ 中间列（名称 +（默认那本）小胶囊徽标 / 分币种结余 / 创建于）+ 右侧「设为默认 / 铅笔改名 / 垃圾桶删除」。
-// ⚠ 改名与删除两个 IconButton 必须放在可点主区 **外面**（同级的动作列）：主区是 Pressable
+// 结构：42 圆图标（IconCircle）+ 中间列（名称 +（默认那本）小胶囊徽标 / 分币种结余 / 创建于）+ 右侧一个编辑键。
+// ⚠ 编辑 IconButton 必须放在可点主区 **外面**（同级的动作列）：主区是 Pressable
 //   （Web 上是 <button>），按钮放进去会变成 button 套 button（读屏重复 + 控制台 hydration 报错，
-//   此前日历药丸踩过一次）。动作列固定宽 88（两个 44 触控区），各行铅笔左缘对齐；
+//   此前日历药丸踩过一次）。动作列固定宽 44（一个 44 触控区），各行编辑键左缘对齐；
 //   中间列 minWidth 0 —— 长名字 / 长余额从这一列压缩，任何元素的右边界都不会越过 344（360 宽屏）。
-// ⚠ 删除键对**每一本**账本都渲染（含默认那本）：默认只是一枚身份徽标，不是删除的例外。
+// 行上留两个入口：★ 一键设为默认（冷启动落点）、铅笔进「账本编辑」面板（改名 / 换色 / 删除）；
+//   删除仍对**每一本**账本生效（含默认那本）：默认只是一枚身份徽标，不是删除的例外。
 type LedgerRowProps = {
   ledger: Ledger;
   active: boolean;
-  /** 是否是当前默认账本（只影响徽标与「设为默认」动作，不影响可删性） */
+  /** 是否是当前默认账本（只影响徽标，不影响可删性） */
   isDefault: boolean;
   /** 该账本的分币种结余（[币种代码, 金额]） */
   totals: [string, number][];
-  renaming: boolean;
-  renameValue: string;
-  renameInputRef: React.RefObject<TextInput | null>;
-  onRenameValueChange: (v: string) => void;
-  onCommitRename: () => void;
-  onStartRename: () => void;
-  onDelete: () => void;
-  /** 设为默认账本（已是默认时这一行不渲染该动作） */
+  /** 打开「账本编辑」面板（名称 / 颜色 / 设为默认 / 删除都在面板里） */
+  onEdit: () => void;
+  /** 一键设为默认账本（冷启动会落在这本）；已是默认时这一格留空占位 */
   onSetDefault: () => void;
   onSelect: () => void;
 };
@@ -182,13 +179,7 @@ function LedgerRow({
   active,
   isDefault,
   totals,
-  renaming,
-  renameValue,
-  renameInputRef,
-  onRenameValueChange,
-  onCommitRename,
-  onStartRename,
-  onDelete,
+  onEdit,
   onSetDefault,
   onSelect,
 }: LedgerRowProps) {
@@ -197,30 +188,6 @@ function LedgerRow({
   const { langMode } = useLanguage();
   const baseColor = ledger.color ?? DEFAULT_LEDGER_COLOR;
   const styles2 = useMemo(() => makeLedgerRowStyles(semantic, spacing, layout), [semantic, spacing, layout]);
-
-  // 改名态：这一行换成行内输入（与旧交互一致：点铅笔 → 名字变输入框，失焦 / 回车提交）
-  if (renaming) {
-    return (
-      <View style={styles2.renameRow}>
-        <TextInput
-          ref={renameInputRef}
-          style={[
-            styles2.renameInput,
-            { color: semantic.textPrimary, borderColor: semantic.accent, backgroundColor: semantic.bg },
-          ]}
-          value={renameValue}
-          onChangeText={onRenameValueChange}
-          onBlur={onCommitRename}
-          onSubmitEditing={onCommitRename}
-          selectTextOnFocus
-          returnKeyType="done"
-          autoFocus
-          accessibilityLabel={t('home.editLedger')}
-        />
-        <Button title={t('common.save')} size="sm" fullWidth={false} onPress={onCommitRename} />
-      </View>
-    );
-  }
 
   return (
     <View style={[styles2.row, active && { backgroundColor: semantic.accentSoft }]}>
@@ -288,9 +255,9 @@ function LedgerRow({
         </PressableScale>
       </View>
       {/* 动作列放在可点区之外（整行是 button，按钮放进去会 button 套 button）。
-          固定宽 132（三个 44 触控区）：设为默认 / 重命名 / 删除。三格常驻（默认那本的第一格
-          留空占位），各行铅笔与垃圾桶左缘永远对齐，不会因为身份变化而左右跳。
-          删除键对每一本账本都渲染——身份由副标题徽标说明，而不是靠藏掉删除键 */}
+          只有一个编辑键：改名 / 换色 / 设为默认 / 删除都收进「账本编辑」面板 ——
+          行上三个图标里两个（设默认、删除）在窄屏最容易挤到名称，入口合并后
+          整行只剩「切账本」和「编辑这本账本」两件事，各行编辑键左缘也永远对齐 */}
       <View style={styles2.actions}>
         {isDefault ? (
           <View style={styles2.actionSlot} />
@@ -305,20 +272,12 @@ function LedgerRow({
           />
         )}
         <IconButton
-          icon="pencil"
+          icon="create-outline"
           size={20}
           color={semantic.textSecondary}
           accessibilityLabel={t('home.editLedger')}
-          onPress={onStartRename}
-          testID={`ledger-rename-${ledger.id}`}
-        />
-        <IconButton
-          icon="trash-outline"
-          size={20}
-          color={semantic.danger}
-          accessibilityLabel={t('home.deleteLedger')}
-          onPress={onDelete}
-          testID={`ledger-delete-${ledger.id}`}
+          onPress={onEdit}
+          testID={`ledger-edit-${ledger.id}`}
         />
       </View>
     </View>
@@ -373,35 +332,14 @@ function makeLedgerRowStyles(semantic: SemanticColors, spacing: Spacing, layout:
     // 余额数字可压缩（放不下自动换紧凑格式），保证行右缘 ≤ 页面边距内的 344
     // minWidth 0：账本抽屉里「分币种结余」与币种代码同一行，长金额要能真的收
     balanceAmount: { flexShrink: 1, minWidth: 0 },
-    // 动作列：设为默认 + 铅笔 + 垃圾桶（各 44 触控区），固定宽 132 保证各行按钮左缘对齐；
-    // 默认那本不显示「设为默认」，用同宽空槽占位而不是省掉一格
+    // 动作列：只有一个编辑键（44 触控区），固定宽 44 保证各行按键左缘对齐
     actions: {
-      width: 132,
+      width: 88,
       flexDirection: 'row',
       alignItems: 'center',
       flexShrink: 0,
     },
     actionSlot: { width: 44, height: 44 },
-    // 改名态：行内输入 + 保存按钮（与旧交互一致：失焦 / 回车提交）
-    renameRow: {
-      minHeight: layout.rowMinHeight,
-      flexDirection: 'row',
-      alignItems: 'center',
-      columnGap: spacing.sm,
-      paddingHorizontal: layout.card,
-      paddingVertical: spacing.sm,
-    },
-    renameInput: {
-      flex: 1,
-      flexShrink: 1,
-      minHeight: 40,
-      fontSize: 15,
-      fontWeight: '600',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderWidth: 1,
-      borderRadius: 10,
-    },
   });
 }
 
@@ -1402,12 +1340,13 @@ export default function HomeScreen({ navigation }: any) {
     defaultLedgerId,
     setDefaultLedger,
     ledgers,
-    renameLedger,
+    updateLedger,
     deleteLedger,
     budgets,
     setBudget,
     assets,
     activeAssets,
+    assetBelongsToActiveLedger,
     paymentPlans,
     getAssetBalance,
     renameBudget,
@@ -1484,21 +1423,14 @@ export default function HomeScreen({ navigation }: any) {
   // 行改用 ui/ListRow（图标方块 + 名称/副标题 + 结余 + 铅笔/垃圾桶），默认账本不再显示删除键。
   const ledgerPickerOpen = activeSheet === 'ledger';
   const closeLedgerPicker = closeSheet;
-  // 账本改名：点击账本名字变成输入框（重命名中的账本 id），失焦/确认时保存
-  const [renamingLedgerId, setRenamingLedgerId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const renameInputRef = useRef<TextInput>(null);
-  const startRenameLedger = (id: string, name: string) => {
-    setRenamingLedgerId(id);
-    setRenameValue(name);
-    requestAnimationFrame(() => renameInputRef.current?.focus());
-  };
-  const commitRenameLedger = () => {
-    if (renamingLedgerId && renameValue.trim()) {
-      renameLedger(renamingLedgerId, renameValue.trim());
-    }
-    setRenamingLedgerId(null);
-  };
+  // 正在编辑的账本（null = 抽屉显示账本列表）。编辑是**同一个抽屉里换内容**，不是第二个浮层 ——
+  // 两个 BottomSheet 同时播弹簧、表单又在入场途中弹键盘，就是「点编辑到面板出来」那段卡顿的来源
+  const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
+  // 关抽屉时一并退出编辑态：下次打开账本抽屉总是先看到列表，不会停在上次的编辑表单
+  const closeLedgerSheet = useCallback(() => {
+    setEditingLedgerId(null);
+    setActiveSheet(null);
+  }, []);
   // MRU 排序：最近使用的账本排最上面（lastUsedAt 降序）；没用过的保持原数组顺序。
   // Array.prototype.sort 在现代 JS 引擎里是稳定排序，比较函数返回 0 时原顺序保留。
   const sortedLedgers = useMemo(
@@ -1530,18 +1462,20 @@ export default function HomeScreen({ navigation }: any) {
   const totalsByCurrency = useMemo(() => {
     const totals: Record<string, number> = {};
     activeAssets
-      .filter((a) => a.ledgerId === activeLedgerId)
+      // 归属判定只走 context 的 assetBelongsToActiveLedger：严格等式会把占位账本期 / 已回收账本名下的
+      // 钱包挡在首页之外，用户看到「还没有添加资产账户」= 以为添加钱包失效了
+      .filter((a) => assetBelongsToActiveLedger(a))
       .forEach((a) => {
         totals[a.currency] = (totals[a.currency] || 0) + getAssetBalanceRef.current(a.id);
       });
     return Object.entries(totals).sort(([c1], [c2]) => c1.localeCompare(c2));
-  }, [activeAssets, activeLedgerId, transactions]);
+  }, [activeAssets, assetBelongsToActiveLedger, transactions]);
 
   // 净资产卡显示的币种：多币种时点行调出货币下拉菜单；默认=资产数组第一个账户的币种（兜底全局货币）
   const defaultNetWorthCurrency = useMemo(() => {
-    const first = activeAssets.find((a) => a.ledgerId === activeLedgerId);
+    const first = activeAssets.find((a) => assetBelongsToActiveLedger(a));
     return first?.currency ?? currency;
-  }, [activeAssets, activeLedgerId, currency]);
+  }, [activeAssets, assetBelongsToActiveLedger, currency]);
   // 用户手选的币种代码（null=未手选过，跟随默认）——列表已按 ABC 排序，不能再用下标，否则默认币种会跟着排序漂移
   const [netWorthCurrency, setNetWorthCurrency] = useState<string | null>(null);
   const currencyMenuOpen = activeSheet === 'currency';
@@ -2729,19 +2663,25 @@ export default function HomeScreen({ navigation }: any) {
   shiftCalendarMonthRef.current = shiftCalendarMonth;
 
   // 每个账本各自的资产合计（按币种），给快速切换账本弹窗用——同一套逻辑，跟 LedgerScreen 的账本列表保持一致
+  // 孤儿账户（无归属 / 账本已回收）只算进「当前账本」那一行：它们没有可信归属，若每行都算一遍，
+  // 抽屉各行结余相加会虚高；只挂在当前账本下，用户至少能在正在用的那本里看到这笔钱
   const ledgerTotals = useMemo(() => {
     const map: Record<string, [string, number][]> = {};
+    // 从全部未归档账户取数：activeAssets 已按「当前账本 + 孤儿」过滤过，
+    // 拿它逐行匹配会让非当前账本那一行永远是空的
+    const live = assets.filter((a) => !a.archivedAt);
     ledgers.forEach((l) => {
       const totals: Record<string, number> = {};
-      activeAssets
-        .filter((a) => a.ledgerId === l.id)
+      live
+        // 孤儿（无归属 / 账本已回收）只算进当前账本那一行，否则各行相加会虚高
+        .filter((a) => (l.id === activeLedgerId ? assetBelongsToActiveLedger(a) : a.ledgerId === l.id))
         .forEach((a) => {
           totals[a.currency] = (totals[a.currency] || 0) + getAssetBalance(a.id);
         });
       map[l.id] = Object.entries(totals);
     });
     return map;
-  }, [ledgers, activeAssets, getAssetBalance]);
+  }, [ledgers, assets, getAssetBalance, assetBelongsToActiveLedger, activeLedgerId]);
 
   // ── 删除账本（二级密码确认）──
   // 待删除账本（点了删除并确认后进入 PIN 验证；PIN 通过才真正删除）
@@ -3451,13 +3391,33 @@ export default function HomeScreen({ navigation }: any) {
       {/* 账本抽屉（T10 / H11）：改用 ui/BottomSheet —— 拖动把手下拉 / 点遮罩 / 关闭键三条路径
           都先播出场动画再卸载，安全区与「打开期间强制收起浮空 Tab 栏」都由组件内部处理；
           行 = 本文件的 LedgerRow（图标圆 + 名称/结余/预设行 + 右动作列）；列表滚动交给抽屉内的 ScrollView。
-          改名 / 新建 / 删除（含二级密码）/ 切换 的行为与旧版一致，一行没改 */}
+          改名 / 换色 / 设为默认 / 删除都从行内编辑键进「账本编辑」面板；新建与切换账本的行为与旧版一致 */}
       <BottomSheet
         visible={ledgerPickerOpen}
-        onClose={closeLedgerPicker}
-        title={t('home.selectLedger')}
+        onClose={closeLedgerSheet}
+        title={t(editingLedgerId ? 'ledger.editTitle' : 'home.selectLedger')}
         testID="ledger-sheet"
       >
+        {/* 编辑态 = 同一个抽屉换内容（不再开第二个浮层）：一层遮罩、一次布局变化 */}
+        {editingLedgerId ? (
+          <LedgerEditPanel
+            ledger={ledgers.find((l) => l.id === editingLedgerId) ?? null}
+            onCancel={() => setEditingLedgerId(null)}
+            onSubmit={async (name, color) => {
+              const id = editingLedgerId;
+              if (!id) return;
+              await updateLedger(id, { name, color });
+              hapticSuccess();
+              setEditingLedgerId(null);
+            }}
+            onDelete={() => {
+              const target = ledgers.find((l) => l.id === editingLedgerId);
+              setEditingLedgerId(null);
+              if (target) requestDeleteLedger(target);
+            }}
+          />
+        ) : (
+        <>
         <ScrollView
           style={styles.ledgerSheetScroll}
           contentContainerStyle={styles.ledgerSheetListContent}
@@ -3471,13 +3431,7 @@ export default function HomeScreen({ navigation }: any) {
                 active={l.id === activeLedgerId}
                 isDefault={l.id === defaultLedgerId}
                 totals={ledgerTotals[l.id] ?? []}
-                renaming={renamingLedgerId === l.id}
-                renameValue={renameValue}
-                renameInputRef={renameInputRef}
-                onRenameValueChange={setRenameValue}
-                onCommitRename={commitRenameLedger}
-                onStartRename={() => startRenameLedger(l.id, l.name)}
-                onDelete={() => requestDeleteLedger(l)}
+                onEdit={() => setEditingLedgerId(l.id)}
                 onSetDefault={() => {
                   hapticLight();
                   void setDefaultLedger(l.id);
@@ -3504,6 +3458,8 @@ export default function HomeScreen({ navigation }: any) {
             testID="ledger-add"
           />
         </View>
+        </>
+        )}
       </BottomSheet>
 
       {/* 预算调整弹窗：自绘计算器键盘常驻（资产页编辑同款「我的计算机」）——

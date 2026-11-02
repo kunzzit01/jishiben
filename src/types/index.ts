@@ -141,7 +141,6 @@ export interface Asset {
   creditLimit?: number; // 额度
   statementDay?: number; // 账单日，1-28
   dueDay?: number; // 还款日，1-28（若小于等于账单日，视为下个月的这一天）
-  interestRate?: number; // 年利率(%)，逾期未还时用于估算利息
   // 默认账户：记一笔时自动带出这个账户。同一时间最多一个资产是默认（由 setDefaultAsset 保证）
   isDefault?: boolean;
   // 归档时间（ISO）：有值 = 已归档。归档账户不出现在账户列表/记账选择/净资产里，
