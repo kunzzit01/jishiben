@@ -5,14 +5,13 @@ import { useT } from '../i18n/LanguageContext';
 import { scheduleLocalNotification } from '../utils/notifications';
 import { formatMoney } from '../utils/formatMoney';
 import { buildBudgetAlerts, currentBudgetMonthKey, type BudgetAlert } from './budget';
-import { loadFiredBudgetKeys, markBudgetAlertFired } from './budgetFired';
+import { loadBudgetMarks, markBudgetAlert } from './budgetFired';
 
 /**
- * 预算超支提醒（事件型）。
+ * 预算超支提醒（事件型）：当月花到 80%/100% 的那一刻才成立，没有"未来时刻"可排，
+ * 所以不进排期映射，而是数据一变就算一遍，把本月还没弹过的弹掉（now + 3s 的本地通知）。
  *
- * 与排期型提醒的区别：它没有"未来某个时刻"，而是"当月花到 80%/100% 的那一刻"才成立，
- * 所以不预先排期、也不进排期映射，而是每次数据变化时算一遍，把当月还没提醒过的弹掉。
- * 弹的是立刻触发的本地通知（now + 3s）：本地通知只支持定时触发，没有立即展示的入口。
+ * 两类记录分开存（见 budgetFired.ts）：已通知只影响"还弹不弹"，已删除才影响"还显示不显示"。
  */
 export interface BudgetAlertsState {
   alerts: BudgetAlert[];
@@ -23,7 +22,7 @@ export function useBudgetAlerts(): BudgetAlertsState {
   const { budgets, transactions, assets, categories, currency, decimalPlaces } = useApp();
   const { user } = useAuth();
   const t = useT();
-  const [fired, setFired] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   const allAlerts = useMemo(
     () =>
@@ -37,11 +36,15 @@ export function useBudgetAlerts(): BudgetAlertsState {
 
   useEffect(() => {
     let alive = true;
-    void loadFiredBudgetKeys(monthPrefix).then(async (loaded) => {
+    void (async () => {
+      const [notified, dismissedKeys] = await Promise.all([
+        loadBudgetMarks(monthPrefix, 'n'),
+        loadBudgetMarks(monthPrefix, 'd'),
+      ]);
       if (!alive) return;
-      setFired(loaded);
-      const fresh = allAlerts.filter((alert) => !loaded.has(alert.key));
-      if (!fresh.length) return;
+      setDismissed(dismissedKeys);
+
+      const fresh = allAlerts.filter((alert) => !notified.has(alert.key));
       for (const alert of fresh) {
         const name = alert.label === 'total' ? t('reminder.budgetTotal') : alert.label;
         const title =
@@ -53,22 +56,23 @@ export function useBudgetAlerts(): BudgetAlertsState {
           limit: formatMoney(alert.limit, { decimals: decimalPlaces }),
         });
         await scheduleLocalNotification(title, body, new Date(Date.now() + 3000));
-        await markBudgetAlertFired(alert.key);
-        loaded = new Set([...loaded, alert.key]);
+        await markBudgetAlert(alert.key, 'n');
       }
-      if (alive) setFired(new Set(loaded));
-    });
+    })();
     return () => {
       alive = false;
     };
   }, [allAlerts, monthPrefix, t, decimalPlaces]);
 
-  const dismiss = useCallback(async (key: string) => {
-    await markBudgetAlertFired(key);
-    setFired((prev) => new Set(prev).add(key));
-  }, []);
+  const dismiss = useCallback(
+    async (key: string) => {
+      await markBudgetAlert(key, 'd');
+      setDismissed((prev) => new Set(prev).add(key));
+    },
+    []
+  );
 
-  const alerts = useMemo(() => allAlerts.filter((alert) => !fired.has(alert.key)), [allAlerts, fired]);
+  const alerts = useMemo(() => allAlerts.filter((alert) => !dismissed.has(alert.key)), [allAlerts, dismissed]);
 
   return { alerts, dismiss };
 }

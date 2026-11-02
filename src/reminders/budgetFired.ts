@@ -1,11 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * 预算提醒的"这个月已经提醒过"记录。
- * 预算提醒是事件型的（达到 80%/100% 才发），没有排期可对账，所以用一份月度集合去重：
- * 一个月内同一个（预算, 币种, 阈值）只弹一次，换月自动失效。
+ * 预算提醒的两类月度记录（同一个月内去重，换月自动失效）：
+ * - 'n'（notified）：这个月已经弹过通知，避免每次数据变化都再弹一遍；
+ * - 'd'（dismissed）：用户主动删掉的那条，不再显示在提醒中心。
+ * 两者必须分开：共用一个集合的话，刚弹出的提醒会立刻被"已处理"过滤掉，列表永远是空的（踩过）。
  */
 const STORAGE_KEY = '@jizhang/budgetAlerts.v1';
+
+export type BudgetMarkKind = 'n' | 'd';
 
 async function readAll(): Promise<string[]> {
   try {
@@ -28,16 +31,22 @@ async function writeAll(keys: string[]): Promise<void> {
   }
 }
 
-/** 当前月份仍有效的已提醒键（顺手丢掉别的月份的） */
-export async function loadFiredBudgetKeys(monthPrefix: string): Promise<Set<string>> {
-  const all = await readAll();
-  const alive = all.filter((key) => key.split('|')[1] === monthPrefix);
-  if (alive.length !== all.length) await writeAll(alive);
-  return new Set(alive);
+function markOf(key: string, kind: BudgetMarkKind): string {
+  return `${kind}|${key}`;
 }
 
-export async function markBudgetAlertFired(key: string): Promise<void> {
+/** 当前月份仍有效的一类记录（顺手丢掉别的月份的） */
+export async function loadBudgetMarks(monthPrefix: string, kind: BudgetMarkKind): Promise<Set<string>> {
   const all = await readAll();
-  if (all.includes(key)) return;
-  await writeAll([...all, key]);
+  const alive = all.filter((entry) => entry.includes(`|${monthPrefix}|`));
+  if (alive.length !== all.length) await writeAll(alive);
+  const prefix = `${kind}|`;
+  return new Set(alive.filter((entry) => entry.startsWith(prefix)).map((entry) => entry.slice(prefix.length)));
+}
+
+export async function markBudgetAlert(key: string, kind: BudgetMarkKind): Promise<void> {
+  const all = await readAll();
+  const entry = markOf(key, kind);
+  if (all.includes(entry)) return;
+  await writeAll([...all, entry]);
 }
