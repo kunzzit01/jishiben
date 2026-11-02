@@ -77,6 +77,8 @@ export type HomeStackParamList = {
   开设账本: undefined;
   关于应用: undefined;
   帮助与反馈: undefined;
+  // 提醒中心：把「未来 3 个月会提醒什么」从系统通知栏搬进 App 可看
+  提醒中心: undefined;
   计算器: undefined;
   贷款计算器: undefined;
   复利计算器: undefined;

@@ -471,6 +471,22 @@ export const en = {
     example2: '“Received 5000 salary yesterday”',
     example3: '“Bought clothes for 199 on Aug 30”',
   },
+  // Reminder center (credit-card reminders): computed by the same pure function the
+  // notification hook uses, so this page only shows what would really be scheduled
+  reminder: {
+    title: 'Reminders',
+    sectionTitle: 'Next 3 months',
+    sectionFooter: 'Sent as system notifications at 09:00 on the day. Turn off a card’s payment reminder and its entries disappear immediately.',
+    kindStatement: 'Statement date',
+    kindPayday: '%{days} day(s) before due',
+    rowSubtitle: '%{date} %{time} · %{name}',
+    emptyTitle: 'No card has reminders turned on',
+    emptyDesc: 'Turn on “Payment reminder” under Assets → Credit card → Account settings to list upcoming reminders here.',
+    // Reminders are scheduled per account (the hook needs a userId), so a local-only
+    // session never has any — do not point users at a switch that can do nothing
+    signInTitle: 'Sign in to schedule reminders',
+    signInDesc: 'Reminders are scheduled per account. This device is in local-only mode, so nothing gets scheduled.',
+  },
   home: {
     netWorth: 'Net Worth',
     /** Hero slogan shown over the photo backdrop */

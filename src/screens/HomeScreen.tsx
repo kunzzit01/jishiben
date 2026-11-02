@@ -3032,9 +3032,7 @@ export default function HomeScreen({ navigation }: any) {
             <RoundIconButton
               kind="bell"
               tone="glass"
-              onPress={() =>
-                dialog.alert({ title: t('home.notificationTitle'), message: t('home.notificationMsg') })
-              }
+              onPress={() => navigation.navigate('提醒中心')}
               badge={unreadCount > 0}
               accessibilityLabel={t('home.notificationTitle')}
               testID="home-notification"

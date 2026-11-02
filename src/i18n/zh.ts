@@ -475,6 +475,20 @@ export const zh = {
     example2: '“昨天收到工资 5000”',
     example3: '“8月30号买衣服花了 199 块”',
   },
+  // 提醒中心（信用卡提醒的可视化）：排期由 useCreditCardReminders 里的纯函数现算，这里只负责展示
+  reminder: {
+    title: '提醒中心',
+    sectionTitle: '未来 3 个月',
+    sectionFooter: '提醒由系统通知在当天 09:00 发出；关掉某张卡的「还款提醒」，这里对应条目会立即消失。',
+    kindStatement: '账单日当天',
+    kindPayday: '还款日前 %{days} 天',
+    rowSubtitle: '%{date} %{time} · %{name}',
+    emptyTitle: '还没有开启提醒的信用卡',
+    emptyDesc: '在「资产 → 信用卡 → 账户设置」里打开「还款提醒」，这里会列出将来会发出的提醒。',
+    // 未登录时排期本身不会发生（hook 需要 userId），别让空态把人指去开开关
+    signInTitle: '登录后才会排提醒',
+    signInDesc: '提醒排期按账号计算；当前是本机模式（未登录），所以不会有提醒。',
+  },
   home: {
     netWorth: '净资产',
     /** 首页顶部标语（照片背景上那一句） */

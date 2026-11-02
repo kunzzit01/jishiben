@@ -89,6 +89,7 @@ import CalculatorHubScreen from './src/screens/CalculatorHubScreen';
 import LoanCalculatorScreen from './src/screens/LoanCalculatorScreen';
 import CompoundInterestScreen from './src/screens/CompoundInterestScreen';
 import OverviewScreen from './src/screens/OverviewScreen';
+import ReminderCenterScreen from './src/screens/ReminderCenterScreen';
 
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -122,6 +123,7 @@ function HomeStack() {
           HomeStack 自己的栈，系统返回箭头 goBack() 天然回首页；从设置项进来同理天然回设置 */}
       <HomeStackNav.Screen name="开设账本" component={LedgerScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="关于应用" component={AboutAppScreen} options={{ headerShown: false }} />
+      <HomeStackNav.Screen name="提醒中心" component={ReminderCenterScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
       <HomeStackNav.Screen name="帮助与反馈" component={HelpFeedbackScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="计算器" component={CalculatorHubScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="贷款计算器" component={LoanCalculatorScreen} options={{ headerShown: false }} />
