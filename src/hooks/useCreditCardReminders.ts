@@ -1,4 +1,4 @@
-// 信用卡还款提醒 hook：给"还款日前 3 / 2 / 1 天"排本地通知（本地 09:00）。
+// 信用卡还款提醒 hook：给"还款日前 3 / 2 / 1 天"和"账单日当天"排本地通知（本地 09:00）。
 //
 // 为什么预排 3 个月：本地通知只在 App 挂载或账户数据变化时才能排期，而用户可能连着几周
 // 不打开 App。一次把未来 3 个月交给系统，长时间不开也不会漏提醒；窗口再长只会在系统里
@@ -10,8 +10,9 @@
 //
 // 为什么按 key 去重：同一份数据会被反复调度（App 每次挂载、assets 每次变化、切账号），
 // 没有 key 就会重复排期——用户同一天收到好几条提醒，而且旧的那几条再也无法取消。
-// key = userId|assetId|目标还款日|提前天数 唯一标识一个节点：已存在就复用它的通知 id，
-// 每轮只在"应存在集合"和"已排集合"之间做增删，重复跑是幂等的。
+// 还款日节点 key = userId|assetId|目标还款日|提前天数，账单日节点 key = userId|assetId|statement|目标账单日：
+// 两种形式不同，所以 statementDay === dueDay 时也只是目标日相同、不会互相覆盖。已存在就复用它的
+// 通知 id，每轮只在"应存在集合"和"已排集合"之间做增删，重复跑是幂等的。
 import { useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from '../types';
@@ -51,9 +52,17 @@ function lastDayOfMonth(year: number, monthIndex: number): number {
   return monthIndex === 1 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[monthIndex];
 }
 
-/** 当月真实存在的还款日：该月没有 dueDay 这一天（如 2 月 30 日）就取该月最后一天 */
-function targetPaydayOfMonth(year: number, monthIndex: number, dueDay: number): CalendarDay {
-  return { year, monthIndex, day: Math.min(dueDay, lastDayOfMonth(year, monthIndex)) };
+/**
+ * 当月真实存在的「每月某日」：该月没有 day 这一天（如 2 月 30 日）就取该月最后一天。
+ * 还款日和账单日共用——两者都必须裁剪，不能拿 new Date(y, m, 30) 直接构造。
+ */
+function targetDayOfMonth(year: number, monthIndex: number, day: number): CalendarDay {
+  return { year, monthIndex, day: Math.min(day, lastDayOfMonth(year, monthIndex)) };
+}
+
+/** 合法的「每月某日」：1-30（账单日与还款日同一口径） */
+function isValidMonthDay(day: number | undefined): day is number {
+  return typeof day === 'number' && day >= 1 && day <= 30;
 }
 
 /**
@@ -89,20 +98,30 @@ function isCreditCardReminderTarget(asset: Asset): boolean {
     asset.type === 'credit' &&
     asset.reminderEnabled === true &&
     !asset.archivedAt &&
-    typeof asset.dueDay === 'number' &&
-    asset.dueDay >= 1 &&
-    asset.dueDay <= 30
+    isValidMonthDay(asset.dueDay)
   );
 }
 
-export interface CreditCardReminderNode {
-  /** 去重键：userId|assetId|目标还款日 YYYYMMDD|提前天数 */
+interface CreditCardReminderNodeBase {
+  /** 去重键：还款日节点 userId|assetId|目标还款日 YYYYMMDD|提前天数；账单日节点 userId|assetId|statement|目标账单日 YYYYMMDD */
   key: string;
   assetName: string;
-  leadDays: number;
   /** 触发时刻（当地 09:00） */
   at: Date;
 }
+
+/** 还款日前 3 / 2 / 1 天 */
+export interface PaydayReminderNode extends CreditCardReminderNodeBase {
+  kind: 'payday';
+  leadDays: number;
+}
+
+/** 账单日当天 */
+export interface StatementReminderNode extends CreditCardReminderNodeBase {
+  kind: 'statement';
+}
+
+export type CreditCardReminderNode = PaydayReminderNode | StatementReminderNode;
 
 /**
  * 算出"应存在的节点集合"：未来 3 个月 × 3 个提前量。
@@ -115,13 +134,31 @@ export function buildCreditCardReminderNodes(userId: string, assets: Asset[], no
   for (const asset of assets) {
     if (!isCreditCardReminderTarget(asset)) continue;
     const dueDay = asset.dueDay as number;
+    // 账单日是可选字段：老数据没有它，那就只排还款日节点
+    const statementDay = isValidMonthDay(asset.statementDay) ? asset.statementDay : null;
 
     for (let offset = 0; offset < WINDOW_MONTHS; offset += 1) {
       // 年月偏移自己算（baseMonth 0-11 + offset 0-2，最多跨一个年）
       const shifted = baseMonth + offset;
       const year = now.getFullYear() + Math.floor(shifted / 12);
       const monthIndex = shifted % 12;
-      const payday = targetPaydayOfMonth(year, monthIndex, dueDay);
+
+      // 账单日当天：和还款日一样先做月末裁剪；键里固定带 statement 段，
+      // 与还款日节点形式不同，statementDay === dueDay 时也不会互相覆盖
+      if (statementDay !== null) {
+        const statement = targetDayOfMonth(year, monthIndex, statementDay);
+        const at = new Date(statement.year, statement.monthIndex, statement.day, REMINDER_HOUR, 0, 0, 0);
+        if (at.getTime() > now.getTime()) {
+          nodes.push({
+            key: `${userId}|${asset.id}|statement|${dayStamp(statement)}`,
+            assetName: asset.name,
+            kind: 'statement',
+            at,
+          });
+        }
+      }
+
+      const payday = targetDayOfMonth(year, monthIndex, dueDay);
       const paydayStamp = dayStamp(payday);
 
       for (const leadDays of LEAD_DAYS) {
@@ -131,6 +168,7 @@ export function buildCreditCardReminderNodes(userId: string, assets: Asset[], no
         nodes.push({
           key: `${userId}|${asset.id}|${paydayStamp}|${leadDays}`,
           assetName: asset.name,
+          kind: 'payday',
           leadDays,
           at,
         });
@@ -169,10 +207,20 @@ async function saveReminderMap(map: ReminderMap): Promise<void> {
   }
 }
 
-function reminderTitle(t: TranslateFunction, leadDays: number, assetName: string): string {
+/**
+ * 通知文案。还款日节点带提前天数、body 附「如已还款请忽略」；
+ * 账单日节点只提醒核对本期账单，那句免责话不属于它。
+ */
+function reminderMessage(
+  t: TranslateFunction,
+  node: CreditCardReminderNode
+): { title: string; body: string } {
+  if (node.kind === 'statement') {
+    return { title: t('asset.reminderOnStatement', { name: node.assetName }), body: '' };
+  }
   const key =
-    leadDays === 3 ? 'asset.reminderOn3' : leadDays === 2 ? 'asset.reminderOn2' : 'asset.reminderOn1';
-  return t(key, { name: assetName });
+    node.leadDays === 3 ? 'asset.reminderOn3' : node.leadDays === 2 ? 'asset.reminderOn2' : 'asset.reminderOn1';
+  return { title: t(key, { name: node.assetName }), body: t('asset.reminderHint') };
 }
 
 async function doReconcile(params: ReconcileParams): Promise<void> {
@@ -195,7 +243,8 @@ async function doReconcile(params: ReconcileParams): Promise<void> {
   // 2) 缺失的节点：补排并记下 id（调度失败返回 null，不记记录，下一轮还会再试）
   for (const node of nodes) {
     if (next[node.key]) continue;
-    const id = await scheduleLocalNotification(reminderTitle(t, node.leadDays, node.assetName), t('asset.reminderHint'), node.at);
+    const { title, body } = reminderMessage(t, node);
+    const id = await scheduleLocalNotification(title, body, node.at);
     if (id) next[node.key] = id;
   }
 
@@ -257,7 +306,8 @@ export function useCreditCardReminders(userId: string | null): void {
       `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`,
       ...assets
         .filter(isCreditCardReminderTarget)
-        .map((asset) => `${asset.id}:${asset.name}:${asset.dueDay}`)
+        // statementDay 也要进指纹：只改账单日时 assets 数组会换新引用，指纹不变就会漏重排
+        .map((asset) => `${asset.id}:${asset.name}:${asset.dueDay}:${asset.statementDay}`)
         .sort(),
     ].join('|');
     if (lastFingerprintRef.current === fingerprint) return;

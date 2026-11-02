@@ -623,6 +623,8 @@ export const zh = {
     reminderOn3: '%{name} 还有 3 天到设定还款日，请核对账单并安排还款。',
     reminderOn2: '%{name} 还有 2 天到设定还款日，请记得处理还款。',
     reminderOn1: '明天是 %{name} 的设定还款日，请确认是否已完成还款。',
+    // 账单日当天：只提醒核对本期账单，不附「如已还款请忽略」（那句只属于还款日提醒）
+    reminderOnStatement: '%{name} 今天是账单日，请核对本期账单。',
     reminderHint: '如已还款，请忽略本次提醒',
     emptyTitle: '还没有账户',
     emptyHint: '添加账户后，余额与账单都会显示在这里',
