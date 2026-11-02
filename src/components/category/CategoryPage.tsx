@@ -1025,6 +1025,22 @@ export default function CategoryPage({
     return cbs;
   }, []);
 
+  /* 性能数据落盘（2026-10-30）：页面顶部那行白字默认不画（showPerf 两个入口都不传），
+   * 导致真机数据一直拿不到。改成把「首帧 / 满载 / 渲染次数 / 帧间隔」写进 AsyncStorage，
+   * 由「设置 → 关于应用」读出来显示 —— 用户随时能截图给我，不用盯着页面顶部。 */
+  useEffect(() => {
+    if (!perf?.first) return;
+    const payload = {
+      at: Date.now(),
+      first: perf.first,
+      full: perf.full,
+      renders: perf.renders,
+      frameAvg: frameStats?.avg ?? null,
+      frameMax: frameStats?.max ?? null,
+    };
+    AsyncStorage.setItem('@jizhang/lastCategoryPerf', JSON.stringify(payload)).catch(() => {});
+  }, [perf, frameStats]);
+
   // PERF 调试白字只在 showPerf 打开时画（两个入口都不传）；采样与状态照旧，不删
   const perfText = showPerf && perf
     ? 'PERF 首帧 ' +

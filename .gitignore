@@ -12,6 +12,10 @@ web-build/
 android/
 ios/
 
+# ─── 设计画布 / 本地工具产物（不进版本库）───
+.superdesign/
+.tools/
+
 # ─── 日志 ───
 *.log
 npm-debug.log*

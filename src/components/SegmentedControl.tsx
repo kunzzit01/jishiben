@@ -164,15 +164,20 @@ export default function SegmentedControl({
             accessibilityLabel={opt.label}
             accessibilityState={{ selected: isActive }}
           >
-            {/* 分段压在滑块上（透明底），缩放反馈看不见 → 沿用按下降透明度的反馈 */}
-            <AppText
-              variant="footnote"
-              weight={isActive ? '600' : '400'}
-              color={isActive ? activeTextColor : idleTextColor}
-              numberOfLines={1}
-            >
-              {opt.label}
-            </AppText>
+            {/* 分段压在滑块上（透明底），缩放反馈看不见 → 沿用按下降透明度的反馈。
+                ⚠ 文字层必须 pointerEvents="none"：某些叠层/合成场景下命中会落在文字上而没到
+                TouchableOpacity，表现为「点字没反应、点字外围才行」（用户 2026-10-30 反馈）。
+                加 wrapper View 是因为 RNW 的 AppText 不保证把该 prop 透传到 DOM。 */}
+            <View pointerEvents="none">
+              <AppText
+                variant="footnote"
+                weight={isActive ? '600' : '400'}
+                color={isActive ? activeTextColor : idleTextColor}
+                numberOfLines={1}
+              >
+                {opt.label}
+              </AppText>
+            </View>
           </TouchableOpacity>
         );
       })}

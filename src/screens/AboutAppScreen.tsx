@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
@@ -44,6 +45,31 @@ export default function AboutAppScreen({ navigation }: any) {
    * 检查 → 有新版就下载（下载完成写进缓存）→ 重启生效。
    * Web / 未配置 OTA 的构建里 isEnabled 为 false，直接给出"当前构建不支持"，
    * 绝不假装在检查。                                               */
+  /* 类别页性能数据（CategoryPage 每次打开都会写 @jizhang/lastCategoryPerf）：
+   * 让用户随时能在关于页看到真机数字并截图，不用盯着那个默认不显示的调试白字。 */
+  const [catPerf, setCatPerf] = useState<{
+    first: number;
+    full: number | null;
+    renders: number;
+    frameAvg: number | null;
+    frameMax: number | null;
+  } | null>(null);
+  useEffect(() => {
+    AsyncStorage.getItem('@jizhang/lastCategoryPerf')
+      .then((raw) => {
+        if (!raw) return;
+        const p = JSON.parse(raw);
+        setCatPerf({
+          first: p.first ?? 0,
+          full: p.full ?? null,
+          renders: p.renders ?? 0,
+          frameAvg: p.frameAvg ?? null,
+          frameMax: p.frameMax ?? null,
+        });
+      })
+      .catch(() => {});
+  }, []);
+
   const [phase, setPhase] = useState<UpdatePhase>('idle');
   const busyRef = useRef(false);
 
@@ -162,6 +188,32 @@ export default function AboutAppScreen({ navigation }: any) {
           <Row
             label={t('addTx.updateChannelRow')}
             value={Updates.channel ?? '-'}
+            muted={semantic.textSecondary}
+          />
+          {/* 真机性能诊断（用户截图用）：数值来自最近一次打开「类别管理」页 */}
+          <Row
+            label={t('addTx.categoryPerfRow')}
+            value={
+              catPerf
+                ? '首帧 ' +
+                  catPerf.first +
+                  'ms · 满载 ' +
+                  (catPerf.full == null ? '…' : catPerf.full + 'ms') +
+                  ' · 渲染 ' +
+                  catPerf.renders +
+                  ' 次'
+                : t('addTx.categoryPerfNone')
+            }
+            muted={semantic.textSecondary}
+            wrap
+          />
+          <Row
+            label={t('addTx.categoryFrameRow')}
+            value={
+              catPerf && catPerf.frameAvg != null
+                ? '均 ' + catPerf.frameAvg + 'ms / 最差 ' + (catPerf.frameMax ?? 0) + 'ms'
+                : t('addTx.categoryPerfNone')
+            }
             muted={semantic.textSecondary}
           />
         </GlassView>

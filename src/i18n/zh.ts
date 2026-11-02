@@ -320,6 +320,10 @@ export const zh = {
     updateBundleRow: '更新包',
     updateBuiltin: '内置版本',
     updateChannelRow: '更新渠道',
+    // 真机性能诊断（关于页）：「类别管理」页最近一次打开的首帧 / 帧间隔
+    categoryPerfRow: '类别页耗时',
+    categoryFrameRow: '类别页帧间隔',
+    categoryPerfNone: '未记录（先进一次类别页）',
     enterFeedback: '请输入反馈内容',
     submitOk: '提交成功',
     submitThanks: '感谢你的反馈',
