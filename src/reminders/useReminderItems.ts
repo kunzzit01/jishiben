@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { loadMutedKeys } from '../utils/reminderMute';
-import { DEFAULT_REMINDER_PREFS, loadReminderPrefs, saveReminderPrefs, type ReminderPrefs } from '../utils/reminderPrefs';
+import {
+  getReminderPrefsSnapshot,
+  hydrateReminderPrefs,
+  setReminderPrefs,
+  subscribeReminderPrefs,
+  type ReminderPrefs,
+} from '../utils/reminderPrefs';
 import { buildReminderItems } from './build';
 import type { ReminderItem } from './types';
 
 export interface ReminderItemsState {
   /** 已排除用户删掉的条目，按时间升序 */
   items: ReminderItem[];
-  /** 全部条目（不排除删掉的），用来判断"是否还有被删的可以恢复" */
+  /** 全部条目（不排除删掉的），用于"恢复已删除"和排期对账 */
   allItems: ReminderItem[];
   prefs: ReminderPrefs;
   setPrefs: (next: ReminderPrefs) => Promise<void>;
@@ -20,22 +26,22 @@ export interface ReminderItemsState {
 
 /**
  * 提醒条目的唯一来源：页面显示与通知排期都从这里取，避免两处各算一遍算出不同结果。
- * 未登录时不产任何条目——排期键带 userId，没账号就没有"谁该被提醒"。
+ * prefs 走模块级 store（不是本地 state）：页面里改开关，App 层的排期 hook 必须立刻看到。
  */
 export function useReminderItems(): ReminderItemsState {
   const { assets, paymentPlans, loading: appLoading } = useApp();
   const { user } = useAuth();
-  const [prefs, setPrefsState] = useState<ReminderPrefs>(DEFAULT_REMINDER_PREFS);
+  const prefs = useSyncExternalStore(subscribeReminderPrefs, getReminderPrefsSnapshot, getReminderPrefsSnapshot);
   const [muted, setMuted] = useState<Set<string>>(new Set());
-  const [prefsLoading, setPrefsLoading] = useState(true);
+  const [mutedReady, setMutedReady] = useState(false);
 
   useEffect(() => {
+    void hydrateReminderPrefs();
     let alive = true;
-    void Promise.all([loadReminderPrefs(), loadMutedKeys()]).then(([loadedPrefs, loadedMuted]) => {
+    void loadMutedKeys().then((keys) => {
       if (!alive) return;
-      setPrefsState(loadedPrefs);
-      setMuted(loadedMuted);
-      setPrefsLoading(false);
+      setMuted(keys);
+      setMutedReady(true);
     });
     return () => {
       alive = false;
@@ -47,21 +53,22 @@ export function useReminderItems(): ReminderItemsState {
   const allItems = useMemo(
     () =>
       userId
-        ? buildReminderItems({ userId, assets, paymentPlans, daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour }, now: new Date() })
+        ? buildReminderItems({
+            userId,
+            assets,
+            paymentPlans,
+            daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour },
+            now: new Date(),
+          })
         : [],
     [userId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour]
   );
 
   const items = useMemo(() => allItems.filter((item) => !muted.has(item.key)), [allItems, muted]);
 
-  const setPrefs = useCallback(async (next: ReminderPrefs) => {
-    setPrefsState(next);
-    await saveReminderPrefs(next);
-  }, []);
-
   const reloadMuted = useCallback(async () => {
     setMuted(await loadMutedKeys());
   }, []);
 
-  return { items, allItems, prefs, setPrefs, muted, reloadMuted, loading: appLoading || prefsLoading };
+  return { items, allItems, prefs, setPrefs: setReminderPrefs, muted, reloadMuted, loading: appLoading || !mutedReady };
 }

@@ -76,7 +76,10 @@ export interface ReconcileInput {
 
 async function doReconcile({ items, t, decimals }: ReconcileInput): Promise<void> {
   await migrateLegacyOnce();
-  const desired = new Set(items.map((item) => item.key));
+  // 已删除集合每次都从磁盘现读，不信调用方传进来的 UI 状态：
+  // 页面里刚删掉一条时，App 层那个 hook 的内存快照还是旧的，照旧算会把这条重新排回去
+  const muted = await loadMutedKeys();
+  const desired = new Set(items.filter((item) => !muted.has(item.key)).map((item) => item.key));
   const stored = await loadMap(STORAGE_KEY);
 
   // 1) 已经不该存在的：账户删了 / 关开关 / 节点过去 → 撤销并丢记录
@@ -91,6 +94,7 @@ async function doReconcile({ items, t, decimals }: ReconcileInput): Promise<void
 
   // 2) 还没有的：补排（失败返回 null 就不记，下一轮再试）
   for (const item of items) {
+    if (!desired.has(item.key)) continue;
     if (next[item.key]) continue;
     const { title, body } = renderText(t, item, decimals);
     const id = await scheduleLocalNotification(title, body, item.at);
@@ -135,19 +139,21 @@ export async function cancelRemindersForUser(userId: string | null): Promise<voi
 
 /** 挂载点：条目集合或语言/小数位变化时对账一次 */
 export function useReminders(): void {
-  const { items, loading } = useReminderItems();
+  // 用 allItems（未过滤删除项）：过滤交给 reconcile 现读磁盘的 muted 集合，
+  // 这样即使 UI 侧的快照过期，也不会把用户删掉的提醒排回来
+  const { allItems, prefs, loading } = useReminderItems();
   const { decimalPlaces } = useApp();
   const t = useT();
   const lastRef = useRef('');
 
   useEffect(() => {
     if (loading) return;
-    // 指纹 = 全部键 + 文案语言 + 小数位；仅时间流逝（条目没变）时不重复读写映射
-    const fingerprint = `${items.map((i) => i.key).join(',')}|${decimalPlaces}`;
+    // 指纹 = 全部键 + 小数位；仅时间流逝（条目没变）时不重复读写映射
+    const fingerprint = `${allItems.map((i) => i.key).join(',')}|${decimalPlaces}`;
     if (lastRef.current === fingerprint) return;
     lastRef.current = fingerprint;
-    void reconcileReminders({ items, t, decimals: decimalPlaces });
-  }, [items, loading, t, decimalPlaces]);
+    void reconcileReminders({ items: allItems, t, decimals: decimalPlaces });
+  }, [allItems, loading, t, decimalPlaces, prefs.dailyEnabled, prefs.dailyHour]);
 }
 
 export { loadMutedKeys };
