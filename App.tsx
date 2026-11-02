@@ -36,6 +36,7 @@ import { LanguageProvider, useT } from './src/i18n/LanguageContext';
 import ComponentGallery from './src/screens/_preview/ComponentGallery';
 import { useNotificationSetup } from './src/hooks/useNotificationSetup';
 import { useReminders } from './src/hooks/useReminders';
+import { useBudgetAlerts } from './src/reminders/useBudgetAlerts';
 import { useBottomSystemInset } from './src/hooks/useBottomSystemInset';
 import { AndroidNavBarAppearance } from './src/hooks/useAndroidNavBarAppearance';
 import {
@@ -322,6 +323,8 @@ function DeferredServices() {
   // 统一提醒：信用卡还款/账单日 + 计划付款 + 每日记账 + 月末总结，一个映射对账；
   // 登出时由 AuthContext 调 cancelRemindersForUser 清理
   useReminders();
+  // 预算超支：事件型提醒，数据变化时检查阈值并弹一次（当月去重）
+  useBudgetAlerts();
   useEffect(() => {
     devMark('deferred services started');
   }, []);

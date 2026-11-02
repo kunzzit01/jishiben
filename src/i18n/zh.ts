@@ -505,6 +505,12 @@ export const zh = {
     monthEndTitle: '这个月要结束啦',
     monthEndBody: '看一眼本月收支，心里有个数～',
     // 来源标签（行副标题里用）
+    // 预算超支（事件型，达到 80%/100% 才提醒）
+    budgetTotal: '总预算',
+    budgetNearTitle: '%{name} 预算用到 %{percent}% 了，留意一下～',
+    budgetOverTitle: '%{name} 预算已经超了（%{percent}%）～',
+    budgetBody: '已花 %{spent}，预算 %{limit}',
+    budgetSectionTitle: '预算提醒',
     sourceCredit: '信用卡',
     sourcePlan: '计划付款',
     sourceDaily: '每日记账',

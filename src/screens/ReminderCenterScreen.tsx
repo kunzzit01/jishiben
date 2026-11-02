@@ -14,6 +14,8 @@ import { cancelReminderItem, reconcileReminders } from '../hooks/useReminders';
 import { muteReminderKey, unmuteAllReminders } from '../utils/reminderMute';
 import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHeader, Switch } from '../components/ui';
 import { formatDate } from '../utils/formatDate';
+import { formatMoney } from '../utils/formatMoney';
+import { useBudgetAlerts } from '../reminders/useBudgetAlerts';
 
 /**
  * 统一提醒中心：信用卡（还款日 + 账单日）、计划付款、每日记账、月末总结。
@@ -33,6 +35,8 @@ export default function ReminderCenterScreen({ navigation }: any) {
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
   const { items, allItems, prefs, setPrefs, muted, reloadMuted, loading } = useReminderItems();
+  // 预算超支是事件型提醒：不预先排期，达到阈值的那一刻才弹，所以单独取
+  const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
   const [expanded, setExpanded] = useState(false);
 
   const next = items[0];
@@ -192,6 +196,43 @@ export default function ReminderCenterScreen({ navigation }: any) {
               </ListSection>
             ) : null}
           </>
+        ) : null}
+
+        {/* 预算超支：本月已经触发的阈值，删掉 = 这个月不再为它提醒 */}
+        {budgetAlerts.length > 0 ? (
+          <ListSection title={t('reminder.budgetSectionTitle')} testID="reminder-budget-section">
+            {budgetAlerts.map((alert) => {
+              const name = alert.label === 'total' ? t('reminder.budgetTotal') : alert.label;
+              return (
+                <ListRow
+                  key={alert.key}
+                  icon={alert.level === 'over' ? 'alert-circle-outline' : 'warning-outline'}
+                  iconColor={alert.level === 'over' ? semantic.danger : semantic.textSecondary}
+                  title={
+                    alert.level === 'over'
+                      ? t('reminder.budgetOverTitle', { name, percent: alert.percent })
+                      : t('reminder.budgetNearTitle', { name, percent: alert.percent })
+                  }
+                  subtitle={t('reminder.budgetBody', {
+                    spent: formatMoney(alert.spent, { decimals: decimalPlaces }),
+                    limit: formatMoney(alert.limit, { decimals: decimalPlaces }),
+                  })}
+                  trailing={
+                    <Pressable
+                      onPress={() => void dismissBudgetAlert(alert.key)}
+                      hitSlop={12}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('reminder.deleteRow')}
+                      testID={`reminder-budget-dismiss-${alert.key}`}
+                      style={styles.deleteButton}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={semantic.textTertiary} />
+                    </Pressable>
+                  }
+                />
+              );
+            })}
+          </ListSection>
         ) : null}
 
         {/* 每日记账：开关就放在中心里，不必再翻设置 */}
