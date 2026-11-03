@@ -69,6 +69,54 @@ type SheetKind = 'type' | 'currency' | null;
 /** 抽屉内列表占屏高的上限：抽屉本身最高 85% 屏，扣掉标题行与底部留白后给列表 0.7 屏 */
 const SHEET_LIST_MAX_RATIO = 0.7;
 
+// ---------- 金额显示格式：已落库值与编辑中的算式共用同一套 ----------
+// formatMoney 是全 App 唯一金额格式化入口（千分位 + 2 位小数）；算式串（getExpressionDisplay）
+// 只有数字与小数点、没有分隔符，编辑时在这里补上——否则同一张卡上会出现「一格带千分位、
+// 一格不带」。光标坐标系仍以算式串为准（pressKeyAt 吃的就是这个），渲染前再换算到带分隔符的串。
+
+/** 只给每项的整数区加千分位：'10000.00' → '10,000.00'；小数位与运算符原样保留 */
+function groupAmountDisplay(display: string): string {
+  const isDigit = (ch: string) => ch >= '0' && ch <= '9';
+  let out = '';
+  let i = 0;
+  while (i < display.length) {
+    if (!isDigit(display[i])) {
+      out += display[i];
+      i += 1;
+      continue;
+    }
+    let end = i;
+    while (end < display.length && isDigit(display[end])) end += 1;
+    const run = display.slice(i, end);
+    // 紧跟小数点的数字串才是整数区；小数位不分组
+    out += display[end] === '.' ? run.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : run;
+    i = end;
+  }
+  return out;
+}
+
+/** 算式光标（距尾部偏移）→ 带千分位显示串光标：分隔符是插入的字符，偏移跟着加几个 */
+function exprCursorToShown(plain: string, shown: string, cursorFromEnd: number): number {
+  const plainIdx = Math.max(0, Math.min(plain.length, plain.length - Math.max(0, cursorFromEnd)));
+  let seen = 0;
+  let i = 0;
+  while (i < shown.length && seen < plainIdx) {
+    if (shown[i] !== ',') seen += 1;
+    i += 1;
+  }
+  return shown.length - i;
+}
+
+/** 带千分位显示串光标 → 算式光标（分隔符不占位）；两边长度不一致时按算式串尾部收口 */
+function shownCursorToExpr(plain: string, shown: string, cursorFromEnd: number): number {
+  const shownIdx = Math.max(0, Math.min(shown.length, shown.length - Math.max(0, cursorFromEnd)));
+  let chars = 0;
+  for (let i = 0; i < shownIdx; i += 1) {
+    if (shown[i] !== ',') chars += 1;
+  }
+  return plain.length - Math.min(chars, plain.length);
+}
+
 export default function AddAssetScreen({ route }: any) {
   const { addAsset, updateAsset, getAssetById, currency } = useApp();
   const { colors, semantic, typography, spacing, motion } = useTheme();
@@ -134,6 +182,25 @@ export default function AddAssetScreen({ route }: any) {
   );
   const [availableCursor, setAvailableCursor] = useState(0);
 
+  // ---------- 进格子预置 + 落库口径（唯一） ----------
+  // 点进金额格时把已落库值**预置进算式**：这个数字从此就是编辑缓冲——退格真删掉一位、
+  // 数字在光标处追加、C 清零后从 0 起输。原先 reset() 把算式清空，格子只是"显示"着已落库值
+  // （算式空 → 退格无作用），于是出现"看得见但编辑不了"。
+  // 分录入法只认非负数（utils/amountExpression 的 toRaw）：负数这类预置不进去的格子保持
+  // "非编辑态"——继续显示已落库值、落库也沿用已落库值，不把负数悄悄变成 0。
+  const canSeedAmount = (value: number) => value >= 0;
+  const balanceEditing = amountField === 'balance' && canSeedAmount(balanceValue);
+  const availableEditing = amountField === 'available' && canSeedAmount(availableValue);
+  /** 进格子：已落库值即编辑缓冲。负值表达不了 → 保持空算式（退回显示已落库值） */
+  const seedExpr = (expr: { reset: (value?: number | string) => void }, value: number) => {
+    if (canSeedAmount(value)) expr.reset(value);
+    else expr.reset();
+  };
+  // 落库与显示同源：编辑中的格子以算式为准（被删空 = 0，而不是回落成旧值），非编辑格沿用已落库值。
+  // 所有落库 / 切字段 / 保存的地方都必须走这两个函数，不许直接调 confirm()。
+  const commitBalance = () => (balanceEditing ? balanceExpr.confirm() : balanceValue);
+  const commitAvailable = () => (availableEditing ? availableExpr.confirm() : availableValue);
+
   // ---------- 自绘键盘与系统键盘的协调 ----------
   // 系统键盘（如账户名称输入框）出现时，自绘键盘让位收起；
   // 系统键盘收起后，只要金额编辑模式还开着（amountField 未清空），自绘键盘自动回到原位。
@@ -161,10 +228,11 @@ export default function AddAssetScreen({ route }: any) {
     // 从「总信用额度」切过来时，先把第一格已经敲进去的值落库，
     // 否则离开编辑态后显示会用旧的 balanceValue → 用户看到"刚输入的数字消失"
     if (amountField === 'balance' && balanceDirtyRef.current) {
-      setBalanceValue(balanceExpr.confirm());
+      setBalanceValue(commitBalance());
       balanceDirtyRef.current = false;
     }
-    availableExpr.reset();
+    // 预置已落库值：点进这一格，屏幕上这个数字就是编辑缓冲（不再 reset() 清空）
+    seedExpr(availableExpr, availableValue);
     setAvailableCursor(0);
     setAmountField('available');
   };
@@ -179,11 +247,11 @@ export default function AddAssetScreen({ route }: any) {
     if (amountField === 'balance') return;
     // 反向切换同理：把「已用额度」已输入的值先落库
     if (amountField === 'available' && availableDirtyRef.current) {
-      setAvailableValue(availableExpr.confirm());
+      setAvailableValue(commitAvailable());
       availableDirtyRef.current = false;
     }
-    // 打开键盘即从空态起输：按 5 就是 0.05（分录入法），新输入直接替换旧值
-    balanceExpr.reset();
+    // 预置已落库值：点进这一格，屏幕上这个数字就是编辑缓冲（不再 reset() 清空）
+    seedExpr(balanceExpr, balanceValue);
     setBalanceCursor(0);
     setAmountField('balance');
   };
@@ -191,13 +259,17 @@ export default function AddAssetScreen({ route }: any) {
   // 进入页面默认常驻计算器键盘（金额是第一填写项）——用户点其他控件（货币弹层/名称框）时
   // 由各自的让位逻辑收起；关闭菜单/失焦后金额模式仍在，键盘自动回到原位
   useEffect(() => {
-    if (isFocused) setAmountField('balance');
+    // 页面一进来「信用额度」格就是编辑态：同样要预置缓冲，否则初始这一格同样删不掉
+    if (isFocused) {
+      setAmountField('balance');
+      seedExpr(balanceExpr, balanceValue);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const commitAmountField = () => {
     if (!amountField) return;
-    setBalanceValue(balanceExpr.confirm());
+    setBalanceValue(commitBalance());
     setAmountField(null);
   };
 
@@ -207,8 +279,9 @@ export default function AddAssetScreen({ route }: any) {
   // 金额的「实时有效值」：正在编辑的那一格取算式实时结果，否则取已落库值。
   // 「已用额度」辅助行 = 总信用 − 当前可用，跟着两格输入实时变，不等「完成」。
   // 注意：可用额度未手动设过时会跟随额度联动（见下方 effect），故默认已用 = 0。
-  const liveBalance = amountField === 'balance' ? balanceExpr.total : balanceValue;
-  const liveAvailable = amountField === 'available' ? availableExpr.total : availableValue;
+  // 与两格显示同一口径：编辑中的格子取算式实时值（＝屏幕上显示的那个数），其余沿用已落库值。
+  const liveBalance = balanceEditing ? balanceExpr.total : balanceValue;
+  const liveAvailable = availableEditing ? availableExpr.total : availableValue;
   const liveUsed = liveBalance - liveAvailable;
 
   // 额度 ↔ 可用额度联动：没手动填过「可用」就等于「额度」（即已用 0）。
@@ -305,8 +378,8 @@ export default function AddAssetScreen({ route }: any) {
     // 信用卡两格：第一格填的数字存成 creditLimit（信用额度），第二格是已用额度；
     // 现金/银行卡填的数字就是初始余额。账单日/还款日不在此填写
     // 保存前先把两格的实时输入提交，避免"最后一格输完直接点保存"丢失刚敲的数字
-    const liveBal = amountField === 'balance' ? balanceExpr.confirm() : balanceValue;
-    const liveAvail = amountField === 'available' ? availableExpr.confirm() : availableValue;
+    const liveBal = amountField === 'balance' ? commitBalance() : balanceValue;
+    const liveAvail = amountField === 'available' ? commitAvailable() : availableValue;
     const bal = overrideBalance ?? liveBal;
     // 可用额度 → 既有模型：creditLimit = 总信用额度，initialBalance = 可用 − 额度（负数 = 已用掉多少）。
     // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
@@ -350,12 +423,12 @@ export default function AddAssetScreen({ route }: any) {
   const handleKeypadConfirm = () => {
     if (amountField === 'available') {
       // 只提交「已用额度」这一格，不触发保存（保存仍走右上角「保存」）
-      const val = availableExpr.confirm();
+      const val = commitAvailable();
       setAvailableValue(val);
       setAmountField(null);
       return;
     }
-    const bal = balanceExpr.confirm();
+    const bal = commitBalance();
     setBalanceValue(bal);
     setAmountField(null);
     // 信用卡要填两个数（初始额度 + 现有额度）：这里只落值，保存交给右上角「保存」，
@@ -366,6 +439,32 @@ export default function AddAssetScreen({ route }: any) {
 
   // 金额是否多项拆分（15.00+20.00 这类）：多项时字号调小防溢出
   const balanceIsMulti = amountField === 'balance' && balanceExpr.isMulti;
+
+  // ---------- 两格显示串：编辑中的格子显示算式（算式已被预置成编辑缓冲），否则显示已落库值 ----------
+  // 编辑态一律用算式：删到空时显示 0.00（用户确实清掉了），不能回落成旧值——那会让刚删空的
+  // 数字突然跳回原值，等于又"编辑不了"。非编辑格照旧显示已落库值。
+  const balanceExprShown = groupAmountDisplay(balanceExpr.displayValue);
+  const balanceDisplay = balanceEditing ? balanceExprShown : formatMoney(balanceValue);
+  const balanceDisplayCursor = balanceEditing
+    ? exprCursorToShown(balanceExpr.displayValue, balanceExprShown, balanceCursor)
+    : 0;
+  // 点按/拖动定位：屏幕上是带千分位的串，光标 state 存的是算式串坐标系 → 反向换算
+  const handleBalanceCursorChange = (cursorFromEnd: number) => {
+    setBalanceCursor(
+      balanceEditing ? shownCursorToExpr(balanceExpr.displayValue, balanceExprShown, cursorFromEnd) : 0
+    );
+  };
+
+  const availableExprShown = groupAmountDisplay(availableExpr.displayValue);
+  const availableDisplay = availableEditing ? availableExprShown : formatMoney(availableValue);
+  const availableDisplayCursor = availableEditing
+    ? exprCursorToShown(availableExpr.displayValue, availableExprShown, availableCursor)
+    : 0;
+  const handleAvailableCursorChange = (cursorFromEnd: number) => {
+    setAvailableCursor(
+      availableEditing ? shownCursorToExpr(availableExpr.displayValue, availableExprShown, cursorFromEnd) : 0
+    );
+  };
 
   const selectedTypeInfo = TYPE_OPTIONS.find((opt) => opt.type === selectedType);
   const selectedCurrencyInfo = CURRENCY_OPTIONS.find((c) => c.code === selectedCurrency);
@@ -397,7 +496,7 @@ export default function AddAssetScreen({ route }: any) {
             fullWidth={false}
             onPress={() => {
               if (amountField) {
-                const bal = balanceExpr.confirm();
+                const bal = commitBalance();
                 setBalanceValue(bal);
                 setAmountField(null);
                 handleSave(bal);
@@ -448,10 +547,10 @@ export default function AddAssetScreen({ route }: any) {
                   containerStyle={styles.amountTextContainer}
                   style={[styles.amountText, ...(balanceIsMulti ? [styles.amountTextSmall] : [])]}
                   cursorStyle={styles.amountCursor}
-                  display={amountField === 'balance' ? balanceExpr.displayValue : formatMoney(balanceValue)}
+                  display={balanceDisplay}
                   enabled={amountField === 'balance' && !sysKeyboardVisible}
-                  cursorFromEnd={balanceCursor}
-                  onCursorChange={setBalanceCursor}
+                  cursorFromEnd={balanceDisplayCursor}
+                  onCursorChange={handleBalanceCursorChange}
                   onPress={openAmountField}
                 />
               </View>
@@ -473,10 +572,10 @@ export default function AddAssetScreen({ route }: any) {
                   containerStyle={styles.amountTextContainer}
                   style={styles.amountText}
                   cursorStyle={styles.amountCursor}
-                  display={amountField === 'available' ? availableExpr.displayValue : formatMoney(availableValue)}
+                  display={availableDisplay}
                   enabled={amountField === 'available' && !sysKeyboardVisible}
-                  cursorFromEnd={availableCursor}
-                  onCursorChange={setAvailableCursor}
+                  cursorFromEnd={availableDisplayCursor}
+                  onCursorChange={handleAvailableCursorChange}
                   onPress={openAvailableField}
                 />
               </View>
@@ -506,10 +605,10 @@ export default function AddAssetScreen({ route }: any) {
                 containerStyle={styles.amountTextContainer}
                 style={[styles.amountText, ...(balanceIsMulti ? [styles.amountTextSmall] : [])]}
                 cursorStyle={styles.amountCursor}
-                display={amountField === 'balance' ? balanceExpr.displayValue : balanceValue.toFixed(2)}
+                display={balanceDisplay}
                 enabled={amountField === 'balance' && !sysKeyboardVisible}
-                cursorFromEnd={balanceCursor}
-                onCursorChange={setBalanceCursor}
+                cursorFromEnd={balanceDisplayCursor}
+                onCursorChange={handleBalanceCursorChange}
                 onPress={openAmountField}
               />
             </View>
@@ -683,8 +782,12 @@ export default function AddAssetScreen({ route }: any) {
             onPressToday={() => {}}
             hideDateKey
             onClear={() => {
-              // 主动清成 0 也是用户意图：清「可用额度」时同样标记为手动设过，避免被联动改回额度值
-              if (amountField === 'available') availableTouchedRef.current = true;
+              // 主动清成 0 也是用户意图：清「可用额度」时同样标记为手动设过，避免被联动改回额度值；
+              // 同时算一次输入（dirty），否则「按 C 清 0 → 直接切走」会不落库，切回来又是旧值
+              if (amountField === 'available') {
+                availableDirtyRef.current = true;
+                availableTouchedRef.current = true;
+              } else balanceDirtyRef.current = true;
               activeExpr.reset(0);
               setActiveCursor(0);
             }}
