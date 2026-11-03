@@ -643,7 +643,8 @@ function profileToRow(s: LocalSnapshot): ProfileRow {
     weekStartsOn: s.weekStartsOn,
     decimalPlaces: s.decimalPlaces,
     periodPreference: s.periodPreference,
-    // 当前账本必须真实存在，否则后端 400（activeLedgerUid 做引用校验）
+    // 当前账本必须先在**本地**账本表里存在；它是否已在服务端，由 pushSnapshot 按镜像再判一次
+    // （服务端 activeLedgerUid 做引用校验，见 serverLedgerUids）
     activeLedgerUid: ledgerIds.has(s.activeLedgerId) ? s.activeLedgerId : null,
   };
 }
@@ -1440,21 +1441,48 @@ async function pushSnapshot(
     if (ids.length) await runLimited(ids, PUSH_CONCURRENCY, (id) => pushDelete(table, id, failedRows));
   }
 
+  // 失败行台账要在推 profile 之前算好：profile 的 activeLedgerUid 需要知道"服务端到底认不认识这本账本"
+  const failedUpsertKeys = new Set(failedRows.filter((f) => f.op === 'upsert').map((f) => f.table + ':' + f.id));
+  const failedDeleteKeys = new Set(failedRows.filter((f) => f.op === 'delete').map((f) => f.table + ':' + f.id));
+
+  // 服务端认识的账本 = 镜像里的（上次成功上传过）∪ 本次成功 upsert 的 − 本次删掉的。
+  // PATCH /api/profile 的 activeLedgerUid 在服务端是**引用校验**（ProfileService.java:79），
+  // 指向它不认识的账本会让整条 PATCH 400（activeLedgerUid does not reference one of your ledgers）——
+  // 2026-11-03 线上就是这个：本地有一本只存在于本机的账本（空账本在上云前的 preflight 推送里
+  // 被 skipUnsyncedEmptyLedgers 刻意跳过，见 pushSnapshot 开头），profile 却拿它当当前账本。
+  // 所以发出去之前先把 activeLedgerUid 摘掉（服务端保留原值），本地选择不受影响。
+  const serverLedgerUids = new Set<string>();
+  mirror.ledgers.forEach((r) => serverLedgerUids.add(String(r.clientUid)));
+  (deletes.ledgers ?? []).forEach((uid) => serverLedgerUids.delete(uid));
+  ledgerRows.forEach((r) => {
+    const uid = String(r.clientUid);
+    if (!failedUpsertKeys.has('ledgers:' + uid)) serverLedgerUids.add(uid);
+  });
+  const cloudProfile: ProfileRow | null = current.profile
+    ? {
+        ...current.profile,
+        activeLedgerUid:
+          current.profile.activeLedgerUid &&
+          serverLedgerUids.has(String(current.profile.activeLedgerUid))
+            ? current.profile.activeLedgerUid
+            : null,
+      }
+    : null;
+
   // profiles 行：局部 PATCH（只写我们管理的列，不影响 displayName 等）
   const profileChanged =
-    !mirror.profile || JSON.stringify(mirror.profile) !== JSON.stringify(current.profile);
-  if (current.profile && profileChanged) {
-    await pushProfile(current.profile, failedRows);
+    !mirror.profile || JSON.stringify(mirror.profile) !== JSON.stringify(cloudProfile);
+  if (cloudProfile && profileChanged) {
+    await pushProfile(cloudProfile, failedRows);
   }
 
   // 镜像 = 本次成功上云的状态：失败的 upsert 行不入镜像（下次同步重试），
   // 失败的 delete 保留旧行（下次同步再删）。网络/服务器中断则整次不落镜像。
-  const failedUpsertKeys = new Set(failedRows.filter((f) => f.op === 'upsert').map((f) => f.table + ':' + f.id));
-  const failedDeleteKeys = new Set(failedRows.filter((f) => f.op === 'delete').map((f) => f.table + ':' + f.id));
-
+  // 镜像里的 profile 记的是"实际发出去的那一行"（activeLedgerUid 可能被摘掉），
+  // 否则每次同步都会因为与本地行不同而重复 PATCH。
   const nextMirror: SyncMirror = {
     ...emptyMirror(),
-    profile: failedUpsertKeys.has('profile:me') ? mirror.profile : current.profile,
+    profile: failedUpsertKeys.has('profile:me') ? mirror.profile : cloudProfile,
   };
   UPSERT_ORDER.forEach((table) => {
     const prevRows = mirrorRows[table] ?? [];
