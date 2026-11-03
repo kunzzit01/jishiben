@@ -55,25 +55,24 @@ export function useReminderItems(): ReminderItemsState {
     };
   }, []);
 
-  const userId = user ? String(user.id) : null;
+  // 未登录也照样排提醒：通知是系统级本地通知（expo-notifications），不走服务器。
+  // 登录用户沿用 userId 做键命名空间（多账号互不串号）；未登录用 'local'，登出时整体撤销
+  const scopeId = user ? String(user.id) : 'local';
 
   const buildInputs = useMemo(
     () => ({
-      userId: userId ?? '',
+      userId: scopeId,
       assets,
       paymentPlans,
       daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour },
       now: new Date(),
     }),
-    [userId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour]
+    [scopeId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour]
   );
 
-  const allItems = useMemo(
-    () => (userId ? buildReminderItems(buildInputs) : []),
-    [userId, buildInputs]
-  );
+  const allItems = useMemo(() => buildReminderItems(buildInputs), [buildInputs]);
 
-  const rules = useMemo(() => (userId ? buildReminderRules(buildInputs, allItems) : []), [userId, buildInputs, allItems]);
+  const rules = useMemo(() => buildReminderRules(buildInputs, allItems), [buildInputs, allItems]);
 
   const items = useMemo(
     () => allItems.filter((item) => !disabledRules.has(item.ruleId) && !muted.has(item.key)),

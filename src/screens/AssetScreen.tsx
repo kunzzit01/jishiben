@@ -51,6 +51,7 @@ import { AccountTransactionList } from '../components/AccountTransactionList';
 import { useAmountExpression } from '../hooks/useAmountExpression';
 import { hapticWarning } from '../utils/haptics';
 import PressableScale from '../components/PressableScale';
+import DayGrid from '../components/DayGrid';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Layout, Radius, SemanticColors, Spacing, Typography } from '../theme/theme';
 
@@ -1918,27 +1919,9 @@ export default function AssetScreen() {
                     </View>
                   )}
 
-                  {/* 还款提醒（仅信用卡）：即时切换，走与账单日同一套 updateAsset 写库路径，不另造保存机制 */}
-                  {sheetAsset.type === 'credit' && (
-                    <View style={styles.sheetList}>
-                      <ListRow
-                        title={t('asset.reminderToggle')}
-                        subtitle={t('asset.reminderToggleHint')}
-                        trailing={
-                          <Switch
-                            value={!!sheetAsset.reminderEnabled}
-                            onValueChange={(next) => {
-                              void updateAsset(sheetAsset.id, { reminderEnabled: next });
-                            }}
-                            accessibilityLabel={t('asset.reminderToggle')}
-                          />
-                        }
-                        testID="asset-detail-reminder"
-                      />
-                    </View>
-                  )}
+                  {/* 还款提醒只在后台自动排（reminderEnabled 恒为 true），账户设置里不再摆只读说明 */}
 
-                  {/* 1–30 选择列表：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层） */}
+                  {/* 1–30 网格：点上方任一格就地展开（同一个抽屉内，不再叠第二个弹层，也不再出现第二层滚动） */}
                   {sheetAsset.type === 'credit' && sheetDaySheet !== null && (
                     <View style={styles.creditDayList} testID="asset-detail-day-list">
                       <PressableScale
@@ -1953,24 +1936,17 @@ export default function AssetScreen() {
                         </AppText>
                         <Ionicons name="chevron-up" size={14} color={semantic.textTertiary} />
                       </PressableScale>
-                      <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
-                        {Array.from({ length: 30 }, (_, k) => k + 1).map((day) => {
-                          const current = sheetDaySheet === 'due' ? sheetAsset.dueDay ?? 5 : sheetAsset.statementDay ?? 1;
-                          return (
-                            <ListRow
-                              key={day}
-                              title={t('asset.dayValue', { day })}
-                              trailing={current === day ? <Ionicons name="checkmark" size={18} color={semantic.accentText} /> : undefined}
-                              onPress={() => {
-                                if (sheetDaySheet === 'due') void updateAsset(sheetAsset.id, { dueDay: day });
-                                else void updateAsset(sheetAsset.id, { statementDay: day });
-                                setSheetDaySheet(null);
-                              }}
-                              testID={`asset-detail-day-${day}`}
-                            />
-                          );
-                        })}
-                      </ScrollView>
+                      <DayGrid
+                        value={sheetDaySheet === 'due' ? sheetAsset.dueDay ?? 5 : sheetAsset.statementDay ?? 1}
+                        max={30}
+                        testIDPrefix="asset-detail-day"
+                        onPick={(day) => {
+                          // 与改造前一致：先写库（信用卡的 dueDay / statementDay），再收起网格
+                          if (sheetDaySheet === 'due') void updateAsset(sheetAsset.id, { dueDay: day });
+                          else void updateAsset(sheetAsset.id, { statementDay: day });
+                          setSheetDaySheet(null);
+                        }}
+                      />
                     </View>
                   )}
 

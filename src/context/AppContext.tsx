@@ -215,7 +215,14 @@ interface AppContextValue {
    * 一次改掉账本的外观字段（名称 / 颜色 / 图标）。名称会 trim，空名直接忽略（不写入）。
    * 只动本地 state，落盘与云同步仍由既有 effect 处理。
    */
-  updateLedger: (id: string, updates: { name?: string; color?: string; icon?: string }) => Promise<void>;
+  /** 返回 false = 这次没写进任何账本（空名字，或这本账本已不在本机账本表里） */
+  updateLedger: (id: string, updates: { name?: string; color?: string; icon?: string }) => Promise<boolean>;
+  /**
+   * 把「本机账本」占位账本落地成一本真账本 —— 本机账本表为空时界面用的是内存占位账本
+   * （不落盘、不参与同步），对它改名/改色只能这样落地；占位期记在其名下的数据一并改挂。
+   * 返回 false = 本机已有真账本，没有可落地的占位。
+   */
+  promotePendingLedger: (updates?: { name?: string; color?: string; icon?: string }) => Promise<boolean>;
   renameLedger: (id: string, name: string) => Promise<void>;
   deleteLedger: (id: string) => Promise<void>;
   /**
@@ -729,14 +736,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateLedger: AppContextValue['updateLedger'] = async (id, updates) => {
     const trimmed = updates.name?.trim();
-    if (updates.name !== undefined && !trimmed) return;
+    if (updates.name !== undefined && !trimmed) return false;
+    // 账本不在这张表里（冷启动占位账本 PENDING_LEDGER_ID / 已被删）就别假装保存成功：
+    // 调用方据此提示用户，而不是关掉面板让改动无声消失
+    if (!ledgersRef.current.some((l) => l.id === id)) return false;
     setLedgers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, ...updates, ...(trimmed ? { name: trimmed } : {}) } : l))
     );
+    return true;
+  };
+
+  const promotePendingLedger: AppContextValue['promotePendingLedger'] = async (updates) => {
+    // 已有真账本 = 没有占位可落地（说明调用方拿的是过期 id）
+    if (ledgersRef.current.length > 0) return false;
+    const fresh: Ledger = {
+      ...makeLedger(updates?.name?.trim() || translate('home.pendingLedgerName')),
+      ...(updates?.color ? { color: updates.color } : {}),
+      ...(updates?.icon ? { icon: updates.icon } : {}),
+    };
+    // 占位期记在 PENDING_LEDGER_ID 下的数据改挂到新账本（与 loadFromStorage / reconcileLedgers 同一规则）
+    setAssets((prev) => prev.map((a) => (a.ledgerId === PENDING_LEDGER_ID ? { ...a, ledgerId: fresh.id } : a)));
+    setTransactions((prev) => prev.map((t) => (t.ledgerId === PENDING_LEDGER_ID ? { ...t, ledgerId: fresh.id } : t)));
+    setPaymentPlans((prev) => prev.map((p) => (p.ledgerId === PENDING_LEDGER_ID ? { ...p, ledgerId: fresh.id } : p)));
+    setLedgers([fresh]);
+    setActiveLedgerIdState(fresh.id);
+    setDefaultLedgerIdState(fresh.id);
+    return true;
   };
 
   // 老 API 保留（别处仍在调 renameLedger）：薄包装，行为与 updateLedger(name) 完全一致
-  const renameLedger: AppContextValue['renameLedger'] = async (id, name) => updateLedger(id, { name });
+  const renameLedger: AppContextValue['renameLedger'] = async (id, name) => {
+    await updateLedger(id, { name });
+  };
 
   const deleteLedger: AppContextValue['deleteLedger'] = async (id) => {
     // 用户定版：任何账本都能删（含原名「默认账本」那条），删到一本不剩也允许。
@@ -1125,6 +1156,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getCategoryById,
         addLedger,
         updateLedger,
+        promotePendingLedger,
         renameLedger,
         deleteLedger,
         clearAllData,

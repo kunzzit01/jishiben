@@ -258,6 +258,8 @@ export const zh = {
     creditLimitLabel: '信用额度',
     creditTotalLabel: '总信用额度',
     creditUsedLabel: '已用额度',
+    creditAvailableLabel: '可用额度',
+    creditUsedAutoLabel: '已用额度',
     creditAvailableHint: '已用 %{used}（初始额度 − 现有额度）',
     accountName: '账户名称',
     accountNamePlaceholder: '例如：银行卡尾号****',
@@ -527,10 +529,7 @@ export const zh = {
     sourceDaily: '每日记账',
     sourceMonthEnd: '月末总结',
     emptyTitle: '暂时没有要提醒的事',
-    emptyDesc: '在信用卡的「账户设置」里打开「还款提醒」，或打开下面的「每天提醒记一笔」，这里就会列出将来的提醒。',
-    // 未登录时排期本身不会发生（hook 需要 userId），别让空态把人指去开开关
-    signInTitle: '登录后才会排提醒',
-    signInDesc: '提醒排期按账号计算；当前是本机模式（未登录），所以不会有提醒。',
+    emptyDesc: '给信用卡设好账单日 / 还款日（还款提醒自动发送），或打开下面的「每天提醒记一笔」，这里就会列出将来的提醒。',
   },
   home: {
     netWorth: '净资产',
@@ -678,6 +677,8 @@ export const zh = {
     reminderToggle: '还款提醒',
     // 单行契约（AssetScreen 用 ListRow.subtitle），两个节点都要说清又不许长
     reminderToggleHint: '账单日当天 + 还款日前 3/2/1 天',
+    // 自动发送说明（加卡表单那行只读说明）：同一套排期，写明无需设置
+    reminderAuto: '账单日当天 + 还款日前 3/2/1 天（自动发送）',
     reminderOn3: '%{name} 还有 3 天就是还款日，可以提前安排一下～',
     reminderOn2: '%{name} 后天就是还款日，别忘了哦～',
     reminderOn1: '明天是 %{name} 的还款日，记得还款哦～',
@@ -768,6 +769,12 @@ export const zh = {
     create: '创建账本',
     editTitle: '账本编辑',
     editNameLabel: '账本名称',
+    unsavedTitle: '保存对账本的修改？',
+    unsavedMsg: '名称或颜色还没保存，直接关闭会丢掉这些修改。',
+    discard: '放弃修改',
+    keepEditing: '继续编辑',
+    saveFailedTitle: '这次没有保存成功',
+    saveFailedMsg: '这本账本当前不在本机账本表里（可能还没同步就绪，或已在其它设备上被删除）。请稍后重试。',
   },
   profile: {
     // Tab 根页大标题（与 Tab 名「设置」一致；改成根页后去掉返回键，不再叫「个人设置」）

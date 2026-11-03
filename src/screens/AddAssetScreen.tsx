@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   BackHandler,
-  Switch,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +25,7 @@ import type { SemanticColors, Spacing, ThemeColors, Typography } from '../theme/
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import PressableScale from '../components/PressableScale';
+import DayGrid from '../components/DayGrid';
 import { useAmountExpression } from '../hooks/useAmountExpression';
 import { formatMoney } from '../utils/formatMoney';
 import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
@@ -97,8 +97,8 @@ export default function AddAssetScreen({ route }: any) {
   // （用户 2026-10-29：「我要怎么设置还款日期？」）。取值 1–30（用户要求上限到 30 号；31 号不入选项）。
   const [statementDay, setStatementDay] = useState<number>(editAsset?.statementDay ?? 1);
   const [dueDay, setDueDay] = useState<number>(editAsset?.dueDay ?? 5);
-  // 还款提醒（仅信用卡）：默认关闭；编辑模式按存档回填，保存时写入 reminderEnabled
-  const [reminderEnabled, setReminderEnabled] = useState<boolean>(editAsset?.reminderEnabled ?? false);
+  // 还款提醒（仅信用卡）：一律自动发送（账单日当天 + 还款日前 3/2/1 天），页面只做说明、不给开关；
+  // 保存时信用卡恒写 reminderEnabled: true，编辑也不再回填开关状态
   const [daySheet, setDaySheet] = useState<'statement' | 'due' | null>(null);
   // 键盘高度（onLayout 实测）与滚动锚点：聚焦金额时把该卡滚到键盘上方可见处
   const [keypadHeight, setKeypadHeight] = useState(0);
@@ -106,6 +106,10 @@ export default function AddAssetScreen({ route }: any) {
   // 用户是否在当前字段真正输入过（切换字段时据此决定要不要提交，空算式不能覆盖已有值）
   const balanceDirtyRef = useRef(false);
   const availableDirtyRef = useRef(false);
+  // 「可用额度」是否被用户手动设过（**永久**标记：availableDirtyRef 只表示「这一格有未提交输入」，
+  // 提交时就清零，不能用来表达「曾经设过」）。没设过 → 跟随「总信用额度」联动；设过 → 停用联动、
+  // 尊重用户输入（包括 0）。编辑模式一律视为已设过：存档反推出来的可用额度不该被联动覆盖。
+  const availableTouchedRef = useRef(!!editAsset && editAsset.type === 'credit');
   const limitYRef = useRef(0);
   const availYRef = useRef(0);
 
@@ -120,13 +124,13 @@ export default function AddAssetScreen({ route }: any) {
   // 金额格自绘光标（距显示串尾部的偏移，0=最末尾）：按键在光标处生效
   const [balanceCursor, setBalanceCursor] = useState(0);
 
-  // 信用卡第二个数值 = 已用额度（现在欠多少）。标识符沿用旧名 available*（连同 testID），语义已换：
-  // 存法 creditLimit = 信用额度；initialBalance = −已用额度，
+  // 信用卡第二个数值 = 可用额度（现在还能刷多少）。标识符沿用旧名 available*（连同 testID）。
+  // 存法 creditLimit = 总信用额度；initialBalance = 可用 − 额度（负数 = 已用掉多少），
   // 于是「可用额度」= creditLimit + balance = 额度 − 已用，和 utils/creditCard 的既有口径完全一致。
-  // 编辑预填由存档反推：建档时 initialBalance = 可用 − 额度，故 −initialBalance = 额度 − 可用 = 当时已用。
+  // 编辑预填由存档反推：可用 = creditLimit + initialBalance（5000 + (−1000) = 4000）。
   const availableExpr = useAmountExpression();
   const [availableValue, setAvailableValue] = useState(
-    editAsset && editAsset.type === 'credit' ? Math.max(0, -editAsset.initialBalance) : 0,
+    editAsset && editAsset.type === 'credit' ? (editAsset.creditLimit ?? 0) + editAsset.initialBalance : 0,
   );
   const [availableCursor, setAvailableCursor] = useState(0);
 
@@ -199,6 +203,22 @@ export default function AddAssetScreen({ route }: any) {
 
   // 计算器键盘上的 Enter（下一项）箭头已由小数点键取代（标准金额录入）
   const nameInputRef = useRef<TextInput>(null);
+
+  // 金额的「实时有效值」：正在编辑的那一格取算式实时结果，否则取已落库值。
+  // 「已用额度」辅助行 = 总信用 − 当前可用，跟着两格输入实时变，不等「完成」。
+  // 注意：可用额度未手动设过时会跟随额度联动（见下方 effect），故默认已用 = 0。
+  const liveBalance = amountField === 'balance' ? balanceExpr.total : balanceValue;
+  const liveAvailable = amountField === 'available' ? availableExpr.total : availableValue;
+  const liveUsed = liveBalance - liveAvailable;
+
+  // 额度 ↔ 可用额度联动：没手动填过「可用」就等于「额度」（即已用 0）。
+  // 否则新建卡只填额度、可用留空，会被换算成「全额已用」（可用 = 0 → initialBalance = −额度）。
+  // 用户一旦手动改过可用（availableTouchedRef），立即停用；正在敲可用那一格时也不覆盖。
+  useEffect(() => {
+    if (selectedType !== 'credit' || availableTouchedRef.current) return;
+    if (amountField === 'available') return;
+    setAvailableValue(liveBalance);
+  }, [selectedType, amountField, liveBalance]);
 
   // 键盘当前作用在哪个金额字段上
   const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
@@ -288,19 +308,19 @@ export default function AddAssetScreen({ route }: any) {
     const liveBal = amountField === 'balance' ? balanceExpr.confirm() : balanceValue;
     const liveAvail = amountField === 'available' ? availableExpr.confirm() : availableValue;
     const bal = overrideBalance ?? liveBal;
-    // 已用额度 → 既有模型：initialBalance = −已用额度（负数 = 欠多少），只取负，不另做换算。
-    // 这样 utils/creditCard 的 可用额度 = creditLimit + balance = 额度 − 已用 仍然成立，历史数据不用迁移。
-    // 已用额度为负按 0 处理（余额字段的既有约定）；已用 > 额度**不拦**：超限要在详情页照实显示负的可用额度。
-    const used = Math.max(liveAvail, 0);
-    const creditInitial = isCredit ? Number((-used).toFixed(2)) : 0;
+    // 可用额度 → 既有模型：creditLimit = 总信用额度，initialBalance = 可用 − 额度（负数 = 已用掉多少）。
+    // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
+    // 可用为负按 0 处理（金额字段的既有约定）；可用 > 额度**不拦**：换算照实给出（差额为负 = 已用为负）。
+    const available = Math.max(liveAvail, 0);
+    const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
 
     if (isEdit && editAsset) {
       await updateAsset(editAsset.id, {
         // 仅信用卡带账单日/还款日；类型切走后清空，避免残留
         statementDay: isCredit ? statementDay : undefined,
         dueDay: isCredit ? dueDay : undefined,
-        // 还款提醒同样只属于信用卡：类型切走后显式关掉，避免残留
-        reminderEnabled: isCredit ? reminderEnabled : undefined,
+        // 还款提醒同样只属于信用卡，且一律自动：信用卡恒写 true；类型切走后清掉，避免残留
+        reminderEnabled: isCredit ? true : undefined,
         name: name.trim(),
         icon: typeInfo?.icon ?? editAsset.icon,
         color: typeInfo?.color ?? editAsset.color,
@@ -312,7 +332,7 @@ export default function AddAssetScreen({ route }: any) {
       });
     } else {
       await addAsset({
-        ...(isCredit ? { statementDay, dueDay, reminderEnabled } : {}),
+        ...(isCredit ? { statementDay, dueDay, reminderEnabled: true } : {}),
         name: name.trim(),
         icon: typeInfo!.icon,
         color: typeInfo!.color,
@@ -446,7 +466,7 @@ export default function AddAssetScreen({ route }: any) {
               testID="add-asset-available"
             >
               <AppText variant="subhead" weight="600" color={semantic.textSecondary}>
-                {t('addTx.creditUsedLabel')}
+                {t('addTx.creditAvailableLabel')}
               </AppText>
               <View style={styles.amountRow}>
                 <CursorAmountText
@@ -461,6 +481,18 @@ export default function AddAssetScreen({ route }: any) {
                 />
               </View>
             </PressableScale>
+
+            <View style={styles.creditRowSeparator} />
+
+            {/* 底部辅助行：已用额度 = 总信用 − 可用，只读，跟着上面两格实时变 */}
+            <View style={styles.creditUsedRow} testID="add-asset-credit-used">
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {t('addTx.creditUsedAutoLabel')}
+              </AppText>
+              <AppText variant="caption" color={semantic.textSecondary}>
+                {formatMoney(liveUsed)}
+              </AppText>
+            </View>
           </View>
         ) : (
           <PressableScale
@@ -526,31 +558,8 @@ export default function AddAssetScreen({ route }: any) {
           </View>
         )}
 
-        {/* 还款提醒（仅信用卡）：放在账单日 / 还款日下方，沿用上方「信用额度」卡的容器与行间距
-            （creditFrame 卡片 + creditRow 行），只补横向排布，不另造一套卡片样式；
-            默认关闭，编辑模式按存档回填，随「保存」一并写入 reminderEnabled */}
-        {selectedType === 'credit' && (
-          <View style={[styles.creditFrame, { marginBottom: spacing.lg }]} testID="add-asset-reminder-card">
-            <View
-              style={[styles.creditRow, { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm }]}
-            >
-              <View style={{ flexShrink: 1, flexGrow: 1 }}>
-                <AppText variant="footnote" color={semantic.textSecondary} weight="600">
-                  {t('asset.reminderToggle')}
-                </AppText>
-                <AppText variant="footnote" color={semantic.textTertiary} style={{ marginTop: spacing.xs }}>
-                  {t('asset.reminderToggleHint')}
-                </AppText>
-              </View>
-              <Switch
-                value={reminderEnabled}
-                onValueChange={setReminderEnabled}
-                accessibilityLabel={t('asset.reminderToggle')}
-                testID="add-asset-reminder"
-              />
-            </View>
-          </View>
-        )}
+        {/* 还款提醒不需要在表单里展示：保存时恒写 reminderEnabled=true，
+            实际提醒由 usePaymentReminders + reminders/credit.ts 在后台自动排（账单日当天 + 还款日前 3/2/1 天） */}
 
         {/* 账户名称 / 账户类型：左右 60% / 40%，类型是下拉选择框 */}
         <View style={styles.nameTypeRow}>
@@ -664,13 +673,21 @@ export default function AddAssetScreen({ route }: any) {
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => {
-              if (amountField === 'available') availableDirtyRef.current = true;
-              else balanceDirtyRef.current = true;
+              if (amountField === 'available') {
+                availableDirtyRef.current = true;
+                // 手动设过（输入 0 也算）：从此停用与「总信用额度」的联动
+                availableTouchedRef.current = true;
+              } else balanceDirtyRef.current = true;
               setActiveCursor(activeExpr.pressKeyAt(key, activeCursor));
             }}
             onPressToday={() => {}}
             hideDateKey
-            onClear={() => { activeExpr.reset(0); setActiveCursor(0); }}
+            onClear={() => {
+              // 主动清成 0 也是用户意图：清「可用额度」时同样标记为手动设过，避免被联动改回额度值
+              if (amountField === 'available') availableTouchedRef.current = true;
+              activeExpr.reset(0);
+              setActiveCursor(0);
+            }}
             onConfirm={handleKeypadConfirm}
           />
         </View>
@@ -686,24 +703,17 @@ export default function AddAssetScreen({ route }: any) {
         title={daySheet === 'due' ? t('asset.dueDayLabel') : t('asset.statementDayLabel')}
         testID="add-asset-day-sheet"
       >
-        <ScrollView style={{ maxHeight: sheetListMaxHeight }} showsVerticalScrollIndicator={false}>
-          {Array.from({ length: 30 }, (_, i) => i + 1).map((day) => {
-            const active = (daySheet === 'due' ? dueDay : statementDay) === day;
-            return (
-              <ListRow
-                key={day}
-                title={t('asset.dayValue', { day })}
-                trailing={active ? <Ionicons name="checkmark" size={18} color={semantic.accentText} /> : undefined}
-                onPress={() => {
-                  if (daySheet === 'due') setDueDay(day);
-                  else setStatementDay(day);
-                  setDaySheet(null);
-                }}
-                testID={`add-asset-day-${day}`}
-              />
-            );
-          })}
-        </ScrollView>
+        <DayGrid
+          value={daySheet === 'due' ? dueDay : statementDay}
+          max={30}
+          testIDPrefix="add-asset-day"
+          onPick={(day) => {
+            // 与改造前一致：写状态后立即关闭弹层（弹层不再需要滚动，也不再有 maxHeight）
+            if (daySheet === 'due') setDueDay(day);
+            else setStatementDay(day);
+            setDaySheet(null);
+          }}
+        />
       </BottomSheet>
 
       {/* 类型抽屉：高度随内容自适应（BottomSheet 最高 85% 屏），列表超长时在抽屉内滚动，
@@ -879,6 +889,14 @@ function makeStyles(
     // 行内不加水平内边距：数字右边缘 = 卡片左右内边距（20），与图二的大留白一致
     creditRow: { paddingVertical: spacing.md },
     creditRowSeparator: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline },
+    // 已用额度辅助行：**不带任何上边框**（上方已有 creditRowSeparator，两条会叠成双线）
+    creditUsedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xs,
+    },
     creditField: { alignSelf: 'stretch' },
     creditFieldGap: { marginTop: spacing.md },
     // 金额输入框：与「账户类型 / 账户名称」同一族的框（1px hairline、10 圆角），

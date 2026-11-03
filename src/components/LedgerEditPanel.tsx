@@ -5,16 +5,15 @@
 // 两层遮罩同屏；表单 autoFocus 还会在入场途中弹键盘，安卓 adjustResize 会当场改 windowHeight →
 // BottomSheet 重算 maxHeight，面板在动画中跳高跳位。同一个抽屉换内容 = 一次布局变化。
 //
-// 版式与「开设账本」页同一张表单卡（同一套组件规格，见 LedgerScreen.addCard / input / colorOption）：
-//   表单卡（surfaceSunken + 发丝边 + 20 圆角 + 20 内衬）
-//     ├ 账本名称 label + 输入框（surfaceElevated + 发丝边 + 高 48 / 14 圆角）
-//     └ 选颜色 label + 5×5 色格（38 圆点，等分五列居中）
-//   取消 / 保存（并排等宽，secondary + primary）
-//   删除账本（destructive 整条 —— 与上面两个按钮同一套按钮规格，不再是一条飘着的红字）
+// 受控组件：名称与颜色的草稿由 HomeScreen 持有。草稿必须在父级，
+// 「✕ / 点遮罩 / 下拉 / 返回键」被 BottomSheet 的 beforeClose 拦下时，父级才拿得到现值判断
+// "有没有改过"，并在弹窗里给出「保存 / 放弃修改 / 继续编辑」。
 //
-// 尺寸只取 spacing 8 档（4/8/12/16/20/24/32/40）与 radius 档，不写散值；颜色全部走 semantic。
+// 版式与「开设账本」页同一张表单卡（LedgerScreen.addCard / input / colorOption）：
+//   表单卡（surfaceSunken + 发丝边 + 20 圆角 + 20 内衬）：名称 / 选颜色
+//   取消 · 保存（并排等宽）→ 删除账本（destructive 整条）
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useTheme } from '../theme/useTheme';
 import { useLayout } from '../theme/useLayout';
@@ -25,24 +24,31 @@ import { AppText, Button } from './ui';
 
 export interface LedgerEditPanelProps {
   ledger: { id: string; name: string; color?: string } | null;
-  /** 返回账本列表（不清空抽屉） */
+  /** 草稿：名称 */
+  name: string;
+  /** 草稿：颜色 */
+  color: string;
+  onChangeName: (value: string) => void;
+  onChangeColor: (value: string) => void;
+  /** 返回账本列表（有未保存修改时由父级先弹确认） */
   onCancel: () => void;
-  onSubmit: (name: string, color: string) => void;
+  onSave: () => void;
   onDelete: () => void;
 }
 
-export function LedgerEditPanel({ ledger, onCancel, onSubmit, onDelete }: LedgerEditPanelProps) {
+export function LedgerEditPanel({
+  ledger,
+  name,
+  color,
+  onChangeName,
+  onChangeColor,
+  onCancel,
+  onSave,
+  onDelete,
+}: LedgerEditPanelProps) {
   const { semantic, spacing, radius } = useTheme();
   const { pagePadding } = useLayout();
   const t = useT();
-  const [name, setName] = useState(ledger?.name ?? '');
-  const [color, setColor] = useState<string>(ledger?.color ?? LEDGER_COLOR_OPTIONS[0]);
-
-  // 只按账本 id 回填：跟着 ledger 对象回填会打断正在打字的人
-  useEffect(() => {
-    setName(ledger?.name ?? '');
-    setColor(ledger?.color ?? LEDGER_COLOR_OPTIONS[0]);
-  }, [ledger?.id]);
 
   // 空名字会被 updateLedger 直接忽略（表面像保存成功，实际什么都没改），所以先禁掉保存键
   const canSave = name.trim().length > 0;
@@ -67,13 +73,13 @@ export function LedgerEditPanel({ ledger, onCancel, onSubmit, onDelete }: Ledger
         </AppText>
         <TextInput
           value={name}
-          onChangeText={setName}
+          onChangeText={onChangeName}
           placeholder={t('ledger.namePlaceholder')}
           placeholderTextColor={semantic.textTertiary}
           maxLength={20}
           returnKeyType="done"
           onSubmitEditing={() => {
-            if (canSave) onSubmit(name.trim(), color);
+            if (canSave) onSave();
           }}
           style={[
             styles.input,
@@ -110,7 +116,7 @@ export function LedgerEditPanel({ ledger, onCancel, onSubmit, onDelete }: Ledger
                     },
                   ]}
                   activeScale={0.9}
-                  onPress={() => setColor(option)}
+                  onPress={() => onChangeColor(option)}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: color === option }}
                   accessibilityLabel={option}
@@ -125,20 +131,10 @@ export function LedgerEditPanel({ ledger, onCancel, onSubmit, onDelete }: Ledger
           外层包一层 flex:1 的 View 才是被约束的那一层，Button 默认 fullWidth=stretch 正好铺满它 */}
       <View style={styles.actionRow}>
         <View style={styles.actionSlot}>
-          <Button
-            title={t('common.cancel')}
-            variant="secondary"
-            onPress={onCancel}
-            testID="ledger-edit-cancel"
-          />
+          <Button title={t('common.cancel')} variant="secondary" onPress={onCancel} testID="ledger-edit-cancel" />
         </View>
         <View style={styles.actionSlot}>
-          <Button
-            title={t('common.save')}
-            onPress={() => onSubmit(name.trim(), color)}
-            disabled={!canSave}
-            testID="ledger-edit-save"
-          />
+          <Button title={t('common.save')} onPress={onSave} disabled={!canSave} testID="ledger-edit-save" />
         </View>
       </View>
 

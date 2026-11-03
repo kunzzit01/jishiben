@@ -4,7 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/useTheme';
 import { useLanguage, useT } from '../i18n/LanguageContext';
-import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useTabBarScrollHandler } from '../context/TabBarAutoHideContext';
@@ -27,7 +26,8 @@ export default function ReminderCenterScreen({ navigation }: any) {
   const { semantic, spacing } = useTheme();
   const t = useT();
   const { langMode } = useLanguage();
-  const { user } = useAuth();
+  // 提醒与账号无关：本地通知在未登录时也排（原先这里的 user 只用于"没登录就只显示空态"）
+
   const { decimalPlaces } = useApp();
   const tabClearance = useTabClearance();
   const onTabScroll = useTabBarScrollHandler();
@@ -35,7 +35,6 @@ export default function ReminderCenterScreen({ navigation }: any) {
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
 
   const next = items[0];
-  const userId = user ? String(user.id) : null;
 
   /** 关掉/打开某条规则后要立刻重排，否则要等下一次数据变化 */
   const handleToggle = useCallback(
@@ -79,21 +78,6 @@ export default function ReminderCenterScreen({ navigation }: any) {
   );
 
   const header = <ScreenHeader variant="compact" title={t('reminder.title')} onBack={() => navigation.goBack()} />;
-
-  if (!userId) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}>
-        <HeroGradient fill />
-        {header}
-        <EmptyState
-          icon="person-circle-outline"
-          title={t('reminder.signInTitle')}
-          description={t('reminder.signInDesc')}
-          testID="reminder-signed-out"
-        />
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}>

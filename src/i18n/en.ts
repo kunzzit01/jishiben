@@ -256,6 +256,8 @@ export const en = {
     creditLimitLabel: 'Credit Limit',
     creditTotalLabel: 'Total limit',
     creditUsedLabel: 'Used Credit',
+    creditAvailableLabel: 'Available credit',
+    creditUsedAutoLabel: 'Used credit',
     creditAvailableHint: 'Used %{used} (limit − available)',
     accountName: 'Account Name',
     accountNamePlaceholder: 'e.g. Bank card ****',
@@ -517,11 +519,7 @@ export const en = {
     sourceDaily: 'Daily logging',
     sourceMonthEnd: 'Month wrap-up',
     emptyTitle: 'Nothing to remind you about yet',
-    emptyDesc: 'Turn on “Payment reminder” in a credit card’s account settings, or switch on “Daily logging reminder” below, and upcoming reminders show up here.',
-    // Reminders are scheduled per account (the hook needs a userId), so a local-only
-    // session never has any — do not point users at a switch that can do nothing
-    signInTitle: 'Sign in to schedule reminders',
-    signInDesc: 'Reminders are scheduled per account. This device is in local-only mode, so nothing gets scheduled.',
+    emptyDesc: 'Set a statement / due date on a credit card (reminders send automatically), or switch on “Daily logging reminder” below, and upcoming reminders show up here.',
   },
   home: {
     netWorth: 'Net Worth',
@@ -668,6 +666,8 @@ export const en = {
     reminderToggle: 'Payment reminder',
     // Single-line contract (AssetScreen uses ListRow.subtitle): name both nodes, stay short
     reminderToggleHint: 'On statement date + 3/2/1 days before due',
+    // Automatic-send note (the read-only row on the add-asset form)
+    reminderAuto: 'Automatic: on statement day and 3/2/1 days before due',
     reminderOn3: '%{name} is due in 3 days — just a friendly heads-up.',
     reminderOn2: '%{name} is due the day after tomorrow — don’t forget.',
     reminderOn1: '%{name} is due tomorrow — remember to pay.',
@@ -758,6 +758,12 @@ export const en = {
     create: 'Create Ledger',
     editTitle: 'Edit ledger',
     editNameLabel: 'Ledger name',
+    unsavedTitle: 'Save changes to this ledger?',
+    unsavedMsg: 'The new name or color is not saved yet. Closing now discards it.',
+    discard: 'Discard',
+    keepEditing: 'Keep editing',
+    saveFailedTitle: 'Not saved',
+    saveFailedMsg: 'This ledger is no longer in the local ledger list (not synced yet, or deleted on another device). Please try again.',
   },
   profile: {
     title: 'Settings',

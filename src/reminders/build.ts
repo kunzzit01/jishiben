@@ -23,8 +23,8 @@ function atHour(year: number, monthIndex: number, day: number, hour: number): Da
 /** 信用卡：复用既有纯函数，键与文案完全不变（历史已排通知不会重复） */
 function buildCreditItems(inputs: BuildInputs): ReminderItem[] {
   const { userId, assets, now } = inputs;
-  if (!userId) return [];
-  return buildCreditCardReminderNodes(userId, assets, now).map((node) => {
+  // userId 在这里只当键命名空间（未登录时是 'local'），不再是"能不能排"的开关
+  return buildCreditCardReminderNodes(userId || 'local', assets, now).map((node) => {
     const isStatement = node.kind === 'statement';
     const titleKey = isStatement
       ? 'asset.reminderOnStatement'

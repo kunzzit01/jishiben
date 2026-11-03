@@ -64,14 +64,16 @@ function dayStamp(day: CalendarDay): string {
 }
 
 /**
- * 目标账户：信用卡 + 开了还款提醒 + 还款日 1-30 号 + 未归档。跨所有账本，不受当前账本限制。
+ * 目标账户：信用卡 + 还款提醒默认开启（只有显式关掉才排除）+ 还款日 1-30 号 + 未归档。跨所有账本，不受当前账本限制。
+ * 判 reminderEnabled !== false 而不是 === true：这个字段是后加的可选字段，历史卡片上根本没有它，
+ * 判 === true 等于把老数据静默关成「不提醒」，而用户的预期是「提醒本来就是自动的，不需要点开」。
  * 归档判定用 archivedAt（有值即归档；恢复时 AppContext.unarchiveAsset 会把它删掉，所以活跃账户恒为 undefined）。
  * 归档那一下 assets 就变了 → 指纹变化 → reconcile 会把这张卡已排的记录取消并删掉。
  */
 function isCreditCardReminderTarget(asset: Asset): boolean {
   return (
     asset.type === 'credit' &&
-    asset.reminderEnabled === true &&
+    asset.reminderEnabled !== false &&
     !asset.archivedAt &&
     isValidMonthDay(asset.dueDay)
   );

@@ -35,6 +35,7 @@ import { AppText, BottomSheet, Button, EmptyState, GlassView, HeroGradient, Icon
 import { MonthlyBudgetSheet } from '../components/MonthlyBudgetSheet';
 import { BudgetRenameSheet } from '../components/BudgetRenameSheet';
 import { LedgerEditPanel } from '../components/LedgerEditPanel';
+import { LEDGER_COLOR_OPTIONS } from '../constants/ledgerColors';
 import { TransactionSearchSheet, type SearchRow } from '../components/TransactionSearchSheet';
 import { withAlpha } from '../components/ui/color';
 import { FolderAssetCard } from '../components/home/FolderAssetCard';
@@ -1341,6 +1342,7 @@ export default function HomeScreen({ navigation }: any) {
     setDefaultLedger,
     ledgers,
     updateLedger,
+    promotePendingLedger,
     deleteLedger,
     budgets,
     setBudget,
@@ -1426,9 +1428,15 @@ export default function HomeScreen({ navigation }: any) {
   // 正在编辑的账本（null = 抽屉显示账本列表）。编辑是**同一个抽屉里换内容**，不是第二个浮层 ——
   // 两个 BottomSheet 同时播弹簧、表单又在入场途中弹键盘，就是「点编辑到面板出来」那段卡顿的来源
   const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
+  // 编辑草稿（名称 / 颜色）。放在父级而不是面板里：✕ / 点遮罩 / 下拉 / 返回键被
+  // BottomSheet 的 beforeClose 拦下时，父级才拿得到现值判断「有没有改过」
+  const [ledgerDraft, setLedgerDraft] = useState<{ name: string; color: string } | null>(null);
+  // 关闭守卫的实现需要 dialog / updateLedger（都在文件后段），这里先放一个 ref 转发
+  const ledgerCloseGuardRef = useRef<() => boolean>(() => true);
   // 关抽屉时一并退出编辑态：下次打开账本抽屉总是先看到列表，不会停在上次的编辑表单
   const closeLedgerSheet = useCallback(() => {
     setEditingLedgerId(null);
+    setLedgerDraft(null);
     setActiveSheet(null);
   }, []);
   // MRU 排序：最近使用的账本排最上面（lastUsedAt 降序）；没用过的保持原数组顺序。
@@ -2687,6 +2695,68 @@ export default function HomeScreen({ navigation }: any) {
   // 待删除账本（点了删除并确认后进入 PIN 验证；PIN 通过才真正删除）
   const { hasPin } = useAppLock();
   const dialog = useDialog();
+
+  // ── 账本编辑的「未保存」守卫 ──
+  // ✕ / 点遮罩 / 下拉 / 安卓返回键都会先经 ledgerCloseGuardRef。有改动时给
+  // 「保存 / 放弃修改 / 继续编辑」三条路；否则改完名字手一滑点到遮罩，改动就无声丢了
+  const editingLedger = ledgers.find((l) => l.id === editingLedgerId) ?? null;
+  const ledgerEditDirty =
+    !!editingLedger &&
+    !!ledgerDraft &&
+    (ledgerDraft.name.trim() !== editingLedger.name.trim() ||
+      ledgerDraft.color !== (editingLedger.color ?? LEDGER_COLOR_OPTIONS[0]));
+  // after：'list' = 回到账本列表（抽屉留着）、'close' = 连抽屉一起关
+  const leaveLedgerEditor = (after: 'list' | 'close') => {
+    setEditingLedgerId(null);
+    setLedgerDraft(null);
+    if (after === 'close') setActiveSheet(null);
+  };
+  const saveLedgerDraft = async (after: 'list' | 'close') => {
+    const id = editingLedgerId;
+    const draft = ledgerDraft;
+    if (!id || !draft) return;
+    const trimmed = draft.name.trim();
+    if (!trimmed) {
+      // 空名字不落库（updateLedger 会忽略）：留在面板并提示，别当成"保存成功"把抽屉关掉
+      dialog.alert({ title: t('ledger.enterName') });
+      return;
+    }
+    let written = await updateLedger(id, { name: trimmed, color: draft.color });
+    if (!written) {
+      // 本机账本表为空时，界面用的是**内存占位账本**（不落盘、不参与同步）——
+      // 对它改名不能走 updateLedger，而是顺手落一本真账本，占位期的数据一起改挂过去
+      written = await promotePendingLedger({ name: trimmed, color: draft.color });
+    }
+    if (!written) {
+      // 既不是真账本也不是占位账本（多半已被别的设备删掉）：别关面板假装成功
+      dialog.alert({ title: t('ledger.saveFailedTitle'), message: t('ledger.saveFailedMsg') });
+      return;
+    }
+    hapticSuccess();
+    leaveLedgerEditor(after);
+  };
+  const requestLeaveLedgerEditor = (after: 'list' | 'close') => {
+    if (!editingLedgerId) return;
+    if (!ledgerEditDirty) {
+      leaveLedgerEditor(after);
+      return;
+    }
+    dialog.alert({
+      title: t('ledger.unsavedTitle'),
+      message: t('ledger.unsavedMsg'),
+      buttons: [
+        { text: t('ledger.discard'), style: 'destructive', onPress: () => leaveLedgerEditor(after) },
+        { text: t('common.save'), style: 'default', onPress: () => { void saveLedgerDraft(after); } },
+        { text: t('ledger.keepEditing'), style: 'cancel' },
+      ],
+    });
+  };
+  ledgerCloseGuardRef.current = () => {
+    if (!editingLedgerId) return true;
+    if (!ledgerEditDirty) return true;
+    requestLeaveLedgerEditor('close');
+    return false;
+  };
   const [pendingDeleteLedgerId, setPendingDeleteLedgerId] = useState<string | null>(null);
   const [pinSheetOpen, setPinSheetOpen] = useState(false);
   const pendingDeleteLedger = ledgers.find((l) => l.id === pendingDeleteLedgerId);
@@ -3183,15 +3253,18 @@ export default function HomeScreen({ navigation }: any) {
                     accessibilityRole="button"
                     accessibilityLabel={t('home.addAccount')}
                     testID="home-no-assets"
-                    style={{
+                    /* 定位 / 尺寸必须落在 Pressable 自身（containerStyle）：以前整块写在 style 上 →
+                       内层 Animated.View 绝对定位、Pressable 自身没有在流内的子节点 → 命中区塌成 0 高，
+                       安卓用户反馈「添加账户点不动」。浏览器预览看不出来：CSS 命中按元素盒子算，
+                       子节点跑到父盒子外面照样点得到。 */
+                    containerStyle={{
                       position: 'absolute',
                       left: cardSize.width * 0.088,
                       right: cardSize.width * 0.088,
                       top: cardSize.height * 0.16,
                       height: cardSize.height * 0.7,
-                      alignItems: 'center',
-                      justifyContent: 'center',
                     }}
+                    style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
                   >
                     <View
                       style={{
@@ -3393,6 +3466,7 @@ export default function HomeScreen({ navigation }: any) {
       <BottomSheet
         visible={ledgerPickerOpen}
         onClose={closeLedgerSheet}
+        beforeClose={() => ledgerCloseGuardRef.current()}
         title={t(editingLedgerId ? 'ledger.editTitle' : 'home.selectLedger')}
         testID="ledger-sheet"
       >
@@ -3400,17 +3474,15 @@ export default function HomeScreen({ navigation }: any) {
         {editingLedgerId ? (
           <LedgerEditPanel
             ledger={ledgers.find((l) => l.id === editingLedgerId) ?? null}
-            onCancel={() => setEditingLedgerId(null)}
-            onSubmit={async (name, color) => {
-              const id = editingLedgerId;
-              if (!id) return;
-              await updateLedger(id, { name, color });
-              hapticSuccess();
-              setEditingLedgerId(null);
-            }}
+            name={ledgerDraft?.name ?? ''}
+            color={ledgerDraft?.color ?? LEDGER_COLOR_OPTIONS[0]}
+            onChangeName={(value) => setLedgerDraft((d) => (d ? { ...d, name: value } : d))}
+            onChangeColor={(value) => setLedgerDraft((d) => (d ? { ...d, color: value } : d))}
+            onCancel={() => requestLeaveLedgerEditor('list')}
+            onSave={() => void saveLedgerDraft('list')}
             onDelete={() => {
               const target = ledgers.find((l) => l.id === editingLedgerId);
-              setEditingLedgerId(null);
+              closeLedgerSheet();
               if (target) requestDeleteLedger(target);
             }}
           />
@@ -3429,7 +3501,10 @@ export default function HomeScreen({ navigation }: any) {
                 active={l.id === activeLedgerId}
                 isDefault={l.id === defaultLedgerId}
                 totals={ledgerTotals[l.id] ?? []}
-                onEdit={() => setEditingLedgerId(l.id)}
+                onEdit={() => {
+                  setEditingLedgerId(l.id);
+                  setLedgerDraft({ name: l.name, color: l.color ?? LEDGER_COLOR_OPTIONS[0] });
+                }}
                 onSetDefault={() => {
                   hapticLight();
                   void setDefaultLedger(l.id);

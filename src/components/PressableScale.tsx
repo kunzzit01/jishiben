@@ -40,7 +40,16 @@ export const PRESS_TRANSITION = {
 type Props = {
   onPress?: () => void;
   onLongPress?: () => void;
+  /** 视觉样式：落在内层 Animated.View 上（缩放的那一层），不参与命中测试 */
   style?: StyleProp<ViewStyle>;
+  /**
+   * 命中区样式：落在 Pressable 自身，也就是真正吃触摸的那一层。
+   * ⚠ 需要「绝对定位 / 铺满某个绝对容器 / 固定边长」时**必须**放这里。
+   * style 若写成 position:'absolute' 就会出事：内层跟随内容走，Pressable 自身没有
+   * 在流内的子节点 → 塌成 0 高，安卓 / iOS 上整块点不动（Web 例外：CSS 命中按元素
+   * 盒子算，子节点跑到父盒子外面照样点得到，所以浏览器预览发现不了）。
+   */
+  containerStyle?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
   /** 按下时的缩放（默认取令牌 motion.pressScale 0.97）；传 1 = 完全不缩放（底部 Tab 用） */
   activeScale?: number;
@@ -59,6 +68,7 @@ export default function PressableScale({
   onPress,
   onLongPress,
   style,
+  containerStyle,
   children,
   activeScale,
   disabled,
@@ -89,6 +99,7 @@ export default function PressableScale({
 
   return (
     <Pressable
+      style={containerStyle}
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={delayLongPress}

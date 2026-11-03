@@ -21,6 +21,7 @@ import {
   listAllTransactions,
 } from './apiClient';
 import { runStorageExclusive } from './storageQueue';
+import { needsLedgerRemap, resolveLedgerFallback } from './ledgerRefs';
 import { getCurrentUser, hydrateSession } from './sessionStore';
 import {
   Asset,
@@ -758,7 +759,12 @@ function effectiveGroups(s: LocalSnapshot): CategoryGroup[] {
 
 /** 把当前快照按表转成云端行（canonical 形状，diff 用） */
 function buildAllRows(s: LocalSnapshot): SyncMirror {
-  const fallbackLedgerId = s.activeLedgerId || 'default';
+  // normalizeSnapshot 已把账本归属修好，这里只是兜底：账本 id 永远取自真实账本，
+  // 绝不再回落到 'default' —— 那是个服务端不存在的账本，整行会被 400 拒写
+  const fallbackLedgerId = resolveLedgerFallback(
+    s.ledgers.map((l) => l.id),
+    s.activeLedgerId
+  );
   const currency = s.currency || 'MYR';
   return {
     ledgers: s.ledgers.map(ledgerToRow),
@@ -797,7 +803,7 @@ function emptySnapshot(): LocalSnapshot {
     categoryGroups: [],
     budgets: [],
     ledgers: [],
-    activeLedgerId: 'default',
+    activeLedgerId: '',
     currency: 'MYR',
     periodPreference: { type: 'month' },
     assets: [],
@@ -851,7 +857,8 @@ async function readLocalSnapshot(): Promise<LocalSnapshot> {
     categoryGroups,
     budgets,
     ledgers,
-    activeLedgerId: activeLed ?? 'default',
+    // 缺 key 时绝不能补 'default'：那是个不存在的账本 id，会被写进账户/流水再推上云吃 400
+    activeLedgerId: activeLed ?? '',
     currency: curr ?? 'MYR',
     periodPreference,
     assets,
@@ -881,6 +888,7 @@ function dedupeBudgets(list: Budget[]): Budget[] {
 
 /**
  * 修复历史遗留的不完整/悬空数据，避免推云时被后端字段校验整块拒绝：
+ * - 账本归属对不上任何一本现存账本（老版本写死的 'default' / 占位账本 id / 已回收账本）→ 改挂真实账本
  * - 资产缺 color/currency/icon/ledgerId/createdAt（每资产币种上线前的老设备数据）
  * - 交易缺 ledgerId/createdAt/date、金额非法（NaN 会被后端拒绝）
  * - 账本缺 icon/createdAt
@@ -891,16 +899,25 @@ function dedupeBudgets(list: Budget[]): Budget[] {
  * 返回 (快照, 是否有修复)：有修复时调用方把结果写回本地自愈，下次不再触发。
  */
 function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed: boolean } {
-  let changed = false;
+  // 账本归属：账本 id 只认本地账本表里的真实 id。'default'（老版本写死的首本账本 id）、
+  // 占位账本 id、以及被回收账本留下的孤儿行，服务端都会整行 400 拒写
+  // （ledgerUid does not reference one of your ledgers），同步就永远卡在那几行上 ——
+  // 所以推送前一律改挂到真实账本，判定规则见 ledgerRefs.ts。
+  const ledgerIds = s.ledgers.map((l) => l.id);
+  const ledgerFallback = resolveLedgerFallback(ledgerIds, s.activeLedgerId);
+  const orphanLedger = (ledgerId: string | undefined): boolean =>
+    needsLedgerRemap(ledgerId, ledgerIds);
+  // 当前账本自己也可能是幽灵 id（存档里存过 'default'）
+  const activeLedgerId = orphanLedger(s.activeLedgerId) ? ledgerFallback : s.activeLedgerId;
+  let changed = activeLedgerId !== s.activeLedgerId;
   const currencyFallback = s.currency || 'MYR';
-  const ledgerFallback = s.activeLedgerId || 'default';
 
   const assets = s.assets.map((a) => {
     const patch: Partial<Asset> = {};
     if (!a.color) patch.color = FALLBACK_COLOR;
     if (!a.currency) patch.currency = currencyFallback;
     if (!a.icon) patch.icon = FALLBACK_ICON;
-    if (!a.ledgerId) patch.ledgerId = ledgerFallback;
+    if (orphanLedger(a.ledgerId)) patch.ledgerId = ledgerFallback;
     if (!Number.isFinite(Number(a.createdAt)) || !a.createdAt) patch.createdAt = Date.now();
     if (!Object.keys(patch).length) return a;
     changed = true;
@@ -912,7 +929,7 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
 
   const transactions = s.transactions.map((t) => {
     const patch: Partial<Transaction> = {};
-    if (!t.ledgerId) patch.ledgerId = ledgerFallback;
+    if (orphanLedger(t.ledgerId)) patch.ledgerId = ledgerFallback;
     if (!Number.isFinite(Number(t.createdAt)) || !t.createdAt) patch.createdAt = Date.now();
     if (!t.date) patch.date = new Date().toISOString().slice(0, 10);
     if (!Number.isFinite(Number(t.amount))) patch.amount = 0;
@@ -942,7 +959,7 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
 
   const paymentPlans = s.paymentPlans.map((p) => {
     const patch: Partial<PaymentPlan> = {};
-    if (!p.ledgerId) patch.ledgerId = ledgerFallback;
+    if (orphanLedger(p.ledgerId)) patch.ledgerId = ledgerFallback;
     // 后端 startDate 必填（LocalDate），缺失会被 400 拒写
     if (!p.startDate) patch.startDate = new Date().toISOString().slice(0, 10);
     if (!Number.isFinite(Number(p.amount)) || Number(p.amount) < 0) patch.amount = 0;
@@ -952,7 +969,9 @@ function normalizeSnapshot(s: LocalSnapshot): { snapshot: LocalSnapshot; changed
   });
 
   return {
-    snapshot: changed ? { ...s, assets, transactions, ledgers, budgets, paymentPlans } : s,
+    snapshot: changed
+      ? { ...s, activeLedgerId, assets, transactions, ledgers, budgets, paymentPlans }
+      : s,
     changed,
   };
 }
@@ -1031,12 +1050,13 @@ async function fetchAll(): Promise<CloudPull> {
   // profile 行也走一次归一化，避免带着 updatedAt 之类的服务端列导致每次启动都误判"有变化"
   const cloud: SyncMirror = {
     ledgers: ledgers.map(ledgerToRow),
-    assets: assets.map((a, i) => assetToRow(a, i, a.ledgerId || 'default', profile.currency)),
+    // 云端 DTO 必带 ledgerUid（assets.ledger_id 是 NOT NULL 外键），镜像行不需要兜底
+    assets: assets.map((a, i) => assetToRow(a, i, '', profile.currency)),
     categoryGroups: categoryGroups.map(groupToRow),
     categories: categories.map(categoryToRow),
     transactions: transactions.map(txToRow),
     budgets: budgets.map((b) => budgetToRow(b, profile.currency)),
-    paymentPlans: paymentPlans.map((p, i) => planToRow(p, i, p.ledgerId || 'default')),
+    paymentPlans: paymentPlans.map((p, i) => planToRow(p, i, '')),
     profile,
   };
   return {

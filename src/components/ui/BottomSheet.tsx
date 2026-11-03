@@ -52,6 +52,11 @@ export interface BottomSheetProps {
   closeButton?: boolean;
   /** 允许下拉关闭（默认允许） */
   dismissible?: boolean;
+  /**
+   * 关闭前守卫：返回 false 拦下这次关闭（用于「有未保存修改」先弹确认框）。
+   * 点遮罩 / ✕ / 下拉 / 安卓返回键四条路径都先问它；拦下时面板弹回原位。
+   */
+  beforeClose?: () => boolean;
   /** 内容最大高度（占屏高比，默认 0.85） */
   maxHeightRatio?: number;
   /** 面板底填充覆盖（默认 = V3 不透明卡色 semantic.homeCard）。传入的颜色须不透明，否则背后内容会透出 */
@@ -80,6 +85,7 @@ export function BottomSheet({
   handle = true,
   closeButton,
   dismissible = true,
+  beforeClose,
   maxHeightRatio = 0.85,
   fill,
   accessibilityLabel,
@@ -132,6 +138,9 @@ export function BottomSheet({
   // onClose 走 ref 转发：手势对象只建一次，不会随渲染重建
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // 守卫同样走 ref：手势对象只建一次，不能把当次渲染的闭包焊进去
+  const beforeCloseRef = useRef(beforeClose);
+  beforeCloseRef.current = beforeClose;
 
   const unmount = () => setMounted(false);
 
@@ -147,6 +156,12 @@ export function BottomSheet({
 
   /** 用户主动关闭（关闭键 / 点遮罩 / 下拉到底）：先起出场动画（带松手速度），再同步父级状态 */
   const requestClose = (velocity = 0) => {
+    // 被守卫拦下（例如账本编辑有未保存的修改）：面板弹回原位，由父级弹窗决定保存还是放弃
+    if (beforeCloseRef.current && beforeCloseRef.current() === false) {
+      translateY.value = withSpring(0, motion.spring.sheet);
+      scrimOpacity.value = withTiming(1, { duration: motion.timing.fade });
+      return;
+    }
     playExit(velocity);
     onCloseRef.current();
   };
