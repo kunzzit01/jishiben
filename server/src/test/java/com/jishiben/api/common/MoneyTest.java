@@ -31,6 +31,19 @@ class MoneyTest {
     }
 
     @Test
+    void signedAmountKeepsAMinusSignThatCarriesMeaning() {
+        // 信用卡欠款：资产的起始余额是负数，符号本身就是业务语义（见 Money.requireSignedAmount）
+        assertThat(Money.requireSignedAmount(new BigDecimal("-1000"), "initialBalance"))
+                .isEqualTo(new BigDecimal("-1000.0000"));
+        assertThatThrownBy(() -> Money.requireSignedAmount(new BigDecimal("1000000000001"), "initialBalance"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("too large");
+        assertThatThrownBy(() -> Money.requireSignedAmount(null, "initialBalance"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("required");
+    }
+
+    @Test
     void additionStaysExactForDecimalMoney() {
         // The classic float trap: 0.1 + 0.2 must be 0.3000, not 0.30000000000000004.
         assertThat(Money.plus(new BigDecimal("0.1"), new BigDecimal("0.2")))

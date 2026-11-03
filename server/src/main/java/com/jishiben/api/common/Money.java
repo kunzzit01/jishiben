@@ -60,6 +60,24 @@ public final class Money {
         return scale(value);
     }
 
+    /**
+     * Signed amount: the minus sign is data, not a typo. Only assets' {@code initialBalance} uses
+     * this — the app stores a credit card as {@code initialBalance = available − creditLimit}
+     * (docs/FEATURES.md §8.2: {@code balance < 0} means debt) and an overdrawn account is negative
+     * too. Reports already sum it as a signed value ({@code ReportService}). Everything that is
+     * genuinely non-negative (transaction/budget/plan amounts, credit limits, fees) keeps using
+     * {@link #requireAmount} / {@link #optionalAmount}.
+     */
+    public static BigDecimal requireSignedAmount(BigDecimal value, String field) {
+        if (value == null) {
+            throw ApiException.validation(field + " is required");
+        }
+        if (value.abs().compareTo(MAX_AMOUNT) > 0) {
+            throw ApiException.validation(field + " is too large");
+        }
+        return scale(value);
+    }
+
     /** Sum helper for reports: null-safe and every operand already carries its own currency bucket. */
     public static BigDecimal plus(BigDecimal left, BigDecimal right) {
         BigDecimal a = left == null ? BigDecimal.ZERO : left;

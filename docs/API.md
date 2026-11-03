@@ -233,6 +233,11 @@
 
 - 分类的大类必须同类型（expense 分类不能挂 income 大类）→ 400。
 - 信用卡专属字段（`creditLimit/statementDay/dueDay/interestRate`）在 `type != credit` 时被置 NULL。
+- **`assets.initialBalance` 是有符号金额**：App 用 `initialBalance = 可用额度 − 信用额度` 存信用卡，
+  所以欠款是负数（`docs/FEATURES.md` §8.2：`balance < 0` 即欠款），透支的储蓄账户同理。
+  服务端用 `Money.requireSignedAmount` 校验它；其余金额（流水/预算/计划金额、额度、手续费）
+  仍然禁止负数（`Money.requireAmount`）。2026-11-03 之前这里误用 `requireAmount`，
+  导致所有「有欠款的信用卡」都无法备份（400 `initialBalance must not be negative`）。
 - `archived: true` 写 `archived_at = now`；`false` 清空。
 - 账本 upsert 传 `defaultLedger: true` 时，同账户其它账本自动取消默认。
 

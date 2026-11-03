@@ -75,7 +75,8 @@ public class AssetService {
         asset.setType(Checks.oneOf(request.type(), TYPES, "type"));
         asset.setCurrency(Texts.upperCurrency(request.currency(), "currency"));
         if (request.initialBalance() != null) {
-            asset.setInitialBalance(Money.requireAmount(request.initialBalance(), "initialBalance"));
+            // 有符号：信用卡以「可用 − 额度」存起始余额，欠款就是负数（见 Money.requireSignedAmount）
+            asset.setInitialBalance(Money.requireSignedAmount(request.initialBalance(), "initialBalance"));
         }
         applyCredit(asset, request.creditLimit(), request.statementDay(), request.dueDay(),
                 request.interestRate());
@@ -109,7 +110,7 @@ public class AssetService {
             asset.setCurrency(Texts.upperCurrency(request.currency(), "currency"));
         }
         if (request.initialBalance() != null) {
-            asset.setInitialBalance(Money.requireAmount(request.initialBalance(), "initialBalance"));
+            asset.setInitialBalance(Money.requireSignedAmount(request.initialBalance(), "initialBalance"));
         }
         applyCredit(asset, request.creditLimit(), request.statementDay(), request.dueDay(),
                 request.interestRate());
