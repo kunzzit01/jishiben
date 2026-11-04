@@ -5,6 +5,8 @@
 // 注意：栈内注册的 name 仍是中文（App.tsx），这里只是"调用侧不再手写字符串"，
 // 改界面文案（行标题）不影响跳转，改路由只需要动 App.tsx 注册处 + 这里。
 
+import type { AssetType } from '../types';
+
 /** 跳转目标（= App.tsx 各 Stack.Screen 的 name，含 Tab 名） */
 export const ROUTES = {
   // Tab 级
@@ -22,6 +24,10 @@ export const ROUTES = {
   LEDGER: '开设账本',
   ABOUT: '关于应用',
   FEEDBACK: '帮助与反馈',
+  /** 通知中心（HomeStack 里注册）：只展示通知，不放置任何设置项 */
+  NOTICE_CENTER: '通知中心',
+  /** 提醒设置（ProfileStack 里注册）：规则开关 / 预算提醒管理 */
+  REMINDER_SETTINGS: '提醒设置',
   CALCULATOR: '计算器',
   LOAN_CALC: '贷款计算器',
   COMPOUND_CALC: '复利计算器',
@@ -77,8 +83,8 @@ export type HomeStackParamList = {
   开设账本: undefined;
   关于应用: undefined;
   帮助与反馈: undefined;
-  // 提醒中心：把「未来 3 个月会提醒什么」从系统通知栏搬进 App 可看
-  提醒中心: undefined;
+  // 通知中心：把「未来 3 个月会提醒什么」从系统通知栏搬进 App 可看（只读列表；设置项在设置里）
+  通知中心: undefined;
   计算器: undefined;
   贷款计算器: undefined;
   复利计算器: undefined;
@@ -86,7 +92,7 @@ export type HomeStackParamList = {
   // 概览模式（设计稿第 11 屏）
   概览模式: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
-  添加资产账户: { assetId?: string } | undefined;
+  添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };
 
 /** ProfileStack：设置项 Tab 的堆栈 */
@@ -95,6 +101,8 @@ export type ProfileStackParamList = {
   设置: undefined;
   类别分类: undefined;
   开设账本: undefined;
+  // 提醒设置：规则开关 / 预算提醒管理（从设置项「功能」分组进入）
+  提醒设置: undefined;
   AI专区: undefined;
   // 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入
   概览模式: undefined;
@@ -122,15 +130,16 @@ export type ProfileStackParamList = {
   贷款计算器: undefined;
   复利计算器: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
-  添加资产账户: { assetId?: string } | undefined;
+  添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };
 
 /** AssetStack */
 export type AssetStackParamList = {
-  资产主页: undefined;
+  // 转账保存后从「记一笔」跳过来：带上转入账户 id，资产页据此直接打开它的详情
+  资产主页: { focusAssetId?: string } | undefined;
   // 账户流水里的行也能进账单详情（同一组件双注册，带钱包视角，goBack 回账户详情）
   账单详情: { transactionId: string; perspectiveAssetId?: string };
-  添加资产账户: { assetId?: string } | undefined;
+  添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
   // 账户详情的"转账" push 本栈的"记一笔"（与 HomeStack / ProfileStack 同一组件三注册）：
   // goBack 天然回账户详情。签名与另两处保持一致，presetType='transfer' 预选转账档
   记一笔: {
@@ -147,13 +156,14 @@ export type AddTransactionStackParamList = {
   记一笔主页: undefined;
   类别分类: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
-  添加资产账户: { assetId?: string } | undefined;
+  添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };
 
 /** 底部 Tab 导航器；'设置项' 支持指定内层 screen（抽屉里跳设置主页用） */
 export type MainTabParamList = {
   首页: undefined;
-  资产: undefined;
+  // params 透传给 AssetStack：navigate('资产', { screen: '资产主页', params: { focusAssetId } })
+  资产: { screen: '资产主页'; params?: { focusAssetId?: string } } | undefined;
   记一笔: undefined;
   统计: undefined;
   设置项: { screen: 'home' } | undefined;

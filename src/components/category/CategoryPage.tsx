@@ -65,6 +65,8 @@ import {
 const ICON_OPTIONS: CategoryIconName[] = CATEGORY_ICON_OPTIONS;
 const COLOR_OPTIONS = CATEGORY_COLOR_OPTIONS;
 const CAT_ORDER_KEY = '@jizhang/categoryOrder';
+/** 被用户删掉的内置大组名（默认组无法从代码里删，只能记「已隐藏」） */
+const HIDDEN_GROUPS_KEY = '@jizhang/hiddenGroups';
 const GROUP_ORDER_KEY = '@jizhang/categoryGroupOrder';
 
 type CategorySection = { group: string; items: Category[]; custom?: boolean };
@@ -395,7 +397,13 @@ export default function CategoryPage({
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollYSV = useSharedValue(0);
   const contentHRef = useRef(0);
-  const { height: windowH } = useWindowDimensions();
+  const { width: windowW, height: windowH } = useWindowDimensions();
+  // 图标弹层用像素高度：百分比在 web 的 Pressable 里会算成 0（网格被压扁 → 图标叠成黑块）
+  const PICKER_H = Math.min(420, Math.round(windowH * 0.55));
+  // 图标格：6 列定宽（百分比宽 + aspectRatio 在 ScrollView 内会被算成 0，图标全挤成一行乱码）
+  const ICON_COLS = 6;
+  const ICON_CELL_W = Math.floor((Math.min(windowW, 560) - 20) / ICON_COLS);
+  const ICON_CELL_H = Math.round(ICON_CELL_W / 1.15);
 
   /* —— 内联新增小卡的聚焦滚动（原在记一笔，两处入口共用一套） ——
    * 系统键盘弹起会盖住小卡输入框。Fabric 下 measureLayout 要求原生 ref，这里改用
@@ -527,6 +535,8 @@ export default function CategoryPage({
   const [catOrder, setCatOrder] = useState<Record<string, number>>({});
   // 大分组排列顺序（按组名存）
   const [groupOrder, setGroupOrder] = useState<Record<string, number>>({});
+  // 内置默认大组的「删除」= 隐藏：默认组由代码常量提供，删不掉，只能记下来不再渲染
+  const [hiddenGroups, setHiddenGroups] = useState<string[]>([]);
   // 每张大组卡片自带内联添加：正在添加的组名 + 输入的名称 + 选择的图标/颜色
   const [addingGroupName, setAddingGroupName] = useState<string | null>(null);
   const [inlineName, setInlineName] = useState('');
@@ -542,6 +552,14 @@ export default function CategoryPage({
 
   // 载入组内排序编号 + 大分组排列顺序
   useEffect(() => {
+    // 内置大组的隐藏名单：与排序编号一起读回
+    Promise.resolve(AsyncStorage.getItem(HIDDEN_GROUPS_KEY)).then((raw) => {
+      if (!raw) return;
+      try {
+        const arr = JSON.parse(raw) as string[];
+        if (Array.isArray(arr)) setHiddenGroups(arr);
+      } catch {}
+    });
     // 两个键一起读、一次提交：分两次 setState 会触发两轮重渲，而每轮都会重算 sections
     // → 10 个网格的 items 引用全变 → memo 失效（安卓进页面卡顿的一半原因）。
     Promise.all([AsyncStorage.getItem(CAT_ORDER_KEY), AsyncStorage.getItem(GROUP_ORDER_KEY)])
@@ -594,7 +612,9 @@ export default function CategoryPage({
   const sections = useMemo(() => {
     const pool = categories.filter((c) => c.type === manageType);
     const isExpense = manageType === 'expense';
-    const defaultGroups: string[] = isExpense ? [...EXPENSE_CATEGORY_GROUPS] : [...INCOME_CATEGORY_GROUPS];
+    const defaultGroups: string[] = (isExpense ? [...EXPENSE_CATEGORY_GROUPS] : [...INCOME_CATEGORY_GROUPS]).filter(
+      (g) => !hiddenGroups.includes(g)
+    );
     const customGroups = categoryGroups.filter((g) => g.type === manageType);
     const known = [...defaultGroups, ...customGroups.map((g) => g.name)];
     const out: CategorySection[] = defaultGroups.map((group) => ({
@@ -619,7 +639,7 @@ export default function CategoryPage({
 
     // 大分组按持久化的排列顺序排（没编号的排最后，保持原有相对顺序）
     return out.sort((a, b) => (groupOrder[a.group] ?? 9999) - (groupOrder[b.group] ?? 9999));
-  }, [categories, categoryGroups, catOrder, groupOrder, manageType]);
+  }, [categories, categoryGroups, catOrder, groupOrder, manageType, hiddenGroups]);
   // 手势回调是稳定闭包，读"当前渲染顺序"走 ref
   sectionsRef.current = sections;
 
@@ -747,7 +767,9 @@ export default function CategoryPage({
       const boxes = readGroupBoxes();
       hapticLight();
       groupDragRef.current = group;
-      groupTapBlockUntilRef.current = Number.MAX_SAFE_INTEGER;
+      // 只挡住拖拽期间 + 随后的补点（有上限）；曾用 MAX_SAFE_INTEGER，一旦 finalize 没跑到
+      // 就永远屏蔽点击 —— 用户表现为「垃圾桶点了没反应、删除不了分类」
+      groupTapBlockUntilRef.current = Date.now() + GROUP_TAP_BLOCK_MS;
       groupFingerYRef.current = absY;
       gFrom.value = from;
       gCur.value = from;
@@ -968,8 +990,11 @@ export default function CategoryPage({
             if (isCustom) {
               deleteCategoryGroup(groupName);
             } else {
-              // 默认大组：保留分类，只把它们的 group 清空（归入"其他"节）
+              // 默认大组：分类的 group 清空（归入「其他」节），再把组名记为已隐藏 —— 否则它永远留着
               items.forEach((c) => updateCategory(c.id, { group: undefined }));
+              const next = Array.from(new Set([...hiddenGroups, groupName]));
+              setHiddenGroups(next);
+              void AsyncStorage.setItem(HIDDEN_GROUPS_KEY, JSON.stringify(next));
             }
           },
         },
@@ -1165,7 +1190,7 @@ export default function CategoryPage({
                     style={styles.catHeaderDeleteBtn}
                     activeScale={0.90}
                     onPress={() => {
-                      if (Date.now() < groupTapBlockUntilRef.current) return;
+                      if (Date.now() < groupTapBlockUntilRef.current && Date.now() - groupTapBlockUntilRef.current < 300000) return;
                       handleDeleteGroup(group, items);
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1390,15 +1415,28 @@ export default function CategoryPage({
               <AppText variant="subhead" weight="600" style={styles.newCatTitle}>
                 {t('addTx.addGroup')}
               </AppText>
-              <TextInput
-                style={[styles.input, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
-                value={newGroupName}
-                onChangeText={setNewGroupName}
-                placeholder={t('addTx.groupNamePlaceholder')}
-                placeholderTextColor={semantic.textSecondary}
-                maxLength={10}
-                autoFocus
-              />
+              {/* 占位文案用 AppText 画（不交给原生 placeholder）：原生 placeholder 在玻璃卡里会发蒙、看不见 */}
+              <View style={styles.inputWrap}>
+                <TextInput
+                  style={[styles.input, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+                  value={newGroupName}
+                  onChangeText={setNewGroupName}
+                  placeholder=""
+                  maxLength={10}
+                  autoFocus
+                />
+                {newGroupName.length === 0 ? (
+                  <AppText
+                    variant="subhead"
+                    color={semantic.textSecondary}
+                    numberOfLines={1}
+                    pointerEvents="none"
+                    style={styles.inputPlaceholder}
+                  >
+                    {t('addTx.groupNamePlaceholder')}
+                  </AppText>
+                ) : null}
+              </View>
               <View style={styles.inlineBtnRow}>
                 <PressableScale style={styles.cancelBtn} activeScale={0.94} onPress={() => setNewGroupFormOpen(false)}>
                   <AppText variant="subhead" color={semantic.textSecondary}>{t('common.cancel')}</AppText>
@@ -1483,7 +1521,12 @@ export default function CategoryPage({
         <Pressable style={styles.iconPickerOverlay} onPress={() => setIconPickerOpen(false)}>
           <Pressable style={{ width: '100%' }} onPress={() => {}}>
             {/* 弹层面板用不透明卡色（Android 无模糊，玻璃 fill 会透出底下内容） */}
-            <GlassView intensity={WEB_GLASS_INTENSITY} radius={0} fill={semantic.homeCard} style={styles.iconPickerSheet}>
+            <GlassView
+              intensity={WEB_GLASS_INTENSITY}
+              radius={0}
+              fill={semantic.homeCard}
+              style={[styles.iconPickerSheet, { height: PICKER_H }]}
+            >
               <View style={styles.iconPickerHeader}>
                 <AppText variant="headline">{t('addTx.pickIconTitle')}</AppText>
                 <PressableScale
@@ -1497,13 +1540,18 @@ export default function CategoryPage({
                   <Ionicons name="close" size={18} color={semantic.textSecondary} />
                 </PressableScale>
               </View>
-              <ScrollView style={styles.iconPickerGrid} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                style={[styles.iconPickerGrid, { height: PICKER_H - 64 }]}
+                contentContainerStyle={styles.iconPickerGridContent}
+                keyboardShouldPersistTaps="handled"
+              >
                 <View style={styles.iconPickerGridInner}>
                   {ICON_OPTIONS.map((icon) => (
                     <PressableScale
                       key={icon}
                       style={[
                         styles.iconPickerCell,
+                        { width: ICON_CELL_W, height: ICON_CELL_H },
                         inlineIcon === icon && { backgroundColor: semantic.accentSoft },
                       ]}
                       activeScale={0.9}
@@ -1604,7 +1652,7 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
     iconPickerSheet: {
       borderTopLeftRadius: 28,
       borderTopRightRadius: 28,
-      maxHeight: 520,
+      overflow: 'hidden',
       paddingBottom: spacing.lg,
     },
     iconPickerHeader: {
@@ -1623,10 +1671,9 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       justifyContent: 'center',
     },
     iconPickerGrid: { paddingHorizontal: 10 },
+    iconPickerGridContent: { paddingBottom: 28 },
     iconPickerGridInner: { flexDirection: 'row', flexWrap: 'wrap' },
     iconPickerCell: {
-      width: `${100 / 6}%` as unknown as `${number}%`,
-      aspectRatio: 1.15,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 12,
@@ -1634,7 +1681,7 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
     // 组内联添加
     inlineAddCard: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     inlineBtnRow: { flexDirection: 'row', marginTop: spacing.md, alignItems: 'center' },
-    cancelBtn: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 18, marginRight: spacing.sm },
+    cancelBtn: { justifyContent: 'center', alignItems: 'center', minHeight: 44, paddingHorizontal: 18, marginRight: spacing.sm },
     // 新增大分类
     newGroupCard: { marginTop: spacing.xs, padding: spacing.lg },
     newCatTitle: { marginBottom: 10 },
@@ -1647,12 +1694,19 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       borderRadius: 999,
     },
     newGroupEntryText: { marginLeft: spacing.xs + 2 },
+    inputWrap: { justifyContent: 'center' },
+    // top 12 = (minHeight 44 − lineHeight 20) / 2：与输入框内文字同一条基线
+    inputPlaceholder: { position: 'absolute', left: spacing.lg, right: spacing.lg, top: 12 },
     input: {
       borderRadius: 999,
       paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
+      // 只有 fontSize 没有 lineHeight 时，行盒比字号矮，文字上下会被切（截图那个黄框输入框）
+      paddingVertical: 10,
+      minHeight: 44,
       fontSize: 14,
+      lineHeight: 20,
       marginBottom: spacing.md,
+      ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as unknown as object) : null),
     },
     pickerLabel: { marginBottom: spacing.sm },
     pickerRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.md },

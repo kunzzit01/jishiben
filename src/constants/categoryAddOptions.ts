@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 export type CategoryIconName = ComponentProps<typeof Ionicons>['name'];
 
-export const CATEGORY_ICON_OPTIONS: CategoryIconName[] = [
+const RAW_ICON_OPTIONS: CategoryIconName[] = [
   // 餐饮饮品
   'restaurant-outline', 'fast-food-outline', 'nutrition-outline', 'leaf-outline', 'ice-cream-outline', 'wine-outline', 'cafe-outline', 'pint-outline', 'beer-outline', 'pizza-outline',
   // 购物日用
@@ -27,6 +27,17 @@ export const CATEGORY_ICON_OPTIONS: CategoryIconName[] = [
   // 财务自然
   'cash-outline', 'wallet-outline', 'card-outline', 'logo-bitcoin', 'trending-up-outline', 'stats-chart-outline', 'pie-chart-outline', 'bar-chart-outline', 'paw-outline', 'fish-outline', 'flower-outline', 'rose-outline', 'sunny-outline', 'moon-outline', 'partly-sunny-outline', 'water-outline', 'planet-outline', 'star-outline', 'heart-outline', 'snow-outline', 'time-outline', 'calendar-outline', 'alarm-outline', 'stopwatch-outline',
 ];
+
+/**
+ * 对外暴露的图标清单：按本机 Ionicons 的 glyphMap 过滤一次。
+ * 为什么：清单里混入过本版本没有的字形名（'extension-puzzle-outline' 之类），
+ * <Ionicons name=未知名> 会画成 .notdef 豆腐块（截图里的乱码方块），过滤后只剩真实可画的图标。
+ */
+const IONICON_GLYPHS = Ionicons.glyphMap as unknown as Record<string, number | undefined>;
+
+export const CATEGORY_ICON_OPTIONS: CategoryIconName[] = RAW_ICON_OPTIONS.filter(
+  (name) => IONICON_GLYPHS[name] != null
+);
 
 export const CATEGORY_COLOR_OPTIONS = [
   '#FF7A5C', // 珊瑚橙

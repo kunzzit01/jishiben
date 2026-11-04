@@ -98,7 +98,9 @@ export function TransactionRow({
   const trimmedNote = note?.trim() ?? '';
   const title = trimmedNote.length > 0 ? trimmedNote : categoryName;
   // 副标题：类别 · 账户 · 时间（缺哪段就少哪段，不留下孤零零的分隔点）
-  const subtitle = [categoryName, accountName, meta]
+  // 规则（全站唯一口径）：**与标题重复的那一段不出现** —— 标题已经是类别名时再写一遍类别，
+  // 就成了「购物 / 购物 · 11-03」这种念两遍（账户详情流水曾如此）。
+  const subtitle = [categoryName === title ? '' : categoryName, accountName, meta]
     .filter((part): part is string => !!part)
     .join(' · ');
 
@@ -127,9 +129,12 @@ export function TransactionRow({
         <AppText variant="headline" numberOfLines={2}>
           {title}
         </AppText>
-        <AppText variant="footnote" color={semantic.textSecondary} numberOfLines={1}>
-          {subtitle}
-        </AppText>
+        {/* 三段都裁空时不占一行（否则转账行会多出一条空副标题的高度） */}
+        {!!subtitle && (
+          <AppText variant="footnote" color={semantic.textSecondary} numberOfLines={1}>
+            {subtitle}
+          </AppText>
+        )}
       </View>
 
       {/* 右：金额（MoneyText 自带 flexShrink:0，不要在外面包固定宽度） */}

@@ -16,13 +16,13 @@ import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
 
 /**
- * 提醒中心：展示的是"规则"，不是排期实例。
+ * 提醒设置（设置 → 功能）：提醒规则开关 + 预算提醒管理。展示的是"规则"，不是排期实例。
  *
  * 为什么：每月 5 号的还款日提醒是一条规则；系统里为了不漏，会把它物化成未来 3 个月、
  * 每次提前 3/2/1 天的十几条通知。把实例铺给用户看，屏幕上就是"还有 3 天／还有 2 天…"
  * 刷屏，谁都不想读。所以这里一条规则一行，右边一个开关；具体时刻只在"下次提醒"里出现。
  */
-export default function ReminderCenterScreen({ navigation }: any) {
+export default function ReminderSettingsScreen({ navigation }: any) {
   const { semantic, spacing } = useTheme();
   const t = useT();
   const { langMode } = useLanguage();
@@ -33,8 +33,6 @@ export default function ReminderCenterScreen({ navigation }: any) {
   const onTabScroll = useTabBarScrollHandler();
   const { items, allItems, rules, disabledRules, toggleRule, loading } = useReminderItems();
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
-
-  const next = items[0];
 
   /** 关掉/打开某条规则后要立刻重排，否则要等下一次数据变化 */
   const handleToggle = useCallback(
@@ -77,7 +75,7 @@ export default function ReminderCenterScreen({ navigation }: any) {
     [langMode, t]
   );
 
-  const header = <ScreenHeader variant="compact" title={t('reminder.title')} onBack={() => navigation.goBack()} />;
+  const header = <ScreenHeader variant="compact" title={t('reminder.settingsTitle')} onBack={() => navigation.goBack()} />;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: semantic.bg }]} edges={['top']}>
@@ -88,24 +86,6 @@ export default function ReminderCenterScreen({ navigation }: any) {
         scrollEventThrottle={16}
         contentContainerStyle={[styles.content, { paddingBottom: tabClearance, paddingHorizontal: spacing.xl }]}
       >
-        {next ? (
-          <Card testID="reminder-next-card">
-            <AppText variant="footnote" color={semantic.textSecondary}>
-              {t('reminder.nextTitle')}
-            </AppText>
-            <View style={styles.nextWhenRow}>
-              <AppText variant="title3" weight="600">
-                {formatDate(next.at, langMode, { style: 'monthDay' })}
-              </AppText>
-              <AppText variant="headline" color={semantic.textSecondary}>
-                {String(next.at.getHours()).padStart(2, '0')}:{String(next.at.getMinutes()).padStart(2, '0')}
-              </AppText>
-            </View>
-            <AppText variant="subhead" color={semantic.textPrimary} style={styles.nextMessage}>
-              {t(next.titleKey, next.titleParams)}
-            </AppText>
-          </Card>
-        ) : null}
 
         {!loading && rules.length === 0 ? (
           <EmptyState
@@ -154,7 +134,9 @@ export default function ReminderCenterScreen({ navigation }: any) {
                   iconColor={alert.level === 'over' ? semantic.danger : semantic.textSecondary}
                   title={
                     alert.level === 'over'
-                      ? t('reminder.budgetOverTitle', { name, percent: alert.percent })
+                      ? `${name} ${t('home.budgetOver', {
+                          amount: formatMoney(alert.spent - alert.limit, { decimals: decimalPlaces }),
+                        })}`
                       : t('reminder.budgetNearTitle', { name, percent: alert.percent })
                   }
                   subtitle={t('reminder.budgetBody', {

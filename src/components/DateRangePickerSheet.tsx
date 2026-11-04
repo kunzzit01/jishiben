@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, PanResponder, Pressable, BackHandler, useWindowDimensions } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ScrollView } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -20,6 +22,10 @@ import PressableScale from './PressableScale';
 import { useT } from '../i18n/LanguageContext';
 import { useTabBarForceHide } from '../context/TabBarAutoHideContext';
 import { ThemeColors, radius, typography } from '../theme/theme';
+
+const HIT_DEBUG = false; // 临时：Pressable 命中区染半透明红；验完改 false
+const HEADER_DEBUG = false; // 临时：显示标题栏边界；验完改 false
+const hitDbg = HIT_DEBUG ? { backgroundColor: 'rgba(255,0,0,0.10)' } : null;
 
 export type DateRange = { start: string; end: string };
 
@@ -108,6 +114,8 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   const now = new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [selStart, setSelStart] = useState<string | null>(null);
+  // 日历内容区实测宽度：星期与日期共用同一列宽（不各自算）
+  const [calW, setCalW] = useState(0);
   const [selEnd, setSelEnd] = useState<string | null>(null);
 
   // 打开时以当前范围初始化选择和视图月份
@@ -121,11 +129,14 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
 
   const calCells = useMemo(() => {
     const first = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1);
-    const offset = (first.getDay() + 6) % 7; // 周一=0
+    const offset = first.getDay(); // 表头以「日」开头 → 周日=0
     const startDay = new Date(first);
     startDay.setDate(1 - offset);
     const cells: { key: string; day: number; muted: boolean }[] = [];
-    for (let i = 0; i < 42; i++) {
+    // 真实周数：前导空格 + 当月天数，向上取整到整周（不固定 6 行、不留多余空行）
+    const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+    const totalCells = Math.ceil((offset + daysInMonth) / 7) * 7;
+    for (let i = 0; i < totalCells; i++) {
       const d = new Date(startDay);
       d.setDate(startDay.getDate() + i);
       cells.push({ key: fmt(d), day: d.getDate(), muted: d.getMonth() !== viewMonth.getMonth() });
@@ -323,14 +334,25 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
       {/* 底部卡片:底部锚定、圆角 24、最高 85% 屏高;整体跟手下拉 */}
       <GestureDetector gesture={sheetPanGesture}>
         <Reanimated.View
-          style={[s.sheet, { paddingBottom: Math.max(20, bottomInset + 16), maxHeight: sheetMaxHeight }, sheetAnimStyle]}
+          style={[s.sheet, { paddingBottom: Math.max(12, bottomInset), maxHeight: sheetMaxHeight }, sheetAnimStyle]}
         >
           <View style={s.grabber} />
           {/* 标题栏:✕ 关闭移到右侧 + 标题居中(与选择账本头部同款) */}
-          <View style={s.sheetHeader}>
-            <View style={{ width: 20 }} />
-            {mode !== 'single' && <Text style={s.title}>{t('addTx.dateSheetTitle')}</Text>}
-            <PressableScale onPress={onClose} activeScale={0.90} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          {/* 标题栏：左 44 占位 | 中间标题 flex:1 居中 | 右 44×44 关闭（同一行，无独立偏移） */}
+          <View style={[s.sheetHeader, HEADER_DEBUG && s.headerDebug]}>
+            <View style={s.headerSide} />
+            {mode !== 'single' ? (
+              <Text style={s.title} numberOfLines={1}>{t('addTx.dateSheetTitle')}</Text>
+            ) : (
+              <View style={s.title} />
+            )}
+            <PressableScale
+              style={s.closeBtn}
+              onPress={onClose}
+              activeScale={0.90}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.cancel')}
+            >
               <Ionicons name="close" size={20} color={colors.textSecondary} />
             </PressableScale>
           </View>
@@ -363,7 +385,7 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
               const inRange = !!selStart && !!selEnd && cell.key > selStart && cell.key < selEnd;
               const isToday = cell.key === fmt(now);
               return (
-                <PressableScale key={cell.key} style={s.calCell} activeScale={0.92} onPress={() => onCalTap(cell.key)}>
+                <PressableScale key={cell.key} style={[s.calCell, hitDbg]} activeScale={1} pressedOverlayColor={colors.link + '14'} onPress={() => onCalTap(cell.key)}>
                   <View style={[s.calDay, inRange && s.calDayInRange, (isStart || isEnd) && s.calDaySelected]}>
                     <Text
                       style={[
@@ -384,82 +406,128 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
             </>
           ) : (
             <>
-            {/* range 模式（图1排版）：左边竖排预设列，右边月历；行为与原来完全一致 */}
-            <View style={s.rangeLayout}>
-              <View style={s.presetColumn}>
-                {presetsToShow.map((p) => {
-                  const r = p.range(now);
-                  const active = selStart === r.start && selEnd === r.end;
-                  return (
-                    <PressableScale
-                      key={p.label}
-                      style={[s.presetItem, active && s.presetChipActive]}
-                      activeScale={0.95}
-                      onPress={() => {
-                        setSelStart(r.start);
-                        setSelEnd(r.end);
-                      }}
-                    >
-                      <Text style={[s.presetText, active && s.presetTextActive]}>{QUICK_KEYS[p.label] ? t(QUICK_KEYS[p.label]) : p.label}</Text>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-              <View style={s.calPane}>
-                <Animated.View
-                  style={{ transform: [{ translateX: swipeTranslate }] }}
-                  {...swipeResponder.panHandlers}
-                >
-                  <View style={s.calHeader}>
-                    <PressableScale onPress={() => flipMonth(-1)} hitSlop={8} activeScale={0.90}>
-                      <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
-                    </PressableScale>
-                    <Text style={s.calTitle}>{t('addTx.calTitle', { y: viewMonth.getFullYear(), m: viewMonth.getMonth() + 1 })}</Text>
-                    <PressableScale onPress={() => flipMonth(1)} hitSlop={8} activeScale={0.90}>
-                      <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                    </PressableScale>
-                  </View>
-                  <View style={s.calWeekRow}>
-                    {t('home.weekdays').split(',').map((w) => (
-                      <Text key={w} style={s.calWeekCell}>{w}</Text>
-                    ))}
-                  </View>
-                  <View style={s.calGrid}>
-                    {calCells.map((cell) => {
-                      const isStart = selStart === cell.key;
-                      const isEnd = selEnd === cell.key;
-                      const inRange = !!selStart && !!selEnd && cell.key > selStart && cell.key < selEnd;
-                      const isToday = cell.key === fmt(now);
+            {/* 主卡：左栏 period + 右栏日历合成一张（共用圆角/边框/阴影，中间淡竖线） */}
+            <View style={s.mainWrap}>
+              <LinearGradient
+                colors={[colors.link + '0A', colors.card]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 0.35 }}
+                style={s.mainCard}
+              >
+                <View style={s.mainHighlight} pointerEvents="none" />
+                <View style={s.rangeRow}>
+                  <View style={s.presetCol}>
+                    {presetsToShow.map((p) => {
+                      const r = p.range(now);
+                      const active = selStart === r.start && selEnd === r.end;
                       return (
-                        <PressableScale key={cell.key} style={s.calCell} activeScale={0.92} onPress={() => onCalTap(cell.key)}>
-                          <View style={[s.calDay, inRange && s.calDayInRange, (isStart || isEnd) && s.calDaySelected]}>
-                            <Text
-                              style={[
-                                s.calDayText,
-                                cell.muted && s.calDayMuted,
-                                isToday && !isStart && !isEnd && s.calDayToday,
-                                (isStart || isEnd) && s.calDayTextSelected,
-                              ]}
+                        <PressableScale
+                          key={p.label}
+                          style={[s.chip, hitDbg]}
+                          activeScale={1}
+                          pressedOverlayColor={colors.link + '14'}
+                          onPress={() => {
+                            setSelStart(r.start);
+                            setSelEnd(r.end);
+                          }}
+                        >
+                          {active ? (
+                            <LinearGradient
+                              colors={[colors.link + 'E6', colors.link]}
+                              start={{ x: 0.1, y: 0 }}
+                              end={{ x: 0.9, y: 1 }}
+                              style={s.chipFill}
                             >
-                              {cell.day}
-                            </Text>
-                          </View>
+                              <Text style={[s.chipText, s.chipTextActive]}>{t(QUICK_KEYS[p.label])}</Text>
+                            </LinearGradient>
+                          ) : (
+                            <Text style={s.chipText}>{t(QUICK_KEYS[p.label])}</Text>
+                          )}
                         </PressableScale>
                       );
                     })}
                   </View>
-                </Animated.View>
-              </View>
+                  <View style={s.vDivider} />
+                  <View style={s.calCol}>
+                    <Animated.View
+                      style={{ transform: [{ translateX: swipeTranslate }] }}
+                      {...swipeResponder.panHandlers}
+                    >
+                      <View style={s.calHeader}>
+                        <PressableScale style={[s.calNavBtn, hitDbg]} onPress={() => flipMonth(-1)} hitSlop={14} activeScale={1} pressedOverlayColor={colors.link + '14'}>
+                          <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
+                        </PressableScale>
+                        <Text style={s.calTitle}>{t('addTx.calTitle', { y: viewMonth.getFullYear(), m: viewMonth.getMonth() + 1 })}</Text>
+                        <PressableScale style={[s.calNavBtn, hitDbg]} onPress={() => flipMonth(1)} hitSlop={14} activeScale={1} pressedOverlayColor={colors.link + '14'}>
+                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </PressableScale>
+                      </View>
+                      <View style={s.calWeekRow}>
+                        {t('home.weekdays').split(',').map((w, i) => (
+                          <Text key={w + i} style={[s.calWeekCell, { width: calW ? calW / 7 : undefined }]}>{w}</Text>
+                        ))}
+                      </View>
+                      <View style={s.calGrid} onLayout={(e) => setCalW(Math.round(e.nativeEvent.layout.width))}>
+                        {calCells.map((cell) => {
+                          const isStart = selStart === cell.key;
+                          const isEnd = selEnd === cell.key;
+                          const inRange = !!selStart && !!selEnd && cell.key > selStart && cell.key < selEnd;
+                          const isToday = cell.key === fmt(now);
+                          const afterStart = !!selStart && cell.key > selStart;
+                          const beforeEnd = !!selEnd && cell.key < selEnd;
+                          return (
+                            <PressableScale key={cell.key} style={[s.calCell, calW ? { width: calW / 7 } : null, hitDbg]} activeScale={1} pressedOverlayColor={colors.link + '14'} onPress={() => onCalTap(cell.key)}>
+                              <View
+                                style={[
+                                  s.calBand,
+                                  !cell.muted &&
+                                    (inRange || (isStart && !!selEnd) || (isEnd && !!selStart)) &&
+                                    s.calBandOn,
+                                  // 起始格只涂右半、结束格只涂左半 → 与中间的整格带无缝衔接
+                                  !cell.muted && isStart && !!selEnd && s.calBandFrom,
+                                  !cell.muted && isEnd && !!selStart && s.calBandTo,
+                                ]}
+                              />
+                              <View style={[s.calDay, (isStart || isEnd) && s.calDaySelected]}>
+                                <Text
+                                  style={[
+                                    s.calDayText,
+                                    cell.muted && s.calDayMuted,
+                                    isToday && !isStart && !isEnd && s.calDayToday,
+                                    (isStart || isEnd) && s.calDayTextSelected,
+                                  ]}
+                                >
+                                  {cell.day}
+                                </Text>
+                              </View>
+                              {isToday && !isStart && !isEnd && <View style={s.calTodayDot} />}
+                            </PressableScale>
+                          );
+                        })}
+                      </View>
+                    </Animated.View>
+                  </View>
+                </View>
+              </LinearGradient>
             </View>
+
             <PressableScale
-              style={[s.confirmBtn, (!selStart || !selEnd) && s.confirmDisabled]}
+              style={[s.confirmWide, (!selStart || !selEnd) && s.confirmDisabled, hitDbg]}
               activeScale={0.97}
               onPress={confirm}
               disabled={!selStart || !selEnd}
             >
-              <Text style={s.confirmText}>
-                {selStart && selEnd ? t('addTx.dateSheetApply', { range: `${selStart} ~ ${selEnd}` }) : t('addTx.dateSheetSelectEnd')}
-              </Text>
+              <LinearGradient
+                colors={[colors.link + 'E6', colors.link]}
+                start={{ x: 0.1, y: 0 }}
+                end={{ x: 0.9, y: 1 }}
+                style={s.confirmFill}
+              >
+                <Text style={s.confirmWideText}>{t('addTx.dateRangeConfirm')}</Text>
+                {selStart && selEnd ? (
+                  <Text style={s.confirmSub}>{`${selStart} — ${selEnd}`}</Text>
+                ) : null}
+              </LinearGradient>
             </PressableScale>
             </>
           )}
@@ -479,16 +547,14 @@ const makeStyles = (colors: ThemeColors) =>
       backgroundColor: colors.card,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
-      padding: 20,
-      paddingTop: 16,
-      paddingBottom: 38,
+      padding: 12,
+      paddingTop: 12,
+      paddingBottom: 12,
     },
-    sheetHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 6,
-    },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', height: 44 },
+    headerSide: { width: 44 },
+    closeBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    headerDebug: { borderWidth: 1, borderColor: 'rgba(255,0,0,0.45)' }, // 临时
     grabber: {
       alignSelf: 'center',
       width: 44,
@@ -497,7 +563,7 @@ const makeStyles = (colors: ThemeColors) =>
       borderRadius: radius.full,
       backgroundColor: colors.divider,
     },
-    title: { fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center', marginBottom: 14 },
+    title: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.textPrimary, textAlign: 'center', marginBottom: 0 },
     // range 模式（图1）：左侧竖排预设列 + 右侧月历
     rangeLayout: { flexDirection: 'row' },
     presetColumn: { width: '15%', borderRightWidth: 1, borderRightColor: colors.divider, paddingRight: 2, gap: 2 },
@@ -516,19 +582,143 @@ const makeStyles = (colors: ThemeColors) =>
     presetChipActive: { backgroundColor: colors.link + '1A' },
     presetText: { fontSize: typography.caption.fontSize, lineHeight: typography.caption.lineHeightCjk, color: colors.textSecondary, fontWeight: '500' },
     presetTextActive: { color: colors.link, fontWeight: '700' },
-    calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-    calTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
-    calWeekRow: { flexDirection: 'row', marginBottom: 4 },
-    calWeekCell: { flex: 1, textAlign: 'center', fontSize: typography.footnote.fontSize, lineHeight: typography.footnote.lineHeightCjk, fontWeight: '600', color: colors.textTertiary },
+    calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+    calTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+    calWeekRow: { flexDirection: 'row', marginBottom: 2 },
+    calWeekCell: { textAlign: 'center', fontSize: 11, lineHeight: typography.footnote.lineHeightCjk, fontWeight: '600', color: colors.textTertiary },
     calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-    calCell: { width: `${100 / 7}%` as any, alignItems: 'center', paddingVertical: 3 },
-    calDay: { width: 38, height: 38, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
-    calDayInRange: { backgroundColor: colors.link + '1A', borderRadius: 0 },
-    calDaySelected: { backgroundColor: colors.link },
-    calDayText: { fontSize: typography.subhead.fontSize, lineHeight: typography.subhead.lineHeight, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+    // 每个日期 Pressable 铺满单元格（不加 hitSlop，避免相邻格重叠）
+    calCell: { width: `${100 / 7}%` as any, height: 40, alignItems: 'center', justifyContent: 'center' },
+    calDay: { width: 28, height: 28, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
+    calDayInRange: { backgroundColor: 'transparent' },
+    calDaySelected: { backgroundColor: colors.link, shadowColor: colors.link, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+    calDayText: { fontSize: 14, lineHeight: typography.subhead.lineHeight, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     calDayMuted: { color: colors.divider },
     calDayToday: { color: colors.link, fontWeight: '700' },
     calDayTextSelected: { color: colors.fabIcon, fontWeight: '700' },
+    // ---------- range v2：胶囊 chips / 立体日历卡 / 范围带 / 渐变 CTA ----------
+    // 主卡：外层承载阴影，内层裁切圆角/边框（避免 overflow 裁掉阴影）
+    mainWrap: {
+      marginTop: 8,
+      borderRadius: 20,
+      shadowColor: colors.textSecondary,
+      shadowOpacity: 0.1,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    mainCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.dividerHair, overflow: 'hidden' },
+    mainHighlight: { position: 'absolute', left: 20, right: 20, top: 0, height: 1, backgroundColor: colors.card },
+    vDivider: { width: 1, backgroundColor: colors.dividerHair },
+    rangeRow: { flexDirection: 'row', alignItems: 'stretch' },
+    // 左栏：一整块浅蓝导航条（不再逐个胶囊描边）
+    presetCol: { width: 52, paddingVertical: 0, paddingHorizontal: 0, alignItems: 'stretch' },
+    calCol: { flex: 1, paddingVertical: 4, paddingHorizontal: 2 },
+    chipRow: { gap: 6 },
+    chip: {
+      width: '100%',
+      flex: 1,
+      minHeight: 36,
+      borderRadius: 10,
+      backgroundColor: 'transparent',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    chipActive: {
+      shadowColor: colors.link,
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+    },
+    chipFill: {
+      position: 'absolute',
+      top: 4,
+      bottom: 4,
+      left: 4,
+      right: 4,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    chipText: { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+    chipTextActive: { color: colors.fabIcon, fontWeight: '700' },
+    calWrap: {
+      position: 'relative',
+      borderRadius: radius.lg,
+      shadowColor: colors.textSecondary,
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    calPlate: {
+      position: 'absolute',
+      left: 6,
+      right: 6,
+      bottom: -3,
+      height: 60,
+      borderRadius: radius.lg,
+      backgroundColor: colors.link + '12',
+    },
+    calCard: {
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.dividerHair,
+      overflow: 'hidden',
+      paddingHorizontal: 8,
+      paddingTop: 10,
+      paddingBottom: 8,
+    },
+    calTopHighlight: {
+      position: 'absolute',
+      left: 16,
+      right: 16,
+      top: 0,
+      height: 1,
+      backgroundColor: colors.card,
+    },
+    calNavBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.dividerHair,
+    },
+    calBand: { position: 'absolute', left: 0, right: 0, height: 28, backgroundColor: 'transparent' },
+    calBandOn: { backgroundColor: colors.link + '14' },
+    calBandFrom: { left: '50%' },
+    calBandTo: { right: '50%' },
+    calBandStart: { borderTopLeftRadius: radius.full, borderBottomLeftRadius: radius.full },
+    calBandEnd: { borderTopRightRadius: radius.full, borderBottomRightRadius: radius.full },
+    calCellActiveRow: { backgroundColor: 'transparent' },
+    calTodayDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.link, marginTop: 1 },
+    rangeSummary: {
+      marginBottom: 12,
+      textAlign: 'center',
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
+    confirmWide: {
+      overflow: 'hidden',
+      borderRadius: 12,
+      height: 50,
+      marginTop: 8,
+      justifyContent: 'center',
+    },
+    confirmFill: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 50,
+      gap: 3,
+      paddingHorizontal: 16,
+    },
+    confirmSub: { color: colors.fabIcon, opacity: 0.85, fontSize: 11 },
+    confirmWideText: { color: colors.fabIcon, fontWeight: '700', fontSize: 15 },
     confirmBtn: {
       backgroundColor: colors.fabBg,
       borderRadius: radius.md,

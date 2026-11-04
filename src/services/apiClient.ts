@@ -599,6 +599,7 @@ export interface VoiceParseDto {
   transcript?: string | null;
 }
 
+
 /** 服务端上游超时 30s + 连接 5s，客户端留出余量，避免先于服务端报「网络超时」。 */
 const AI_SCAN_TIMEOUT_MS = 45_000;
 
@@ -734,10 +735,7 @@ export const api = {
     }),
 };
 
-/**
- * 拉全部流水：服务端 size 上限 100，必须翻页（否则会被静默截断，
- * 换设备恢复时"少了几个月流水"）。按 totalPages 收敛，并留硬上限防御死循环。
- */
+
 export async function listAllTransactions(): Promise<TransactionDto[]> {
   const out: TransactionDto[] = [];
   const PAGE_SIZE = 100;

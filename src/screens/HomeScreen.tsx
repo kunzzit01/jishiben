@@ -31,6 +31,7 @@ import { formatDate } from '../utils/formatDate';
 import type { Ledger, Transaction } from '../types';
 import { UNCATEGORIZED_ICON, UNCATEGORIZED_NAME, UNCATEGORIZED_COLOR } from '../constants/uncategorized';
 import PressableScale from '../components/PressableScale';
+import MonthBudgetList, { type BudgetListItem } from '../components/home/MonthBudgetList';
 import { AppText, BottomSheet, Button, EmptyState, GlassView, HeroGradient, IconButton, IconCircle, ListSection, MoneyText, StatusBarGlass } from '../components/ui';
 import { MonthlyBudgetSheet } from '../components/MonthlyBudgetSheet';
 import { BudgetRenameSheet } from '../components/BudgetRenameSheet';
@@ -54,6 +55,8 @@ import type { SegKey } from '../components/MonthCalendarCard';
 import { useAppLock } from '../context/AppLockContext';
 import { useDialog } from '../components/AppDialog';
 import { ROUTES } from '../navigation/routes';
+
+
 import { hapticLight, hapticSuccess } from '../utils/haptics';
 
 // 首页三张卡片的入场：240ms、60ms 间隔的 stagger（30-80ms 区间内）。
@@ -1854,10 +1857,12 @@ export default function HomeScreen({ navigation }: any) {
           const cat = getCategoryById(tx.categoryId);
           const asset = tx.assetId ? getAssetById(tx.assetId) : undefined;
           const catName = cat ? getCategoryLabel(cat, t) : UNCATEGORIZED_NAME;
+          // 与 TransactionRow 同一条规则：标题已经是类别名时，副标题不再重复类别
+          const ownTitle = tx.note?.trim() ?? '';
           return {
             id: tx.id,
-            title: tx.note?.trim() || catName,
-            subtitle: [catName, asset?.name].filter(Boolean).join(' · '),
+            title: ownTitle || catName,
+            subtitle: [ownTitle ? catName : '', asset?.name].filter(Boolean).join(' · '),
             amount: tx.amount,
             kind: (tx.type === 'income' ? 'income' : 'expense') as 'income' | 'expense',
             dateText: tx.date,
@@ -1912,7 +1917,8 @@ export default function HomeScreen({ navigation }: any) {
 
   // 未设额度但本月有支出的支出分类（抽屉里一键加额度，最多 8 条）
   const unsetCategoryRows = useMemo(() => {
-    const withLimit = new Set(categoryBudgetRows.map((r) => r.categoryId));
+
+  const withLimit = new Set(categoryBudgetRows.map((r) => r.categoryId));
     return categories
       // 不再要求「本月有支出」：否则想给还没花过钱的分类（房租/宠物…）设预算时列表是空的
       .filter((c) => c.type === 'expense' && !withLimit.has(c.id))
@@ -1926,6 +1932,17 @@ export default function HomeScreen({ navigation }: any) {
       .sort((a, b) => b.used - a.used)
       .slice(0, 8);
   }, [categories, categoryBudgetRows, expenseByCategory, t]);
+
+  // 首页「本月预算」预览：只列分类预算（总预算已在卡内预算槽显示，不重复），取使用率最高的 3 个。
+  // categoryBudgetRows 已按「已用/额度」倒序，这里只做截断与过滤。
+  const monthBudgetItems = useMemo<BudgetListItem[]>(() => {
+    const out: BudgetListItem[] = [];
+    for (const r of categoryBudgetRows) {
+      if (out.length >= 3) break;
+      if (r.limit > 0) out.push({ categoryId: r.categoryId, name: r.name, color: r.color, limit: r.limit, used: r.used });
+    }
+    return out;
+  }, [categoryBudgetRows]);
 
   // 账单：按天分组（倒序）→ SectionList 的 sections（T09 / H4 / H6）。
   // 头部合计只算净资产卡当前选中币种；条目本身也只保留该币种（既有行为不变）。
@@ -3102,7 +3119,7 @@ export default function HomeScreen({ navigation }: any) {
             <RoundIconButton
               kind="bell"
               tone="glass"
-              onPress={() => navigation.navigate('提醒中心')}
+              onPress={() => navigation.navigate(ROUTES.NOTICE_CENTER)}
               badge={unreadCount > 0}
               accessibilityLabel={t('home.notificationTitle')}
               testID="home-notification"
@@ -3401,6 +3418,18 @@ export default function HomeScreen({ navigation }: any) {
               )}
             </View>
           </GestureDetector>
+
+        {/* 本月预算（最多 3 条）：分类预算卡 */}
+        {monthBudgetItems.length > 0 && (
+          <MonthBudgetList
+            items={monthBudgetItems}
+            palette={palette}
+            hidden={balanceHidden}
+            currency={activeCurrency}
+            onPressSeeAll={openBudgetPlan}
+            onPressItem={(id) => openBudgetModal(id)}
+          />
+        )}
 
           {/* 4 个快捷入口（参考图）：支出 / 收入 / 转账 / 扫描 —— 视觉走 QuickActions
               （双色自绘图标 + 圆形底），动作分发仍是原来的 switch（扫描带 autoScan），

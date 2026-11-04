@@ -8,7 +8,7 @@ import { NavigationBar } from 'expo-navigation-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { View, StyleSheet, Pressable, Animated, Platform, InteractionManager } from 'react-native';
-import { NavigationContainer, CommonActions, DarkTheme, DefaultTheme, useNavigation } from '@react-navigation/native';
+import { NavigationContainer, CommonActions, DarkTheme, DefaultTheme, useNavigation, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BottomTabBar } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
@@ -89,7 +89,8 @@ import CalculatorHubScreen from './src/screens/CalculatorHubScreen';
 import LoanCalculatorScreen from './src/screens/LoanCalculatorScreen';
 import CompoundInterestScreen from './src/screens/CompoundInterestScreen';
 import OverviewScreen from './src/screens/OverviewScreen';
-import ReminderCenterScreen from './src/screens/ReminderCenterScreen';
+import NoticeCenterScreen from './src/screens/NoticeCenterScreen';
+import ReminderSettingsScreen from './src/screens/ReminderSettingsScreen';
 
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -123,7 +124,7 @@ function HomeStack() {
           HomeStack 自己的栈，系统返回箭头 goBack() 天然回首页；从设置项进来同理天然回设置 */}
       <HomeStackNav.Screen name="开设账本" component={LedgerScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="关于应用" component={AboutAppScreen} options={{ headerShown: false }} />
-      <HomeStackNav.Screen name="提醒中心" component={ReminderCenterScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
+      <HomeStackNav.Screen name="通知中心" component={NoticeCenterScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
       <HomeStackNav.Screen name="帮助与反馈" component={HelpFeedbackScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="计算器" component={CalculatorHubScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="贷款计算器" component={LoanCalculatorScreen} options={{ headerShown: false }} />
@@ -157,6 +158,7 @@ function ProfileStack() {
       <ProfileStackNav.Screen name="我的主页" component={ProfileScreen} options={{ headerShown: false }} />
       <ProfileStackNav.Screen name="类别分类" component={CategoryManagementScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }} />
       <ProfileStackNav.Screen name="开设账本" component={LedgerScreen} options={{ headerShown: false }} />
+      <ProfileStackNav.Screen name="提醒设置" component={ReminderSettingsScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
       {/* AI专区改用与其他二级页一致的自绘头部（圆框返回键），原生头部关闭 */}
       <ProfileStackNav.Screen name="AI专区" component={AIScreen} options={{ headerShown: false }} />
       {/* 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入 */}
@@ -378,11 +380,22 @@ function CenterTabButton({ onPress }: { onPress?: () => void }) {
 // 不是色块遮盖。
 // 注意：v7 会以普通函数方式调用 tabBar（tabBar(props) 而非 <tabBar/>），
 // 所以这层不能放 hooks——hooks 全部在 SlidingTabBarInner 组件里。
+/** 二级页里不显示底部 Tab 栏的名单（按「被聚焦的栈内路由名」判定） */
+const TAB_BAR_HIDDEN_ON = new Set(['通知中心']);
+
+function focusedInnerName(state: any): string | undefined {
+  const focused = state?.routes?.[state.index];
+  if (!focused) return undefined;
+  return getFocusedRouteNameFromRoute(focused) ?? undefined;
+}
+
 function SlidingTabBar(props: any) {
   return <SlidingTabBarInner {...props} />;
 }
 
 function SlidingTabBarInner(props: any) {
+  const innerName = focusedInnerName(props.state);
+  if (innerName && TAB_BAR_HIDDEN_ON.has(innerName)) return null;
   // 底部让位（安卓三键导航实测 / 手势条 / iPhone Home Indicator / web 0）唯一来源：
   // 与自绘键盘、底部抽屉、NavBarScrim 遮罩、useTabClearance 同一个数。不读裸 insets.bottom ——
   // Expo Go / 非 edge-to-edge 的安卓机 insets.bottom 可能报 0，栏会压到系统导航条上。
@@ -594,7 +607,7 @@ function AppContent() {
             // 栏身只留几何，材质 / 描边 / 凹槽全部由外层 NotchTabBarSurface 的 SVG 画：
             // 底色透明（让底板透出来）、无圆角（顶部两个外角由包装层 18 圆角 + overflow 裁切）、
             // 无投影（贴底通栏不浮空）。
-            tabBarStyle: {
+            tabBarStyle: TAB_BAR_HIDDEN_ON.has(getFocusedRouteNameFromRoute(route) ?? '') ? { display: 'none' } : {
               // 高度 = 栏身 58 + 底部安全区：底板铺到屏幕底边，所以安全区算在栏身之内
               height: TAB_BAR_HEIGHT + bottomInset,
               // 关键：把库默认的 paddingBottom: insets.bottom 换成同一个 inset 来源

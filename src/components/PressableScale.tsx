@@ -16,8 +16,8 @@
 // ⚠ 底部 Tab 按钮禁止任何按压反馈（用户明令）：Tab 栏若要用本组件，必须传 activeScale={1}。
 
 import React, { useEffect } from 'react';
-import { Platform, Pressable, StyleProp, ViewStyle } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { Platform, Pressable, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useTheme } from '../theme/useTheme';
 
 // RN 的 ViewStyle 类型还没收录 CSS transition 这几个属性
@@ -60,6 +60,8 @@ type Props = {
   accessibilityRole?: React.ComponentProps<typeof Pressable>['accessibilityRole'];
   accessibilityLabel?: string;
   accessibilityState?: React.ComponentProps<typeof Pressable>['accessibilityState'];
+  /** 按下时覆盖一层淡色底（不改变布局、不缩放）：用于日历格子这类需要「按下反馈但不晃动」的场景 */
+  pressedOverlayColor?: string;
   /** 测试 / 预览页定位用（透传给 Pressable） */
   testID?: string;
 };
@@ -78,12 +80,15 @@ export default function PressableScale({
   accessibilityLabel,
   accessibilityState,
   testID,
+  pressedOverlayColor,
 }: Props) {
   const { motion } = useTheme();
   const scale = useSharedValue(1);
   const pressedScale = activeScale ?? motion.pressScale;
 
+  const tint = useSharedValue(0);
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const tintStyle = useAnimatedStyle(() => ({ opacity: tint.value }));
 
   const pressIn = () => {
     scale.value = withSpring(pressedScale, motion.spring.press);
@@ -113,7 +118,15 @@ export default function PressableScale({
       accessibilityState={accessibilityState}
       testID={testID}
     >
-      <Animated.View style={[animatedStyle, style]}>{children}</Animated.View>
+      <Animated.View style={[animatedStyle, style]}>
+        {children}
+        {pressedOverlayColor ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: pressedOverlayColor }, tintStyle]}
+          />
+        ) : null}
+      </Animated.View>
     </Pressable>
   );
 }

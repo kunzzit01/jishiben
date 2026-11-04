@@ -370,6 +370,13 @@ export default function ProfileScreen({ navigation }: any) {
               （App.tsx 的 ROUTES.OVERVIEW）。设计稿第 11 屏自身没有入口提示、首页不在本任务可改
               范围内（Boundary），所以入口落在设置项「功能」分组，与 AI 专区同组同规格。 */}
           <ListRow
+            leading={<RowIcon icon="notifications-outline" />}
+            title={tr('profile.reminderSettings')}
+            chevron
+            onPress={() => navigation.navigate(ROUTES.REMINDER_SETTINGS)}
+            testID="profile-reminder-settings"
+          />
+          <ListRow
             leading={<RowIcon icon="grid-outline" />}
             title={tr('profile.overview')}
             chevron

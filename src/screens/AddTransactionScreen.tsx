@@ -20,6 +20,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import Svg, { Circle, Defs, Mask, Path, Rect } from 'react-native-svg';
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useApp } from '../context/AppContext';
 import { getAssetDisplayBalance } from '../utils/creditCard';
 import { ROUTES, AddTxPresetType } from '../navigation/routes';
@@ -47,6 +49,8 @@ import { useAmountExpression } from '../hooks/useAmountExpression';
 import { getExpressionTotal } from '../utils/amountExpression';
 import { formatMoney } from '../utils/formatMoney';
 import { formatDate as formatDateLabel } from '../utils/formatDate';
+import { getRecentAssetsSnapshot, rememberRecentAsset, useRecentAssets } from '../utils/recentAssets';
+import { hydrateAmountCategory, lookupCategoryForAmount, rememberAmountCategory } from '../utils/amountCategory';
 import { AmountCalculatorKeypad, keypadPanelHeight } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import { ReceiptCameraModal } from '../components/ReceiptCameraModal';
@@ -112,6 +116,36 @@ function todayStr() {
 // 日历选择器回调给的是 Date 对象，转成表单里统一用的 YYYY-MM-DD 字符串
 function formatDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// 汇率写进输入框：先去掉浮点尾巴（1/0.625 = 1.6000000000000004 → 1.6），
+// 再收到 6 位小数（与编辑转账回填汇率的精度同一档，输入框里也放得下）
+function formatRateField(rate: number): string {
+  if (!Number.isFinite(rate) || rate <= 0) return '';
+  return String(Number(rate.toFixed(6)));
+}
+
+// 后端给的 asOf 只保证「能表示一个时刻」：ISO 串与毫秒数都接住，其余一律当没有
+function parseFxAsOf(asOf: unknown): Date | null {
+  if (typeof asOf === 'number') {
+    const d = new Date(asOf);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof asOf !== 'string' || !asOf) return null;
+  const d = /^\d+$/.test(asOf) ? new Date(Number(asOf)) : new Date(asOf);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// 汇率状态行里的时刻：实时只给 HH:mm，离线带上「M月d日」（英文 M/D）。
+// 解析不出来给 '—'：宁可少一段信息，也不能把旧汇率标成「刚刚」
+function formatFxMoment(asOf: unknown, opts: { withDate: boolean; zh: boolean }): string {
+  const d = parseFxAsOf(asOf);
+  if (!d) return '—';
+  const pad = (n: number) => (n < 10 ? '0' + n : String(n));
+  const hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  if (!opts.withDate) return hm;
+  const md = opts.zh ? d.getMonth() + 1 + '月' + d.getDate() + '日' : d.getMonth() + 1 + '/' + d.getDate();
+  return md + ' ' + hm;
 }
 
 // 英文短语在窄框里的按词换行：安卓端默认断行策略是 highQuality（均衡断行），为对齐两行
@@ -184,6 +218,7 @@ function HeroAmountText({
   cursorFromEnd,
   cursorActive,
   onCursorChange,
+  onPress,
 }: {
   display: string;
   fontSize: number;
@@ -191,6 +226,8 @@ function HeroAmountText({
   /** 光标是否可见（键盘开着且不是多项算式的合计态） */
   cursorActive: boolean;
   onCursorChange: (cursorFromEnd: number) => void;
+  /** 未在编辑该格时点按的回落：打开计算器键盘（CursorAmountText 的 fallback） */
+  onPress?: () => void;
 }) {
   const dotIdx = display.indexOf('.');
   const intPart = dotIdx < 0 ? display : display.slice(0, dotIdx);
@@ -319,7 +356,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan } =
     useApp();
   const insets = useSafeAreaInsets();
-  const { colors, isDark, semantic, spacing, layout, radius } = useTheme();
+  const { colors, isDark, semantic, spacing, layout, radius, elevation } = useTheme();
   // 矮屏（可用高 < 700）：金额卡内边距 / 行距再收紧一档，保证「金额 + 至少 2 行类别 + 键盘」一屏可见
   // height / width = useLayout 的窗口尺寸（内部就是 useWindowDimensions），
   // 旋转 / 分屏 / RN Web 改窗口时自动重算 —— 不再用 Dimensions.get（只在启动时取一次）。
@@ -367,6 +404,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 长按在"资产"页勾选过的默认账户，新增记录时自动带出来（编辑已有记录时不覆盖，还是用那笔记录本来的账户）
   const defaultAsset = activeAssets.find((a) => a.isDefault);
 
+  // 「上一次用的钱包」（用户 2026-11-03）：默认账户只是兜底，真正优先的是上次记同类账用过的账户。
+  // 记忆里的 id 必须仍然可用（存在 / 未归档 / 属当前账本），否则回落默认账户，再回落「未选择」。
+  const recentAssets = useRecentAssets();
+  const pickUsableAsset = (id?: string) => (id && activeAssets.some((a) => a.id === id) ? id : null);
+  const preferredAssetId =
+    pickUsableAsset(recentAssets[uiType === 'income' ? 'income' : 'expense']) ?? defaultAsset?.id ?? null;
+  // 转账只让「转出」跟随记忆：转入是资金去向，仍让用户自己点一次（避免手滑转到上次那个账户）
+  const preferredFromAssetId = pickUsableAsset(recentAssets.transferFrom) ?? defaultAsset?.id ?? null;
+
   // 所有类型都直接进入主表单；转账/兑换的账户改为页面内弹层选择，不再增加独立选择步骤。
   const stepForType = (t: UiType): Step => (t === 'transfer' || t === 'exchange' ? 'transferDetail' : 'detail');
 
@@ -375,6 +421,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     return stepForType(initialUiType);
   });
   const [categoryId, setCategoryId] = useState<string | null>(editTransaction?.categoryId ?? null);
+  // 用户在这一笔里手动选过类别后，金额联想就不再覆盖它（编辑既有账单时初始即为 true）
+  const userPickedCategoryRef = useRef(!!editTransaction?.categoryId);
   const [amount, setAmount] = useState(editTransaction ? String(editTransaction.amount) : '');
   // 自绘计算器键盘：amount 字符串仍然是提交表单时用的最终值（跟以前一样），
   // amountExpr 只在键盘面板打开时管理当前正在输入/拆分的表达式，
@@ -401,7 +449,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
 
   // 普通收支专用：可选的资产账户（这笔钱从/到哪个账户）——没有编辑数据时，用"资产"页设的默认账户
-  const [assetId, setAssetId] = useState<string | null>(editTransaction?.assetId ?? defaultAsset?.id ?? null);
+  const [assetId, setAssetId] = useState<string | null>(editTransaction?.assetId ?? preferredAssetId);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   // 「全部」类别抽屉（T15）：打开完整列表；管理与排序入口在里面 →（管理类别）→ 选择类别页
   const [catSheetOpen, setCatSheetOpen] = useState(false);
@@ -419,18 +467,21 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 账户变了，金额显示币种自动跟着变——金额币种只认所选账户
   useEffect(() => {
     if (userPickedAssetRef.current) return;
-    setAssetId(defaultAsset?.id ?? null);
-  }, [defaultAsset?.id]);
+    // 依赖里放 recentAssets（快照对象）而不是派生出来的 id：只比 id 会漏掉「值不变但要复位」的场景
+    setAssetId(
+      pickUsableAsset(getRecentAssetsSnapshot()[uiType === 'income' ? 'income' : 'expense']) ?? defaultAsset?.id ?? null
+    );
+  }, [recentAssets, defaultAsset?.id, uiType]);
 
   useEffect(() => {
     if (userPickedFromRef.current) return;
-    setFromAssetId(defaultAsset?.id ?? null);
-  }, [defaultAsset?.id]);
+    setFromAssetId(pickUsableAsset(getRecentAssetsSnapshot().transferFrom) ?? defaultAsset?.id ?? null);
+  }, [recentAssets, defaultAsset?.id]);
 
   // 转账/兑换专用状态——"转出"账户也带默认值（通常就是平时最常用那张），"转入"留给用户自己选
   // 转账编辑：账户 / 汇率 / 手续费从这笔记录回填（用户 2026-10-28：转账也要能编辑，不再「删了重记」）
   const editTransfer = editTransaction?.type === 'transfer' ? editTransaction : undefined;
-  const [fromAssetId, setFromAssetId] = useState<string | null>(editTransfer?.fromAssetId ?? defaultAsset?.id ?? null);
+  const [fromAssetId, setFromAssetId] = useState<string | null>(editTransfer?.fromAssetId ?? preferredFromAssetId);
   const [toAssetId, setToAssetId] = useState<string | null>(editTransfer?.toAssetId ?? null);
   const [exchangeRate, setExchangeRate] = useState(() => {
     const f = editTransfer?.exchangeRate ?? 0;
@@ -454,21 +505,60 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [fee, setFee] = useState(editTransfer?.fee ? String(editTransfer.fee) : '');
   // 转账/兑换的所有金额字段统一使用自绘计算器：金额、汇率、手续费。
   // 汇率跟手续费一样默认空（显示 0.00），不预填 1.00——不然每次都要先删掉默认值才能输入
+  // 兑换 / 跨币种转账：用户在 money changer 柜台**实际收到**的金额（转入币种）。
+  // 用户 2026-11-03：流程是「先去实体店换钱，再回来记账」——两侧金额都是已知输入，
+  // 汇率是算出来的结果，不该反过来由实时汇率去推。
+  const [receivedAmount, setReceivedAmount] = useState(() => {
+    const factor = editTransfer?.exchangeRate ?? 0;
+    if (!factor) return '';
+    return String(Number(((editTransfer?.amount ?? 0) * factor).toFixed(2)));
+  });
+  const receivedExpr = useAmountExpression(undefined);
+  const [receivedCursor, setReceivedCursor] = useState(0);
   const rateExpr = useAmountExpression(undefined);
   const feeExpr = useAmountExpression(undefined);
-  const [calculatorTarget, setCalculatorTarget] = useState<'amount' | 'rate' | 'fee'>('amount');
+  const [calculatorTarget, setCalculatorTarget] = useState<'amount' | 'rate' | 'fee' | 'received'>('amount');
+
+  // 用户手动改过汇率（在计算器里定过「汇率」那一格）→ 自动流程不再覆盖他输入的数字；resetAll 复位
+  const rateManuallySetRef = useRef(false);
+  // 转账 / 兑换 各自的表单草稿：两页互不覆盖，切走再切回能恢复（钱包、金额、实收、汇率、手续费、乘除档）
+  type FxDraft = {
+    fromAssetId: string | null;
+    toAssetId: string | null;
+    amount: string;
+    receivedAmount: string;
+    exchangeRate: string;
+    fee: string;
+    rateMode: 'mul' | 'div';
+    rateManual: boolean;
+  };
+  const fxDraftsRef = useRef<{ transfer?: FxDraft; exchange?: FxDraft }>({});
+  // 自动流程是在 await 之后才写字段的，那时闭包里的 rateMode 可能已经过期 → 用 ref 拿当前档位
+  const rateModeRef = useRef(rateMode);
+  useEffect(() => {
+    rateModeRef.current = rateMode;
+  }, [rateMode]);
 
   // 当前键盘目标格的光标分发：按键在光标处生效（pressKeyAt 返回新光标偏移写回 state）。
   // reset 打开键盘（空态起输）时光标一律回到末尾
   const handleExprKey = (key: string) => {
     if (calculatorTarget === 'amount') setAmountCursor(amountExpr.pressKeyAt(key, amountCursor));
     else if (calculatorTarget === 'rate') setRateCursor(rateExpr.pressKeyAt(key, rateCursor));
+  else if (calculatorTarget === 'received') setReceivedCursor(receivedExpr.pressKeyAt(key, receivedCursor));
     else setFeeCursor(feeExpr.pressKeyAt(key, feeCursor));
   };
 
   // 转账/兑换账户选择：不再经过独立的“选择步骤”，直接在当前页面通过弹层菜单切换账户
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [accountPickerRole, setAccountPickerRole] = useState<'from' | 'to'>('from');
+  // 咬合接缝：共同父容器实测宽度（不假设等于 windowWidth-32）+ 每个实例稳定的 mask id
+  const [fxMeasuredW, setFxMeasuredW] = useState(0);
+  const fxMaskIdRef = useRef(`fxm-${Math.random().toString(36).slice(2, 8)}`);
+  // 互换按钮：箭头只绕自身中心顺时针累计旋转（每次 +180°，不回零、不倒转）
+  const fxArrowRot = useSharedValue(0);
+  const fxArrowStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${fxArrowRot.value}deg` }],
+  }));
 
 
   // Enter/下一步跳到"备注"这个真实输入框——详情页和转账页的备注框不会同时挂载，共用一个 ref 就够
@@ -590,7 +680,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
 
   // ---------- 类别横排"最近用过"：外面直接显示4个，点了就直接选中，不用进选择页 ----------
   const [recentCategoryIds, setRecentCategoryIds] = useState<string[]>([]);
-  /** 网格顺序重建代号：列表数据（最近用过 / 固定格）落地、类型切换、重进页面（resetAll）时 +1 */
+  /** 兑换页金额展示：输入中给原始串（保住光标），空输入仍显示 0.00 —— 与支出页同一口径 */
+function fxAmountText(raw: string, live: string | null): string {
+  if (live !== null) return live === '' ? '0.00' : live;
+  return formatMoney(parseFloat(raw) || 0, { decimals: 2 });
+}
+
+
+/** 网格顺序重建代号：列表数据（最近用过 / 固定格）落地、类型切换、重进页面（resetAll）时 +1 */
   const [catListsGen, setCatListsGen] = useState(0);
   useEffect(() => {
     AsyncStorage.getItem(RECENT_CATEGORY_KEY)
@@ -644,6 +741,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 仅挂载/类型确定时恢复一次：依赖空数组会拿不到 route 参数，这里跟着 uiType/isEditing 走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiType, isEditing]);
+  // 记一笔页挂载时把「金额 → 类别」记忆读一次（之后都是同步快照查询）
+  useEffect(() => {
+    void hydrateAmountCategory();
+  }, []);
+
+
   const bumpRecentCategory = (id: string) => {
     setRecentCategoryIds((prev) => {
       const next = [id, ...prev.filter((x) => x !== id)].slice(0, RECENT_CATEGORY_HISTORY_LIMIT);
@@ -744,17 +847,67 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       ? formatMoney(expressionTotal(amountExpr.displayValue))
       : amountExpr.displayValue
     : amount || '0.00';
+  // 金额 → 类别联想用的“当前金额”：键盘打开时 amount 还没落定（「完成」就是保存键），
+  // 只能盯实时输入串；多项算式（拆金额中）不参与，避免算术中间态乱跳类别。
+  const liveAmountValue = amountKeypadOpen
+    ? amountExpr.isMulti
+      ? NaN
+      : parseFloat(amountExpr.displayValue)
+    : parseFloat(amount);
+
+  // 金额变化时按「输入过的金额」带出类别：手选过 / 编辑态 / 转账兑换 一律不参与
+  useEffect(() => {
+    if (isEditing) return;
+    if (userPickedCategoryRef.current) return;
+    if (uiType !== 'expense' && uiType !== 'income') return;
+    if (!liveAmountValue || liveAmountValue <= 0) return;
+    const remembered = lookupCategoryForAmount(uiType, liveAmountValue);
+    if (!remembered || remembered === categoryId) return;
+    // 类别可能已被删除：只认当前类型下仍然存在的
+    if (!categories.some((c) => c.id === remembered && c.type === uiType)) return;
+    setCategoryId(remembered);
+  }, [liveAmountValue, uiType, isEditing, categoryId, categories]);
+
   // 金额字号档位（V2 稿基准 64；矮屏按 T15 惯例再收一档 44，给类别网格腾「至少 2 行」）
   const heroAmountFontSize = amountFontTier(heroAmountDisplay, isShort ? 44 : 64);
+
   const fromAsset = assets.find((a) => a.id === fromAssetId);
   const toAsset = assets.find((a) => a.id === toAssetId);
   const isCrossCurrency = !!fromAsset && !!toAsset && fromAsset.currency !== toAsset.currency;
   // 兑换页始终显示汇率输入；普通转账只在跨币种时才显示
   const showRateField = isExchange || isCrossCurrency;
 
+  // 「实收」的当前值：键盘正停在那一格时用实时输入串。
+  // ⚠ 必须进依赖数组：2026-11-03 实测「转出 120 / 实收 1000 但汇率仍是 0.00」，
+  // 就是因为按键过程中 deps 没变，effect 只在切格子那一刻跑过一次（那时缓冲还是空）。
+  // 两侧都要实时：转出侧正在打字时同样不能等提交
+  const sentLive = calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : amount;
+  const receivedLive =
+    calculatorTarget === 'received' && amountKeypadOpen ? receivedExpr.displayValue : receivedAmount;
+
+  // 汇率 = 实收 ÷ (转出 − 手续费)。强制「×」档：用户要看的就是「1 转出币 = ? 转入币」。
+  useEffect(() => {
+    if (isEditing) return;
+    if (!showRateField) return;
+    const sent = parseFloat(sentLive) || 0;
+    const feeNum = parseFloat(fee) || 0;
+    const net = Math.max(0, sent - feeNum);
+    const got = parseFloat(receivedLive) || 0;
+    // 任一侧为空/为 0：汇率没有意义 → 清空，避免残留上一组金额算出的汇率
+    if (net <= 0 || got <= 0) {
+      if (exchangeRate) setExchangeRate('');
+      return;
+    }
+    if (rateModeRef.current !== 'mul') setRateMode('mul');
+    setExchangeRate(formatRateField(got / net));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sentLive, fee, receivedLive, showRateField, isEditing]);
+
+
   useEffect(() => {
     if (presetCategoryId) {
       setCategoryId(presetCategoryId);
+    userPickedCategoryRef.current = true;
       setStep('detail');
     }
     if (autoScan) {
@@ -789,7 +942,80 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 真圆 = 58 圆 + borderWidth 2（夜：类别色 60% / 日 #9B5BD6），与 48 实心圆之间留 3 的页面底间隙；
   // 绝对定位在 48 盒子上 → 不影响网格行高、选中前后图标不位移。等 ui 侧修好可移除。
 
+  // 转账 / 兑换 两页互不覆盖：离开时存草稿，进入时还原（没有草稿才回到默认钱包 + 空值）
+  const isFxType = (t: UiType) => t === 'transfer' || t === 'exchange';
+
+  // 存草稿时优先取「键盘缓冲里正在输入的值」：用户常直接切 tab 不按完成，
+  // 此时 amount/receivedAmount/fee 这几个 state 还是旧值，只存 state 会丢数据。
+  const liveOr = (target: 'amount' | 'received' | 'fee', live: string, committed: string) =>
+    calculatorTarget === target && amountKeypadOpen && live ? live : committed;
+
+  const captureFxDraft = (): FxDraft => ({
+    fromAssetId,
+    toAssetId,
+    amount: liveOr('amount', amountExpr.displayValue, amount),
+    receivedAmount: liveOr('received', receivedExpr.displayValue, receivedAmount),
+    exchangeRate,
+    fee: liveOr('fee', feeExpr.displayValue, fee),
+    rateMode: rateModeRef.current,
+    rateManual: rateManuallySetRef.current,
+  });
+
+  const applyFxDraft = (d?: FxDraft) => {
+    const fallbackFrom = pickUsableAsset(getRecentAssetsSnapshot().transferFrom) ?? defaultAsset?.id ?? null;
+    setFromAssetId(d ? d.fromAssetId : fallbackFrom);
+    setToAssetId(d ? d.toAssetId : null);
+    setAmount(d?.amount ?? '');
+    amountExpr.reset(d?.amount || undefined);
+    setAmountCursor(0);
+    setReceivedAmount(d?.receivedAmount ?? '');
+    receivedExpr.reset(d?.receivedAmount || undefined);
+    setReceivedCursor(0);
+    const draftComplete =
+      !!d && (parseFloat(d.amount) || 0) > 0 && (parseFloat(d.receivedAmount) || 0) > 0;
+    setExchangeRate(draftComplete ? d!.exchangeRate : '');
+    setFee(d?.fee ?? '');
+    feeExpr.reset(d?.fee || undefined);
+    setFeeCursor(0);
+    setRateMode(d?.rateMode ?? 'mul');
+    rateManuallySetRef.current = d?.rateManual ?? false;
+    userPickedFromRef.current = !!d;
+    setCalculatorTarget('amount');
+  };
+
+  // 支出/收入 与 转账/兑换 是两套金额语义：跨族切换时清空，避免「兑换填了 1000，支出页也变 1000」
+  const switchUiType = (nextType: UiType) => {
+    if (uiType === nextType) return;
+    const fxNow = isFxType(uiType);
+    const fxNext = isFxType(nextType);
+    // 离开转账/兑换：先把当前这一档整份存成草稿
+    if (fxNow) {
+      fxDraftsRef.current[uiType as 'transfer' | 'exchange'] = captureFxDraft();
+    }
+    // 只有 支出↔收入 视为「改同一笔的类型」，保留金额；其余切换一律清空（草稿已保存，不丢）
+    const bothSimple =
+      (uiType === 'expense' || uiType === 'income') && (nextType === 'expense' || nextType === 'income');
+    if (!bothSimple) {
+      setAmount('');
+      amountExpr.reset();
+      setAmountCursor(0);
+      setReceivedAmount('');
+      setExchangeRate('');
+      setFee('');
+      rateManuallySetRef.current = false;
+    }
+    // 进入转账/兑换：还原这一档自己的草稿（没有就用默认）
+    if (fxNext && uiType !== nextType) {
+      applyFxDraft(fxDraftsRef.current[nextType as 'transfer' | 'exchange']);
+    }
+    setUiType(nextType);
+    setCategoryId(null);
+    setStep(stepForType(nextType));
+  };
+
   const resetAll = () => {
+    // 离开「记一笔」页面即作废草稿：只有同一次页面停留内切 tab 才保留数据
+    fxDraftsRef.current = {};
     // 类型也要重置回支出：底部Tab的"记一笔"切走不会卸载，uiType 留着的话，
     // 上次停在转账/兑换，回来就还是转账/兑换，而不是用户期望的全新支出表单
     setUiType('expense');
@@ -806,11 +1032,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 重置后恢复"自动跟随默认账户"（金额币种只认所选账户，无需复位手动币种）
     userPickedAssetRef.current = false;
     userPickedFromRef.current = false;
-    setAssetId(defaultAsset?.id ?? null);
+    // 现场读快照，而不是渲染期的 preferredAssetId：saveTransaction 刚写进去的记忆还没走完一次渲染，
+    // 用闭包会拿到上一笔之前的旧值（表现：必须重载 App 才记得上次的钱包）。resetAll 一律回到支出档。
+    setAssetId(pickUsableAsset(getRecentAssetsSnapshot().expense) ?? defaultAsset?.id ?? null);
     setAssetPickerOpen(false);
-    setFromAssetId(defaultAsset?.id ?? null);
+    setFromAssetId(pickUsableAsset(getRecentAssetsSnapshot().transferFrom) ?? defaultAsset?.id ?? null);
     setToAssetId(null);
     setExchangeRate('');
+    // 手动改过汇率的标记复位：新的一笔重新允许自动填
+    rateManuallySetRef.current = false;
     setFee('');
     rateExpr.reset();
     feeExpr.reset();
@@ -1038,6 +1268,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const handlePickCategory = (id: string) => {
     // 选类别 = selection 震动（UI_RULES 4.3；网格格与「全部」抽屉共用这一套）
     hapticSelection();
+    userPickedCategoryRef.current = true;
     setCategoryId(id);
     // TASK-022 补充：编辑账单时点类别只改这一笔，绝不写持久化键——
     // 否则会污染"记一笔（新增）"记住的默认类别（编辑模式自己又不读这个键，表现为两边不同步）
@@ -1113,6 +1344,10 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // "最近用过"只在这一笔真的记完账之后才更新，点击/切换类别选择本身不算——
     // 这样横排那4个分类在你填表的过程中不会因为点了别的类别就跳位置
     bumpRecentCategory(categoryId);
+    // 账户同理：真的记完账才算「上一次用的钱包」（只是选中没保存不记）
+    rememberRecentAsset(type === 'income' ? 'income' : 'expense', assetId);
+    // 同时学习「这个金额对应哪个类别」：下次输入同一金额直接带出（精确匹配，最近一次优先）
+    rememberAmountCategory(type === 'income' ? 'income' : 'expense', value, categoryId);
 
     // 自动月结：开关打开（默认关，手动开）时，把这笔账同步建成一条「每月同日自动入账」的
     // 财务规划——之后每个月由补账引擎自动 ±账目。防重复：同名称+同金额+同周期+同账户的计划已存在则跳过
@@ -1189,7 +1424,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             navigation?.goBack();
           } else {
             resetAll();
-            navigation?.navigate(ROUTES.TAB_HOME);
+            navigation?.navigate(ROUTES.TAB_HOME, { screen: ROUTES.HOME });
           }
         });
       }
@@ -1222,20 +1457,28 @@ export default function AddTransactionScreen({ navigation, route }: any) {
 
   // 转账/兑换字段统一走同一个计算器。只有编辑“转出金额”时，完成键才会保存整笔记录；
   // 汇率/手续费完成键只负责把计算结果写回对应字段，不会提前保存。
-  const openTransferCalculator = (target: 'amount' | 'rate' | 'fee') => {
+  const openTransferCalculator = (target: 'amount' | 'rate' | 'fee' | 'received') => {
     // 备注框的系统键盘/光标退场：一次只允许一个光标显示（点自绘字段 = 切换输入焦点）
     noteInputRef.current?.blur();
     // 切换到另一个字段之前，先把当前正在编辑、还没确认的算式定下来——
     // 不然直接点别的格子（比如输入了500转出金额，手滑点了汇率格子）会导致
     // 刚输入的值从没写回 amount/exchangeRate/fee 这几个 state，显示直接跳回 0
     if (amountKeypadOpen && calculatorTarget !== target) {
-      commitTransferField();
+      try {
+        commitTransferField();
+      } catch {
+        // 提交当前格子失败也必须继续切换焦点，否则整行点了会「毫无反应」
+      }
     }
     setCalculatorTarget(target);
     // 打开键盘即从空态起输：按 5 就是 5 元，新输入直接替换旧值（不再从尾部续接）
     if (target === 'amount') { amountExpr.reset(); setAmountCursor(0); }
-    if (target === 'rate') { rateExpr.reset(); setRateCursor(0); }
-    if (target === 'fee') { feeExpr.reset(); setFeeCursor(0); }
+    // 汇率格不再空态起步：自动汇率已经填好了，点开就把它显示出来（否则看一眼就被清成 0）
+    if (target === 'rate') { rateExpr.reset(exchangeRate || undefined); setRateCursor(0); }
+    // 实收金额可编辑：点开先显示已填的值（空态才从 0 起输）
+    if (target === 'received') { receivedExpr.reset(receivedAmount || undefined); setReceivedCursor(0); }
+    // 手续费：点开先带入已填值、光标置于尾端（和「实收」一致；空态由展示层回落 0.00）
+    if (target === 'fee') { feeExpr.reset(fee || undefined); setFeeCursor(0); }
     setAmountKeypadOpen(true);
     scrollToField(target);
   };
@@ -1249,8 +1492,14 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     }
     if (calculatorTarget === 'rate') {
       const value = rateExpr.confirm();
-      setExchangeRate(value.toString());
+      // 缓冲是空的（点开汇率格但没输入）时绝不回写：否则会把自动汇率冲成 0
+      if (Number.isFinite(value) && value > 0) setExchangeRate(value.toString());
       return value;
+    }
+    if (calculatorTarget === 'received') {
+      const got = receivedExpr.confirm();
+      setReceivedAmount(got > 0 ? got.toFixed(2) : '');
+      return got;
     }
     const value = feeExpr.confirm();
     setFee(value.toString());
@@ -1266,7 +1515,12 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 再拿着这个刚算出来的值去尝试保存整笔——跟支出/收入那边"完成＝保存"保持一致语义。
   const handleTransferCalculatorConfirm = async () => {
     try {
+      // 先定这一格的值，再按它决定是否算「手动覆盖」——点开看一眼就点完成，不该锁死自动汇率；
+      // commitTransferField 只能调一次：它内部的 confirm() 会重置键盘，第二次会拿到 0。
       const committed = commitTransferField();
+      if (calculatorTarget === 'rate' && Number.isFinite(committed) && committed > 0) {
+        rateManuallySetRef.current = true;
+      }
       const ok = await handleSaveTransferWithAmount(
         calculatorTarget === 'amount' ? committed : undefined,
         {
@@ -1358,6 +1612,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
         receiptUri: receiptUri ?? undefined,
       });
     }
+    // 转账只记「转出」：下次进来转出直接带出；转入仍留空让用户确认
+    rememberRecentAsset('transferFrom', fromAssetId);
     // T17：success 震动 + 300ms 勾选动画，然后照原逻辑（清表单；非长按再回首页）
     hapticSuccess();
     playSaveFlashThen(() => {
@@ -1366,7 +1622,16 @@ export default function AddTransactionScreen({ navigation, route }: any) {
       if (!options?.continueRecording) {
         // 编辑态：回上一页（账单详情），那里会读到更新后的数据；新建态才回首页
         if (editTransfer) navigation?.goBack();
-        else navigation?.navigate(ROUTES.TAB_HOME);
+        // 转账：落到「资产」Tab 并直接打开转入账户详情 —— 让用户看到「收到钱的那个钱包」到账后的余额/流水
+        else {
+          // 先把「记一笔」从当前栈上摘掉：它在首页栈 / 资产栈 / AI 栈里都是 push 进来的，
+          // 只切 Tab 的话它会留在原栈里，用户再回那个 Tab 看到的是一张空的记一笔表单。
+          if (typeof navigation?.canGoBack === 'function' && navigation.canGoBack()) navigation.goBack();
+          navigation?.navigate(ROUTES.TAB_ASSETS, {
+            screen: ROUTES.ASSETS,
+            params: { focusAssetId: toAssetId },
+          });
+        }
       }
     });
     return true;
@@ -1397,6 +1662,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           ? categories.find((c) => c.type === result.type && c.id === suggestedId)
           : undefined;
         if (matched) setCategoryId(matched.id);
+      userPickedCategoryRef.current = true;
       }
       if (result.amount != null) {
         setAmount(String(result.amount));
@@ -1485,7 +1751,19 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // ---------- 转账/兑换：填金额/汇率/手续费 ----------
   if (type === 'transfer' && step === 'transferDetail') {
     const fromSymbol = getCurrencySymbol(fromAsset?.currency ?? currency);
-    const toSymbol = getCurrencySymbol(toAsset?.currency ?? currency);    const rateNum = parseFloat(exchangeRate) || 0;
+    const toSymbol = getCurrencySymbol(toAsset?.currency ?? currency);
+    // ---------- 咬合几何（唯一真相）：卡高 / 间距 / 按钮 / 凹口 全部从这里取 ----------
+    const FX_CARD_H = showRateField ? 124 : 62;
+    const FX_GAP = 24;
+    const FX_BTN = 44;
+    const FX_NOTCH_R = 26;
+    const fxPairW = fxMeasuredW || windowWidth - layout.page * 2;
+    const fxPairH = FX_CARD_H * 2 + FX_GAP;
+    const fxCx = fxPairW / 2;
+    const fxCy = FX_CARD_H + FX_GAP / 2;
+    const fxBtnTop = (FX_GAP - FX_BTN) / 2;
+    const fxMaskId = fxMaskIdRef.current;
+   const rateNum = parseFloat(exchangeRate) || 0;
     const amountNum = parseFloat(amount) || 0;
     const feeNum = parseFloat(fee) || 0;
     // 正在哪个格子上打字，到账金额就实时用那个格子键盘上当前的数字算，不用等按"完成"——
@@ -1524,9 +1802,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           onDeletePress={isEditing ? handleDeleteTransaction : undefined}
           onSelectType={(nextType) => {
             if (isEditing) return;
-            setUiType(nextType);
-            setCategoryId(null);
-            setStep(stepForType(nextType));
+            switchUiType(nextType);
           }}
           title={isEditing ? t('addTx.editTitle') : t('nav.add')}
         />
@@ -1542,302 +1818,426 @@ export default function AddTransactionScreen({ navigation, route }: any) {
             // 键盘面板是常驻底部 footer，页面内容现在正好一屏放下：
             // 键盘开着时只留一点点底部空隙让内容紧贴键盘上方，不再撑出多余的滚动空间；
             // 键盘没开（极端情况）才回退到悬浮 Tab 栏的让位留白
-            { paddingBottom: amountKeypadOpen ? 16 : tabClearance + 36 },
+            { paddingBottom: amountKeypadOpen ? 28 : tabClearance + 36 },
           ]}
         >
-          {/* 资金流卡（T16 / A6）：转出账户 → 转入账户，中间方向 IconButton 互换两边；
-              点账户块开账户抽屉；账户名放不下换行、不截断；标签 ≥12pt */}
-          <Card style={styles.flowCard}>
-            <View style={styles.flowHeader}>
-              <AppText variant="caption" color={semantic.textSecondary}>
-                {t('addTx.fundFlow')}
-              </AppText>
-              <Badge label={t('addTx.instantRecord')} tone="success" dot />
-            </View>
+                    {/* 兑换记录（V2）：一张卡两段，中间 hairline + 骑在缝上的互换钮；
+              金额是主角（大字号、点开自绘计算器），账户行只负责选钱包。 */}
 
-            <View style={styles.flowRow}>
-              {/* 转出账户块（外层 View 承载 flex —— PressableScale 的样式落在内层，flex 必须给直接子项） */}
-              <View style={styles.flowBlockWrap}>
-              <PressableScale
-                style={styles.flowBlock}
-                activeScale={0.98}
-                hitSlop={0}
-                onPress={() => {
-                  setAccountPickerRole('from');
-                  setAccountPickerOpen(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`${t('addTx.outAccount')} ${fromAsset?.name ?? t('common.notSelected')}`}
-              >
-                <View style={styles.flowBlockLabelRow}>
-                  <AppText variant="caption" color={semantic.textSecondary}>
-                    {t('addTx.outAccount')}
-                  </AppText>
-                  <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
-                </View>
-                <View style={styles.flowBlockMain}>
-                  {/* UI V2：圆形账户图标（42 圆，取代旧 40 圆角方块） */}
-                  <IconCircle
-                    size={42}
-                    color={fromAsset?.color ?? semantic.accent}
-                    icon={(fromAsset?.icon as IconName) ?? 'wallet-outline'}
-                  />
-                  <AppText variant="headline" numberOfLines={2} style={styles.flowBlockName}>
-                    {fromAsset?.name ?? t('common.notSelected')}
-                  </AppText>
-                </View>
-              </PressableScale>
-              </View>
+          {!showRateField ? (
+            <AppText variant="caption" weight="600" color={semantic.textSecondary} style={styles.fxOuterLabel}>
+              {t('addTx.fromWalletLabel')}
+            </AppText>
+          ) : null}
 
-              {/* 中间方向按钮：互换转出/转入两个账户（原逻辑不变）；同样用外层 View 承载外边距 */}
-              <View style={styles.flowSwapWrap}>
-                <IconButton
-                  icon="swap-horizontal"
-                  variant="soft"
-                  accessibilityLabel={t('addTx.swapAccounts')}
-                  onPress={() => {
-                    hapticLight();
-                    // 互换是显式操作，之后转出账户不再自动跟随默认账户变化
-                    userPickedFromRef.current = true;
-                    setFromAssetId(toAssetId);
-                    setToAssetId(fromAssetId);
-                    // 互换后报价方向跟着换，否则同一个数字会算反
-                    setRateMode((m) => (m === 'mul' ? 'div' : 'mul'));
-                  }}
-                />
-              </View>
-
-              {/* 转入账户块（外层 View 承载 flex） */}
-              <View style={styles.flowBlockWrap}>
-              <PressableScale
-                style={styles.flowBlock}
-                activeScale={0.98}
-                hitSlop={0}
-                onPress={() => {
-                  setAccountPickerRole('to');
-                  setAccountPickerOpen(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`${t('addTx.inAccount')} ${toAsset?.name ?? t('common.notSelected')}`}
-              >
-                <View style={styles.flowBlockLabelRow}>
-                  <AppText variant="caption" color={semantic.textSecondary}>
-                    {t('addTx.inAccount')}
-                  </AppText>
-                  <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
-                </View>
-                <View style={styles.flowBlockMain}>
-                  {/* UI V2：圆形账户图标（42 圆，取代旧 40 圆角方块） */}
-                  <IconCircle
-                    size={42}
-                    color={toAsset?.color ?? semantic.accent}
-                    icon={(toAsset?.icon as IconName) ?? 'wallet-outline'}
-                  />
-                  <AppText variant="headline" numberOfLines={2} style={styles.flowBlockName}>
-                    {toAsset?.name ?? t('common.notSelected')}
-                  </AppText>
-                </View>
-              </PressableScale>
-              </View>
-            </View>
-          </Card>
-
-          {/* 转账和兑换/跨币种转账统一用同一套网格排版（T16 令牌化）：
-              第一行左边永远是可编辑的"转出金额"，右边是根据 converted 算出来的只读金额
-              （兑换叫"到账"、普通转账叫"转入金额"，本质是同一个数——普通转账走 !showRateField
-              时 converted 就是 amount 本身，天然 1:1，不用额外分支处理数值）。
-              第二行：手续费独占一整行（有汇率时汇率在中间格）；金额等宽数字、标签 ≥12pt；
-              手续费空态 = 灰色 0.00 占位（原来写"选填"） */}
           <View
-            onLayout={(e) => {
-              fieldY.current['cardTop'] = e.nativeEvent.layout.y;
-            }}
+            style={styles.fxPairWrap}
+            onLayout={(e) => setFxMeasuredW(Math.round(e.nativeEvent.layout.width))}
           >
-            <Card style={styles.rateCard}>
-              <AppText variant="subhead" weight="600" align="center" style={styles.rateCardTitle}>
-                {showRateField ? t('addTx.exchangeRate') : t('addTx.transfer')}
+            <Svg width={fxPairW} height={fxPairH} style={styles.fxPairSvg} pointerEvents="none">
+                <Defs>
+                  <Mask id={fxMaskId} maskUnits="userSpaceOnUse" x={0} y={0} width={fxPairW} height={fxPairH}>
+                    <Rect x={0} y={0} width={fxPairW} height={fxPairH} fill="#FFFFFF" />
+                    <Circle cx={fxCx} cy={fxCy} r={FX_NOTCH_R} fill="#000000" />
+                  </Mask>
+                </Defs>
+                <Rect x={0} y={0} width={fxPairW} height={FX_CARD_H} rx={radius.md} ry={radius.md}
+                  fill={semantic.surface} mask={`url(#${fxMaskId})`} />
+                <Rect x={0} y={FX_CARD_H + FX_GAP} width={fxPairW} height={FX_CARD_H} rx={radius.md} ry={radius.md}
+                  fill={semantic.surface} mask={`url(#${fxMaskId})`} />
+            </Svg>
+          <View
+            style={[
+              styles.fxAmountCard,
+              !showRateField && styles.fxWalletCard,
+              styles.fxPairCard,
+              { height: FX_CARD_H },
+              showRateField && calculatorTarget === 'amount' && amountKeypadOpen && styles.fxCardActive,
+            ]}
+            onLayout={registerFieldY('amount')}
+          >
+
+            <PressableScale
+              activeScale={0.98}
+              hitSlop={0}
+              onPress={() => {
+                setAccountPickerRole('from');
+                setAccountPickerOpen(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.outAccount')}
+              style={styles.fxAccountRow}
+            >
+              <IconCircle
+                size={44}
+                color={fromAsset?.color ?? semantic.surfaceSunken}
+                icon={(fromAsset?.icon as IconName) ?? 'wallet-outline'}
+              />
+
+              <AppText
+                variant={showRateField ? "subhead" : "headline"}
+                weight="600"
+                color={fromAsset ? semantic.textPrimary : semantic.textTertiary}
+                numberOfLines={1}
+                style={styles.fxAccountName}
+              >
+                {fromAsset?.name ?? t('common.notSelected')}
               </AppText>
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {fromAsset?.currency ?? ''}
+              </AppText>
+              {!showRateField && fromAsset ? (
+                <AppText color={semantic.textTertiary} numberOfLines={1} style={styles.fxBalanceInline}>
+                  {formatMoney(getAssetBalance(fromAsset.id), { decimals: 2 })}
+                </AppText>
+              ) : null}
+              <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} style={styles.fxChevron} />
+            </PressableScale>
+            <PressableScale
+              activeScale={0.98}
+              hitSlop={0}
+              onPress={() => openTransferCalculator('amount')}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.outAmount')}
+              style={showRateField ? styles.fxBigAmountTouch : undefined}
+            >
 
-              {/* 第一行：左边转出金额输入框，右边到账/转入金额（只读展示） */}
-              <View style={styles.rateGridRow}>
-                {/* onLayout 挂外层 View（PressableScale 不收 onLayout；T16 wip 的 7 个 tsc 错） */}
-                <View
-                  style={styles.rateGridCellWrapLeft}
-                  onLayout={(e) => {
-                    const cardY = fieldY.current['cardTop'] ?? 0;
-                    fieldY.current['amount'] = cardY + e.nativeEvent.layout.y;
-                  }}
-                >
-                  <PressableScale
-                    style={styles.rateGridCellLeft}
-                    activeScale={0.98}
-                    hitSlop={0}
-                    onPress={() => openTransferCalculator('amount')}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('addTx.outAmount')}
-                  >
-                    <View style={styles.rateGridLabelRow}>
-                      <AppText variant="caption" color={semantic.textSecondary}>
-                        {t('addTx.outAmount')}
-                      </AppText>
-                      {/* 后置货币提示贴在"转出金额"标签右侧：选了转出账户才显示，不与金额数字碰撞 */}
-                      {fromAsset && (
-                        <AppText variant="footnote" color={semantic.textTertiary} style={styles.rateGridLabelSuffix}>
-                          ({fromAsset.currency})
-                        </AppText>
-                      )}
-                    </View>
-                    <View style={styles.rateGridValueRow}>
-                      <CursorAmountText
-                        display={calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : amount || '0.00'}
-                        enabled={calculatorTarget === 'amount' && amountKeypadOpen}
-                        cursorFromEnd={amountCursor}
-                        onCursorChange={setAmountCursor}
-                        style={styles.rateGridValue}
-                        cursorStyle={styles.rateCursor}
-                      />
-                    </View>
-                  </PressableScale>
+
+              {showRateField ? (
+  <View style={styles.fxAmountLine}>
+                  <HeroAmountText
+                    display={fxAmountText(amount, calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : null)}
+                  onPress={() => openTransferCalculator('amount')}
+                    fontSize={amountFontTier(fxAmountText(amount, calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : null), 44)}
+                    cursorFromEnd={amountCursor}
+                    cursorActive={calculatorTarget === 'amount' && amountKeypadOpen && !amountExpr.isMulti}
+                    onCursorChange={setAmountCursor}
+                  />
+
                 </View>
+              ) : null}
+            </PressableScale>
+          </View>
 
-                {/* 分隔竖线：兑换/普通转账都渲染——转账没有汇率时这条线就是转出与转入的分界；
-                    大金额换行时线跟随格子布局，两种货币不会撞在一起 */}
-                <View style={styles.rateGridDividerVertical} />
+          {/* 接缝：间距 24、按钮 44（上下各压 10）；凹口靠卡片 SVG 轮廓 evenodd 挖出，这里不放任何圆盘 */}
+          <View style={styles.fxGapBand}>
+            {!showRateField ? (
+              <AppText variant="caption" weight="600" color={semantic.textSecondary} style={styles.fxGapLabel}>
+                {t('addTx.toWalletLabel')}
+              </AppText>
+            ) : null}
+            {/* 定位层：普通透明 View（44×44，left 50% / -22，top -10，相对接缝带局部坐标） */}
+            <View style={styles.fxSwapSlot}>
+              <PressableScale
+                style={[styles.fxSeamBtn, elevation.level2]}
+              activeScale={1}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.swapAccounts')}
+              onPress={() => {
+                hapticLight();
+                fxArrowRot.value = withTiming(fxArrowRot.value + 180, {
+                  duration: 280,
+                  easing: Easing.inOut(Easing.ease),
+                });
+                userPickedFromRef.current = true;
+                // 1) 方向：两个钱包对调（跨币种、同币种都这么做）
+                setFromAssetId(toAssetId);
+                setToAssetId(fromAssetId);
+                if (showRateField) {
+                  // 2) 跨币种：两侧金额也要一起对调 —— 「100 MYR → 30.18 SGD」反转后就该是
+                  //    「付 30.18 SGD 拿到 100 MYR」，否则金额含义与方向不一致（汇率会算错）。
+                  //    优先取键盘缓冲里的实时值，避免没按完成时对调成旧值。
+                  const liveFrom =
+                    calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : amount;
+                  const liveTo =
+                    calculatorTarget === 'received' && amountKeypadOpen ? receivedExpr.displayValue : receivedAmount;
+                  setAmount(liveTo);
+                  setReceivedAmount(liveFrom);
+                  amountExpr.reset(liveTo || undefined);
+                  receivedExpr.reset(liveFrom || undefined);
+                  setAmountCursor(0);
+                  setReceivedCursor(0);
+                  // 汇率是派生值：实收 ÷ 净转出 → 对调后自动等于原汇率的倒数，不需要切乘除档
+                  setRateMode('mul');
+                  setCalculatorTarget('amount');
+                } else {
+                  // 同币种转账：金额不随方向变化，只切换乘除档（原行为）
+                  setRateMode((m) => (m === 'mul' ? 'div' : 'mul'));
+                }
+              }}
+            >
+              <LinearGradient
+                colors={[withAlpha(semantic.accent, 0.86), semantic.accent]}
+                start={{ x: 0.2, y: 0 }}
+                end={{ x: 0.8, y: 1 }}
+                style={styles.fxSeamFace}
+              >
+              <Reanimated.View style={fxArrowStyle}>
+                            <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                {/* 参考图：两条互相追随的弧形箭头（上弧朝右、下弧朝左），整体呈旋转交换形态 */}
+                <Path
+                  d="M4 9 C7 3 16 3 20 9 M20 4 V9 H15"
+                  stroke={semantic.onAccent}
+                  strokeWidth={2.2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <Path
+                  d="M20 15 C17 21 8 21 4 15 M4 20 V15 H9"
+                  stroke={semantic.onAccent}
+                  strokeWidth={2.2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+              </Reanimated.View>
+              </LinearGradient>
+              </PressableScale>
+            </View>
+          </View>
 
-                {showRateField ? (
-                  <>
-                    <View
-                      style={styles.rateCenterCellWrap}
-                      onLayout={(e) => {
-                        const cardY = fieldY.current['cardTop'] ?? 0;
-                        fieldY.current['rate'] = cardY + e.nativeEvent.layout.y;
-                      }}
-                    >
-                      <PressableScale
-                        style={styles.rateCenterCell}
-                        activeScale={0.96}
-                        hitSlop={0}
-                        onPress={() => openTransferCalculator('rate')}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('addTx.rate')}
-                      >
-                        <AppText variant="caption" color={semantic.textSecondary} style={styles.rateCenterLabel}>
-                          {t('addTx.rate')}
-                        </AppText>
-                        <View style={styles.rateGridValueRow}>
-                          <PressableScale
-                            activeScale={0.9}
-                            hitSlop={8}
-                            onPress={() => {
-                              hapticLight();
-                              setRateMode((m) => (m === 'mul' ? 'div' : 'mul'));
-                            }}
-                            accessibilityRole="button"
-                            accessibilityLabel={rateMode === 'mul' ? 'rate multiply' : 'rate divide'}
-                            testID="addtx-rate-mode"
-                          >
-                            <Text style={styles.rateFieldValue}>{rateMode === 'mul' ? '×' : '÷'}</Text>
-                          </PressableScale>
-                          <CursorAmountText
-                            display={calculatorTarget === 'rate' && amountKeypadOpen ? rateExpr.displayValue : exchangeRate || '0.00'}
-                            enabled={calculatorTarget === 'rate' && amountKeypadOpen}
-                            cursorFromEnd={rateCursor}
-                            onCursorChange={setRateCursor}
-                            style={styles.rateFieldValue}
-                            cursorStyle={styles.rateCursor}
-                          />
-                          <Ionicons name="calculator-outline" size={16} color={semantic.accentText} style={styles.rateGridCalcIcon} />
-                        </View>
 
-                      </PressableScale>
-                    </View>
-                    <View style={styles.rateGridDividerVertical} />
-                  </>
-                ) : null}
+          <View
+            style={[
+              styles.fxAmountCard,
+              !showRateField && styles.fxWalletCard,
+              styles.fxPairCard,
+              { height: FX_CARD_H },
+              calculatorTarget === 'received' && amountKeypadOpen && styles.fxCardActive,
+            ]}
+          >
 
-                <View style={styles.rateGridCellRight}>
-                  <View style={styles.rateGridLabelRow}>
-                    <AppText variant="caption" color={semantic.textSecondary}>
-                      {showRateField ? t('addTx.receivedLabel') : t('addTx.inAmountLabel')}
-                    </AppText>
-                    {/* 后置货币提示贴在标签右侧：选了转入账户才显示，不与金额数字碰撞 */}
-                    {toAsset && (
-                      <AppText variant="footnote" color={semantic.textTertiary} style={styles.rateGridLabelSuffix}>
-                        ({toAsset.currency})
-                      </AppText>
-                    )}
-                  </View>
-                  <View style={styles.rateGridValueRow}>
-                    <Text
-                      style={[
-                        styles.rateGridValue,
-                        styles.rateGridValueTo,
-                        { fontVariant: ['tabular-nums'] },
-                      ]}
-                    >
-                      {converted}
-                    </Text>
-                  </View>
+            <PressableScale
+              activeScale={0.98}
+              hitSlop={0}
+              onPress={() => {
+                setAccountPickerRole('to');
+                setAccountPickerOpen(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.inAccount')}
+              style={styles.fxAccountRow}
+            >
+              <IconCircle
+                size={44}
+                color={toAsset?.color ?? semantic.surfaceSunken}
+                icon={(toAsset?.icon as IconName) ?? 'wallet-outline'}
+              />
+
+              <AppText
+                variant={showRateField ? "subhead" : "headline"}
+                weight="600"
+                color={toAsset ? semantic.textPrimary : semantic.textTertiary}
+                numberOfLines={1}
+                style={styles.fxAccountName}
+              >
+                {toAsset?.name ?? t('common.notSelected')}
+              </AppText>
+              <AppText variant="caption" color={semantic.textTertiary}>
+                {toAsset?.currency ?? ''}
+              </AppText>
+              {!showRateField && toAsset ? (
+                <AppText color={semantic.textTertiary} numberOfLines={1} style={styles.fxBalanceInline}>
+                  {formatMoney(getAssetBalance(toAsset.id), { decimals: 2 })}
+                </AppText>
+              ) : null}
+              <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} style={styles.fxChevron} />
+            </PressableScale>
+
+            {!showRateField ? null : !isEditing ? (
+              <PressableScale
+                activeScale={0.98}
+                hitSlop={0}
+                onPress={() => openTransferCalculator('received')}
+                accessibilityRole="button"
+                accessibilityLabel={t('addTx.receivedLabel')}
+                style={styles.fxBigAmountTouch}
+                testID="addtx-received-amount"
+              >
+                <View style={styles.fxAmountLine}>
+                  <HeroAmountText
+                    display={fxAmountText(receivedAmount, calculatorTarget === 'received' && amountKeypadOpen ? receivedExpr.displayValue : null)}
+                  onPress={() => openTransferCalculator('received')}
+                    fontSize={amountFontTier(fxAmountText(receivedAmount, calculatorTarget === 'received' && amountKeypadOpen ? receivedExpr.displayValue : null), 44)}
+                    cursorFromEnd={receivedCursor}
+                    cursorActive={calculatorTarget === 'received' && amountKeypadOpen && !receivedExpr.isMulti}
+                    onCursorChange={setReceivedCursor}
+                  />
+
+                </View>
+              </PressableScale>
+            ) : (
+              <View style={styles.fxBigAmountTouch}>
+                <View style={styles.fxAmountLine}>
+                  <HeroAmountText
+                  display={converted}
+                  fontSize={amountFontTier(converted, 44)}
+                  cursorFromEnd={0}
+                  cursorActive={false}
+                  onCursorChange={() => {}}
+                />
+
                 </View>
               </View>
+            )}
+          </View>
 
-              <View style={styles.exchangeRateDivider} />
+                      {/* 同币种转账：只有一个金额框（参考图），跨币种才需要两个金额 */}
+          </View>
 
-              {/* 第二行：手续费独占一整行——兑换和普通转账统一用同一套整行布局，大小完全一致 */}
+          {!showRateField ? (
+            <AppText variant="caption" weight="600" color={semantic.textSecondary} style={styles.fxOuterLabel}>
+              {t('addTx.transferAmount')}
+            </AppText>
+          ) : null}
+          {!showRateField ? (
+            <View style={[styles.fxAmountCard, styles.fxAmountCardCompact]}>
+              <View style={styles.fxAmountLine}>
+
+                <PressableScale
+                  style={styles.fxAmountFill}
+                  activeScale={0.98}
+                  hitSlop={0}
+                  onPress={() => openTransferCalculator('amount')}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addTx.transferAmount')}
+                >
+                  <HeroAmountText
+                    display={fxAmountText(amount, calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : null)}
+                  onPress={() => openTransferCalculator('amount')}
+                    fontSize={amountFontTier(fxAmountText(amount, calculatorTarget === 'amount' && amountKeypadOpen ? amountExpr.displayValue : null), 64)}
+                    cursorFromEnd={amountCursor}
+                    cursorActive={calculatorTarget === 'amount' && amountKeypadOpen && !amountExpr.isMulti}
+                    onCursorChange={setAmountCursor}
+                  />
+                </PressableScale>
+                <PressableScale
+                  style={styles.fxClearBtn}
+                  activeScale={0.9}
+                  hitSlop={8}
+                  onPress={() => {
+                    setAmount('');
+                    amountExpr.reset();
+                    setAmountCursor(0);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addTx.clearAmount')}
+                >
+                  <Ionicons name="close-circle" size={20} color={semantic.textTertiary} />
+                </PressableScale>
+              </View>
               <View
-                style={styles.transferMetaNoteRow}
                 onLayout={(e) => {
                   const cardY = fieldY.current['cardTop'] ?? 0;
                   fieldY.current['fee'] = cardY + e.nativeEvent.layout.y;
                 }}
               >
-                <View style={styles.transferMetaLeft}>
-                  <Ionicons name="receipt-outline" size={16} color={semantic.textSecondary} />
-                  <AppText variant="caption" color={semantic.textSecondary} style={styles.transferMetaLabel}>
-                    {t('addTx.fee')}
-                  </AppText>
-                </View>
-                <PressableScale
-                  style={styles.transferFeeValueButton}
-                  activeScale={0.97}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  onPress={() => openTransferCalculator('fee')}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('addTx.fee')}
-                >
-                  <CursorAmountText
-                    display={
-                      calculatorTarget === 'fee' && amountKeypadOpen
-                        ? feeExpr.displayValue
-                        : feeNum > 0
-                          ? `${fromSymbol}${formatMoney(feeNum, { decimals: 2 })}`
-                          : '0.00'
-                    }
-                    enabled={calculatorTarget === 'fee' && amountKeypadOpen}
-                    cursorFromEnd={feeCursor}
-                    onCursorChange={setFeeCursor}
-                    style={[styles.transferFeeValue, ...(feeNum > 0 ? [styles.transferFeeValueActive] : [])]}
-                    cursorStyle={styles.feeCursor}
-                  />
-                  <Ionicons name="calculator-outline" size={16} color={semantic.textTertiary} />
-                </PressableScale>
-              </View>
+              <PressableScale
+                style={styles.fxFeeInlineRow}
+                activeScale={0.98}
+                hitSlop={8}
 
-              {/* 填了手续费就提示：手续费先从转出金额里扣掉——兑换的到账是"扣完再按汇率换算"，
-                  普通转账则直接按扣完的金额到账 */}
-              {liveFeeNum > 0 && (
-                <View style={styles.exchangeFeeHintRow}>
-                  <Ionicons name="information-circle-outline" size={16} color={semantic.textSecondary} />
-                  <AppText variant="caption" color={semantic.textSecondary} numberOfLines={2} style={styles.exchangeFeeHintText}>
-                    {showRateField
-                      ? t('addTx.feeDeductExchange', { fee: `${fromSymbol}${formatMoney(liveFeeNum, { decimals: 2 })}`, net: `${fromSymbol}${formatMoney(netAmount, { decimals: 2 })}` })
-                      : t('addTx.feeDeductTransfer', { fee: `${fromSymbol}${formatMoney(liveFeeNum, { decimals: 2 })}`, net: `${toSymbol}${formatMoney(netAmount, { decimals: 2 })}` })}
-                  </AppText>
+                onPress={() => openTransferCalculator('fee')}
+                accessibilityRole="button"
+                accessibilityLabel={t('addTx.fee')}
+              >
+                <View style={styles.fxMetaPill}>
+                  <Ionicons name="receipt-outline" size={14} color={semantic.textSecondary} />
                 </View>
-              )}
-            </Card>
+                <AppText variant="caption" color={semantic.textSecondary}>
+                  {t('addTx.fee')}
+                </AppText>
+                <View style={styles.fxFeeSpacer} />
+                <CursorAmountText
+                  display={
+                    calculatorTarget === 'fee' && amountKeypadOpen
+                      ? feeExpr.displayValue
+                      : formatMoney(feeNum, { decimals: 2 })
+                  }
+                  enabled={calculatorTarget === 'fee' && amountKeypadOpen}
+                  cursorFromEnd={feeCursor}
+                  onCursorChange={setFeeCursor}
+                  style={[styles.rateGridValue, styles.fxRateValueText]}
+                  onPress={() => openTransferCalculator('fee')}
+                  cursorStyle={styles.feeCursor}
+                />
+              </PressableScale>
+              </View>
+            </View>
+          ) : null}
+          {/* 汇率 + 手续费：仅兑换档需要（转账档的手续费并进金额卡右下角） */}
+          {showRateField ? (
+          <View style={styles.fxMetaCard}>
+            {showRateField ? (
+              <View style={styles.fxMetaRow} onLayout={registerFieldY('rate')}>
+                <View style={styles.fxMetaPill}>
+                  <Ionicons name="swap-vertical-outline" size={14} color={semantic.accentText} />
+                </View>
+                <AppText variant="caption" color={semantic.textSecondary} style={styles.fxRateLabel}>
+                  {t('addTx.rate')}
+                </AppText>
+                <AppText variant="subhead" weight="600" color={semantic.textPrimary} align="right" style={styles.fxRateValue} numberOfLines={1}>
+                  {exchangeRate && fromAsset && toAsset
+                    ? '1 ' + fromAsset.currency + ' = ' + exchangeRate + ' ' + toAsset.currency
+                    : '—'}
+                </AppText>
+              </View>
+            ) : null}
+
+            {showRateField && !exchangeRate ? (
+              <AppText variant="caption2" color={semantic.textTertiary} style={styles.fxHintRow}>
+                {t('addTx.receivedHint')}
+              </AppText>
+            ) : null}
+
+            {showRateField ? <View style={styles.fxMetaDivider} /> : null}
+
+            <View onLayout={registerFieldY('fee')}>
+            <PressableScale
+              style={styles.fxMetaRow}
+              activeScale={0.98}
+              onPress={() => openTransferCalculator('fee')}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.fee')}
+            >
+              <View style={styles.fxMetaPill}>
+                <Ionicons name="receipt-outline" size={14} color={semantic.textSecondary} />
+              </View>
+              <AppText variant="caption" color={semantic.textSecondary} style={styles.fxRateLabel}>
+                {t('addTx.fee')}
+              </AppText>
+              <View style={styles.fxRateValue}>
+                <CursorAmountText
+                  display={
+                    calculatorTarget === 'fee' && amountKeypadOpen
+                      ? feeExpr.displayValue || '0.00'
+                      : formatMoney(feeNum, { decimals: 2 })
+                  }
+                  enabled={calculatorTarget === 'fee' && amountKeypadOpen}
+                  cursorFromEnd={feeCursor}
+                  onCursorChange={setFeeCursor}
+                  style={[styles.rateGridValue, styles.fxRateValueText]}
+                  onPress={() => openTransferCalculator('fee')}
+                  cursorStyle={styles.feeCursor}
+                />
+              </View>
+            </PressableScale>
+            </View>
           </View>
-        </ScrollView>
+          ) : null}
+
+{liveFeeNum > 0 && (
+            <View style={styles.exchangeFeeHintRow}>
+              <Ionicons name="information-circle-outline" size={16} color={semantic.textSecondary} />
+              <AppText variant="caption" color={semantic.textSecondary} numberOfLines={2} style={styles.exchangeFeeHintText}>
+                {showRateField
+                  ? t('addTx.feeDeductExchange', { fee: `${fromSymbol}${formatMoney(liveFeeNum, { decimals: 2 })}`, net: `${fromSymbol}${formatMoney(netAmount, { decimals: 2 })}` })
+                  : t('addTx.feeDeductTransfer', { fee: `${fromSymbol}${formatMoney(liveFeeNum, { decimals: 2 })}`, net: `${toSymbol}${formatMoney(netAmount, { decimals: 2 })}` })}
+              </AppText>
+            </View>
+          )}
+</ScrollView>
         </View>
 
         {/* 转账/兑换也使用同一套计算器；金额/汇率/手续费点击后进入这里。
@@ -1853,6 +2253,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
               onClear={() => {
                 if (calculatorTarget === 'amount') { amountExpr.reset(); setAmountCursor(0); }
                 else if (calculatorTarget === 'rate') { rateExpr.reset(); setRateCursor(0); }
+                else if (calculatorTarget === 'received') { receivedExpr.reset(); setReceivedCursor(0); }
                 else { feeExpr.reset(); setFeeCursor(0); }
               }}
               onConfirmLongPress={handleTransferCalculatorConfirmAndContinue}
@@ -2007,11 +2408,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           <TransactionTypeHeader
             uiType={uiType}
             onBack={() => navigation?.goBack()}
-            onSelectType={(nextType) => {
-              setUiType(nextType);
-              setCategoryId(null);
-              setStep(stepForType(nextType));
-            }}
+            onSelectType={switchUiType}
             title={t('nav.add')}
             onScanPress={handleScanPress}
           />
@@ -2020,60 +2417,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
         {/* 金额 Hero（UI V2 / 稿）：币种小胶囊 → 算式（多项时才出现，14pt 降透明）→ 64pt 金额，
             全部居中直接落在渐变上（不再是卡片）；金额点按打开自绘键盘 / 定位光标 */}
         <View style={[styles.heroArea, isShort && styles.heroAreaShort]}>
-          {/* 金额那一行：左＝币种胶囊，右＝「每月」开关。
-              日期不再单独占一行 —— 键盘上的日期键（今天 / 10月28日）已经覆盖同一功能，
-              两枚胶囊单独排一行会和上下两块边缘都对不齐（用户 2026-10-28 反馈）。 */}
-          <View style={styles.heroTopRow}>
-          <PressableScale
-            activeScale={0.96}
-            hitSlop={0}
-            onPress={() => setAssetPickerOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={t('addTx.selectCurrency')}
-          >
-            <GlassView radius={999} style={styles.currencyPill}>
-              <AppText variant="caption2" weight="500" color={semantic.textPrimary}>
-                {amountCurrencyCode}
-              </AppText>
-              <Ionicons name="chevron-down" size={12} color={semantic.textPrimary} />
-            </GlassView>
-          </PressableScale>
-
-          {!isEditing && (
-            <PressableScale
-              activeScale={0.94}
-              hitSlop={6}
-              onPress={() => {
-                hapticLight();
-                setAutoMonthly((v) => !v);
-              }}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: autoMonthly }}
-              accessibilityLabel={t('finance.monthlyLabel')}
-              testID="addtx-monthly-toggle"
-            >
-              <View
-                style={[
-                  styles.monthlyToggle,
-                  autoMonthly && { backgroundColor: semantic.accent, borderColor: semantic.accent },
-                ]}
-              >
-                <Ionicons
-                  name="repeat-outline"
-                  size={13}
-                  color={autoMonthly ? semantic.onAccent : semantic.textSecondary}
-                />
-                <AppText
-                  variant="caption2"
-                  weight="600"
-                  color={autoMonthly ? semantic.onAccent : semantic.textSecondary}
-                >
-                  {t('finance.monthlyLabel')}
-                </AppText>
-              </View>
-            </PressableScale>
-          )}
-          </View>
 
           {/* 算式行：多项（有 +/− 运算符）时才出现；稿里是降透明白 →
               UI V2.1 §3 改 text.primary（13pt 小字需 4.5:1，降透明浅字在浅色渐变上不达标） */}
@@ -2118,41 +2461,86 @@ export default function AddTransactionScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* 币种行（设计稿 03 屏）：账户 + 币种 / 可用余额 + chevron —— 点按仍是原「选择账户」抽屉，
-            数据与行为不变，只是把账户从一行胶囊换成一张 surface 卡 */}
-        <PressableScale
-          activeScale={0.98}
-          hitSlop={0}
-          onPress={() => setAssetPickerOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel={t('addTx.selectAccount')}
-          style={styles.currencyRow}
-          testID="addtx-currency-row"
-        >
-          <View
-            style={[
-              styles.currencyBadge,
-              { backgroundColor: withAlpha(selectedAsset?.color ?? semantic.accent, 0.12) },
-            ]}
-          >
-            <AppText variant="caption2" weight="600" color={semantic.textPrimary}>
-              {amountCurrencyCode}
-            </AppText>
-          </View>
-          <View style={styles.currencyInfo}>
-            <AppText variant="subhead" weight="500" color={semantic.textPrimary} numberOfLines={1}>
-              {selectedAsset ? `${selectedAsset.name} · ${amountCurrencyCode}` : t('common.notSelected')}
-            </AppText>
-            {assetId != null && (
-              <AppText variant="caption2" color={semantic.textTertiary} numberOfLines={1}>
-                {selectedAsset?.type === 'credit'
-                  ? `${t('asset.creditAvailableShort')} ${formatMoney(getAssetDisplayBalance(selectedAsset, getAssetBalance(assetId)))}`
-                  : `${t('addTx.availableBalance')} ${formatMoney(getAssetBalance(assetId))}`}
+        {/* 币种/钱包卡 + 每月（用户 2026-11-03 二改：只重排这三个控件，其余不动）：
+            左＝白色钱包卡，内含「货币按钮 → 短竖线 → 钱包信息」三个互不嵌套的热区；
+            右＝独立的「每月」按钮（自带渐变底 / 描边 / 圆角），与卡同高，中间露出 8 的页面背景。
+            点货币开币种、点钱包信息开账户、点每月只切换 —— 三者互不触发。 */}
+        <View style={styles.walletRow}>
+          <View style={[styles.walletCard, !isDark && elevation.level1]}>
+            {/* 货币选择：浅蓝圆角胶囊（可点，不是静态标签） */}
+            <PressableScale
+              style={styles.currencyBtn}
+              activeScale={0.94}
+              hitSlop={0}
+              onPress={() => setAssetPickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.selectCurrency')}
+              testID="addtx-currency-row"
+            >
+              <AppText variant="caption2" weight="600" color={semantic.textPrimary} numberOfLines={1}>
+                {amountCurrencyCode}
               </AppText>
-            )}
+              <Ionicons name="chevron-down" size={11} color={semantic.textSecondary} />
+            </PressableScale>
+            {/* 短竖线：只占卡片中段，区分货币与钱包（不贯穿整卡高度） */}
+            <View style={styles.walletDivider} />
+            {/* 钱包信息：点这里开钱包（账户）选择；名称后不再重复「· 币种」 */}
+            <PressableScale
+              style={styles.walletInfo}
+              activeScale={0.98}
+              hitSlop={0}
+              onPress={() => setAssetPickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('addTx.selectAccount')}
+              testID="addtx-account-row"
+            >
+              <View style={styles.walletNameRow}>
+                <AppText variant="subhead" weight="500" color={semantic.textPrimary} numberOfLines={1}>
+                  {selectedAsset ? selectedAsset.name : t('common.notSelected')}
+                </AppText>
+                <Ionicons name="chevron-down" size={14} color={semantic.textSecondary} />
+              </View>
+              {assetId != null && (
+                <AppText variant="caption2" color={semantic.textSecondary} numberOfLines={1}>
+                  {selectedAsset?.type === 'credit'
+                    ? `${t('asset.creditAvailableShort')} ${formatMoney(getAssetDisplayBalance(selectedAsset, getAssetBalance(assetId)))}`
+                    : `${t('addTx.availableBalance')} ${formatMoney(getAssetBalance(assetId))}`}
+                </AppText>
+              )}
+            </PressableScale>
           </View>
-          <Ionicons name="chevron-down" size={16} color={semantic.textTertiary} />
-        </PressableScale>
+          {!isEditing && (
+            <PressableScale
+              style={[styles.monthlyTouch, !isDark && elevation.level1]}
+              activeScale={0.94}
+              hitSlop={0}
+              onPress={() => {
+                hapticLight();
+                setAutoMonthly((v) => !v);
+              }}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: autoMonthly }}
+              accessibilityLabel={t('finance.monthlyLabel')}
+              testID="addtx-monthly-toggle"
+            >
+              <LinearGradient
+                colors={
+                  autoMonthly
+                    ? [semantic.accent, withAlpha(semantic.accent, 0.86)]
+                    : [withAlpha(semantic.accent, 0.2), withAlpha(semantic.accent, 0.06)]
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={[styles.monthlyBtn, { borderColor: withAlpha(semantic.accent, autoMonthly ? 0.5 : 0.22) }]}
+              >
+                <Ionicons name="repeat-outline" size={18} color={autoMonthly ? semantic.onAccent : semantic.accentText} />
+                <AppText variant="caption" weight="600" color={autoMonthly ? semantic.onAccent : semantic.accentText} numberOfLines={1}>
+                  {t('finance.monthlyLabel')}
+                </AppText>
+              </LinearGradient>
+            </PressableScale>
+          )}
+        </View>
 
         {/* 类别（T15 / V2）：列数取版型；格 = 42 立体球图标 + 12pt 标签；网格区可滚动，「全部」永远殿后。
             定稿里没有「类别：xxx」提示行（选中态由外圈表达）→ 整行删掉，高度让给网格：
@@ -2407,27 +2795,43 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   heroAmountBox: { alignSelf: 'stretch', marginTop: 2 },
   heroAmountTouch: { alignSelf: 'stretch', minWidth: 0, alignItems: 'center', justifyContent: 'center' },
   // 账户 / 日期 / 月度结转 Chip 行（稿）：整行居中、放不下整块掉第二行，不截断、不缩字
-  // 币种行（设计稿 03 屏）：surface 实底 12 圆角卡 —— 币种徽标 + 账户·币种 + 余额 + chevron
-  currencyRow: {
+  // 行容器：左＝钱包卡（吃掉剩余宽度），右＝固定 60 的「每月」按钮；中间 8 露出页面背景。
+  // 左右边距取 20（= 备注栏 / 数字键盘 stickyFooter 的内容边），整排与下方键盘块同一条竖线
+  walletRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: spacing.md,
-    marginHorizontal: layout.page,
+    columnGap: spacing.sm,
+    marginHorizontal: spacing.xl,
     marginTop: spacing.sm,
-    paddingHorizontal: layout.card,
-    paddingVertical: spacing.sm,
+  },
+  // 钱包卡：surface 白底 + 14 圆角 + 48 高；内部「货币按钮 / 短竖线 / 钱包信息」横排
+  walletCard: {
+    flex: 1,
+    minWidth: 0,
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: spacing.sm,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: semantic.surface,
   },
-  currencyBadge: {
-    minWidth: 42,
-    height: 24,
-    paddingHorizontal: spacing.xs,
-    borderRadius: radius.xs,
+  // 货币选择：浅蓝圆角胶囊（56×30）—— 可点，不是静态标签
+  currencyBtn: {
+    width: 56,
+    height: 30,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    columnGap: 2,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.accentSoft,
   },
-  currencyInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  // 短竖线：卡片高度中段 20，不贯穿整卡
+  walletDivider: { width: 1, height: 20, backgroundColor: semantic.hairline },
+  // 钱包信息：两行左对齐、整体垂直居中，吃掉卡片剩余宽度（窄屏由 numberOfLines 兜底）
+  walletInfo: { flex: 1, minWidth: 0, justifyContent: 'center', rowGap: 1 },
+  walletNameRow: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
   // 金额那一行：币种贴左、每月开关贴右（与账户卡 / 类别网格同一条左右边界）
   heroTopRow: {
     flexDirection: 'row',
@@ -2437,16 +2841,17 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
     alignSelf: 'stretch',
     paddingHorizontal: spacing.sm,
   },
-  // 「每月」开关：中性态描边胶囊；打开后填充品牌色（与分段控件的选中态同一套语言）
-  monthlyToggle: {
-    flexDirection: 'row',
+  // 「每月」：独立按钮，固定 60×48（与钱包卡同高）；
+  // 阴影放在外层（内部渐变半透明，Android 阴影从元件内侧透出的老问题要避开）
+  monthlyTouch: { width: 60, height: 48, borderRadius: radius.sm },
+  // 渐变 / 描边 / 圆角都落在这一层；图标在上、文字在下，上下排列居中
+  monthlyBtn: {
+    flex: 1,
     alignItems: 'center',
-    columnGap: 4,
-    height: 28,
-    paddingHorizontal: 10,
-    borderRadius: 999,
+    justifyContent: 'center',
+    rowGap: 2,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: semantic.hairline,
   },
   // 矮屏：与金额区的间距 4→0、Chip 间距 8→6（三个 Chip 保持一行）
   heroChipsRowShort: { marginTop: 0, columnGap: 6 },
@@ -2533,7 +2938,8 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   },
   // onLayout 挂外层（fieldY 记账用），格子本体仍是 PressableScale
   rateGridCellWrapLeft: { flex: 1, minWidth: 0 },
-  rateCenterCellWrap: { alignItems: 'center' },
+  // minWidth：三位的汇率（如 ÷0.3125 兑）也留得下，同时保证可点宽度不小于 104
+  rateCenterCellWrap: { minWidth: 104, alignItems: 'stretch' },
   // 数值行：数字与「×」/计算器图标同一基线
   rateGridValueRow: { flexDirection: 'row', alignItems: 'baseline' },
   rateGridCellLeft: { flex: 1, alignItems: 'flex-start', paddingVertical: spacing.xs },
@@ -2545,11 +2951,21 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   rateGridValue: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'], color: semantic.textPrimary },
   rateGridValueTo: { color: semantic.amountIncome },
   rateGridCalcIcon: { marginLeft: spacing.xs },
-  rateCenterCell: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  // 汇率格：可点区域撑满中间这一列（原来只有文字宽，真机上很难点中）
+  rateCenterCell: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
   rateCenterLabel: { marginBottom: spacing.xs },
   // 汇率数值：accentText 强调色，保持"这里能点"的视觉权重
   rateFieldValue: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'], color: semantic.accentText },
   exchangeRateDivider: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline, marginTop: spacing.md },
+  // 汇率来源状态行：网格与手续费行之间的一行小字，点它 = 重新拉取汇率
+  rateStatusRow: { marginTop: spacing.sm, paddingVertical: spacing.xs, alignItems: 'center' },
   // 汇率格下方的一行含义说明（不占交互，只是把方向讲清楚）
   rateCenterHint: { marginTop: 2, textAlign: 'center' },
   // 汇率格下方：÷ / × 两个候选结果并排，当前档加重
@@ -2573,6 +2989,168 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   transferFeeValueActive: { color: semantic.textPrimary },
   exchangeFeeHintRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: spacing.xs, marginTop: spacing.sm, paddingHorizontal: spacing.xs },
   exchangeFeeHintText: { flex: 1 },
+  // ---------- 兑换记录（参照新设计稿）：从 / 兑换为 大金额卡 + 汇率条 ----------
+  fxSectionLabel: { marginTop: spacing.md, marginBottom: spacing.xs, marginLeft: layout.page },
+  fxAmountCard: {
+    marginHorizontal: layout.page,
+    paddingHorizontal: layout.card,
+    paddingVertical: spacing.md,
+    minHeight: 124,
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    borderRadius: radius.md,
+    backgroundColor: semantic.surface,
+  },
+  fxAccountRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, minHeight: 44 },
+  fxAccountName: { flex: 1, minWidth: 0 },
+  fxChevron: { marginLeft: 'auto' },
+  // 金额可点区：44 号字约 49px 高、64 号更高 —— 盒子必须比字大，否则点数字上半部会落空
+  // 金额可点区：铺满卡片剩余空间（点数字、点数字周围的空白都算）
+  fxBigAmountTouch: { flex: 1, minHeight: 60, justifyContent: 'center', paddingVertical: spacing.xs },
+  fxBigAmount: { fontSize: 34, fontWeight: '700', color: semantic.textPrimary },
+  fxBigAmountTo: { color: semantic.amountIncome },
+  fxBigAmountToText: { fontVariant: ['tabular-nums'] },
+  fxBigAmountMuted: { color: semantic.textTertiary },
+  // 正在输入的那张卡：蓝描边（与光标同色，两侧一致）
+  fxCardActive: { borderColor: semantic.accent },
+  fxAmountLine: { flexDirection: 'row', alignItems: 'baseline', columnGap: spacing.xs, minHeight: 56 },
+  fxCardLabel: { marginBottom: spacing.xs },
+  fxBalanceInline: {
+    marginLeft: 'auto',
+    marginRight: spacing.sm,
+    flexShrink: 0,
+    fontSize: 16,
+    fontWeight: '600',
+    color: semantic.textPrimary,
+  },
+  fxFeeInlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: spacing.xs,
+    marginTop: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: semantic.hairline,
+  },
+  fxFeeSpacer: { flex: 1 },
+  // 卡外小标题：贴在上方卡片 8，左右与卡片对齐
+  fxOuterLabel: { marginTop: spacing.md, marginBottom: spacing.xs, marginLeft: layout.page },
+  // 转账档：钱包卡只放「标题 + 钱包 + 余额」，不需要 124 的金额高度
+  fxWalletCard: { minHeight: 0, paddingVertical: spacing.sm },
+  fxAmountCardCompact: { minHeight: 0, paddingVertical: spacing.sm },
+  fxBalanceLine: { marginTop: spacing.xs, marginLeft: 42 },
+  fxAmountFill: { flex: 1 },
+  fxClearBtn: {
+    alignSelf: 'center',
+    marginLeft: spacing.xs,
+    width: 34,
+    height: 34,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: semantic.surfaceSunken,
+  },
+  fxAmountCurrency: { marginBottom: spacing.xs },
+  // 按钮咬进上下两张卡：48 高、上下各 -18 ⇒ 卡间净剩 12
+  // 44 高 + 上下 -22：净占 0，按钮整体跨在接缝上，且热区不被父级裁剪
+  // 咬合接缝：卡片直边间距 26；凹口圆 r=26、按钮 r=22，同心 ⇒ 按钮上下各重叠 9、凹口留 4px 背景
+  fxPairWrap: { position: 'relative', marginHorizontal: layout.page },
+  fxPairSvg: { position: 'absolute', left: 0, top: 0 },
+  fxPairCard: {
+    marginHorizontal: 0,
+    marginLeft: 0,
+    marginRight: 0,
+    minHeight: 0,
+    borderWidth: 0,
+    paddingVertical: 0,
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    zIndex: 1,
+  },
+  fxGapBand: { height: 24, justifyContent: 'center', zIndex: 2 },
+  fxGapLabel: { marginLeft: 0 },
+  // 定位层：普通 View，只负责 absolute 定位，不带任何背景/圆盘/阴影
+  fxSwapSlot: { position: 'absolute', left: '50%', marginLeft: -22, top: -10, width: 44, height: 44, zIndex: 3 },
+  fxSeamRow: {
+    height: 44,
+    marginTop: -18,
+    marginBottom: -18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: layout.page,
+    zIndex: 2,
+  },
+  fxSeamHair: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 18,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: semantic.hairline,
+  },
+  fxSeamBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 渐变面：严格铺在既有 44 圆内（不放大、不加外圈、不碰凹口）
+  fxSeamFace: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fxSeamArrows: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
+  fxSwapCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: semantic.surface,
+    borderWidth: 1,
+    borderColor: semantic.hairline,
+  },
+  fxSwapWrap: { alignItems: 'center', marginTop: -spacing.lg, marginBottom: -spacing.lg, zIndex: 1 },
+  fxRateBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: spacing.sm,
+    minHeight: 44,
+    marginHorizontal: layout.page,
+    marginTop: spacing.sm,
+    paddingHorizontal: layout.card,
+    borderRadius: radius.md,
+    backgroundColor: semantic.surface,
+  },
+  fxRateLabel: { flexShrink: 0 },
+  fxMetaCard: {
+    marginHorizontal: layout.page,
+    marginTop: spacing.md,
+    paddingHorizontal: layout.card,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: semantic.surface,
+  },
+  fxMetaRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, minHeight: 44 },
+  fxMetaPill: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: semantic.brandSoft,
+  },
+  fxMetaDivider: { height: StyleSheet.hairlineWidth, backgroundColor: semantic.hairline },
+  fxRateValue: { flex: 1 },
+  fxRateValueText: { textAlign: 'right' },
+  fxHintRow: { marginLeft: 34, marginTop: -spacing.xs, marginBottom: spacing.xs },
 
   });
 }

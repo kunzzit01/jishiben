@@ -21,16 +21,17 @@
 // （负号会被念成「负七十三」）。总预算与分类预算共用 utils/budgetPct.ts 的 formatBudgetPct
 // （首页净资产卡的预算槽用的是同一份），别处不要再写百分比三元表达式。
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/useTheme';
 import { useT } from '../i18n/LanguageContext';
+import { LinearGradient } from 'expo-linear-gradient';
 import { formatBudgetPct } from '../utils/budgetPct';
+import { formatMoney } from '../utils/formatMoney';
 import AppText from './ui/AppText';
 import BottomSheet from './ui/BottomSheet';
 import MoneyText from './ui/MoneyText';
-import ProgressBar from './ui/ProgressBar';
 import PressableScale from './PressableScale';
 import { withAlpha } from './ui/color';
 
@@ -102,6 +103,17 @@ export function MonthlyBudgetSheet({
     () =>
       StyleSheet.create({
         scroll: { maxHeight: '100%' },
+        moneyBox: { rowGap: 2 },
+        moneyLine: {
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          columnGap: spacing.xs,
+        },
+        // 金额与货币代码各占一个节点：代码固定宽、金额取剩余宽度并允许换行（不省略、不缩字号）
+        moneyValue: { flexShrink: 1, flexDirection: 'row', alignItems: 'baseline', columnGap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' },
+        barTrack: { borderRadius: 4, overflow: 'hidden' },
+        barFill: { borderRadius: 4 },
         content: { paddingHorizontal: layout.card, paddingBottom: spacing.xxl, gap: spacing.lg },
         // 卡面：稿里 12 圆角、16 内衬、surface 实底（页面底比它深一档分层）
         card: {
@@ -166,6 +178,7 @@ export function MonthlyBudgetSheet({
     }
   };
   const totalPct = formatBudgetPct(totalUsed, totalLimit, t);
+  const totalOver = totalLimit > 0 && totalUsed > totalLimit;
 
   return (
     <BottomSheet
@@ -193,26 +206,42 @@ export function MonthlyBudgetSheet({
             </AppText>
             {totalLimit > 0 ? (
               <AppText
-                variant="title2"
+                variant="subhead"
                 weight="600"
                 color={toneColor(totalPct.tone)}
                 accessibilityLabel={totalPct.a11y}
                 testID="budget-total-pct"
               >
-                {totalPct.text}
+                {totalLimit > 0 && totalUsed > totalLimit
+                  ? t('home.budgetOver', { amount: formatMoney(totalUsed - totalLimit, { showCurrency: false }) })
+                  : totalPct.text}
               </AppText>
             ) : null}
           </View>
           {totalLimit > 0 ? (
             <>
               <View style={styles.totalAmountRow}>
-                <MoneyText value={totalUsed} kind="plain" variant="title2" color={semantic.textPrimary} hidden={hidden} />
+                <MoneyText value={totalUsed} kind="plain" variant="title2" color={semantic.textPrimary} />
                 <AppText variant="subhead" color={semantic.textTertiary}>
                   {' / '}
                 </AppText>
-                <MoneyText value={totalLimit} kind="plain" variant="subhead" color={semantic.textSecondary} hidden={hidden} />
+                <MoneyText value={totalLimit} kind="plain" variant="subhead" color={semantic.textSecondary} />
               </View>
-              <ProgressBar ratio={totalPct.fillRatio} tone={totalPct.tone} height={10} testID="budget-total-bar" />
+              <View
+            style={[styles.barTrack, { height: 10, backgroundColor: semantic.hairline }]}
+            testID="budget-total-bar"
+          >
+            {totalOver ? (
+              <View style={[styles.barFill, { height: 10, width: '100%', backgroundColor: semantic.danger }]} />
+            ) : (
+              <LinearGradient
+                colors={[withAlpha(semantic.accent, 0.55), semantic.accent] as const}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.barFill, { height: 10, width: `${Math.min(1, totalPct.fillRatio) * 100}%` }]}
+              />
+            )}
+          </View>
             </>
           ) : (
             <AppText variant="subhead" color={semantic.textTertiary}>
@@ -220,6 +249,91 @@ export function MonthlyBudgetSheet({
             </AppText>
           )}
         </PressableScale>
+
+        {/* 分类预算 */}
+        <View style={styles.sectionHead}>
+          <AppText variant="caption" weight="600" color={semantic.textSecondary}>
+            {t('home.budgetCategorySection')}
+          </AppText>
+          <AppText variant="caption" color={semantic.textTertiary}>
+            {rows.length}
+          </AppText>
+        </View>
+
+        {rows.length === 0 && (
+          <AppText variant="footnote" color={semantic.textTertiary} style={styles.emptyHint}>
+            {t('home.budgetCategoryEmpty')}
+          </AppText>
+        )}
+        {rows.length > 0 && (
+          <AppText variant="caption2" color={semantic.textTertiary} style={styles.emptyHint}>
+            {t('home.budgetLongPressHint')}
+          </AppText>
+        )}
+
+        <View style={styles.rowList}>
+          {rows.map((row) => {
+            const pct = formatBudgetPct(row.used, row.limit, t);
+            const over = row.limit > 0 && row.used > row.limit;
+            const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
+            const tint = row.color ?? semantic.accent;
+            return (
+              <PressableScale
+                key={row.categoryId}
+                activeScale={0.98}
+                onPress={() => onEditCategory(row.categoryId)}
+                onLongPress={() => onRenameCategory?.(row.categoryId, row.name)}
+                accessibilityRole="button"
+                accessibilityLabel={`${row.name} ${pct.a11y}`}
+                style={styles.card}
+                testID={`budget-cat-${row.categoryId}`}
+              >
+                <View style={styles.rowHead}>
+                  <View style={[styles.iconBox, { backgroundColor: withAlpha(tint, 0.12) }]}>
+                    <Ionicons name={iconName} size={16} color={tint} />
+                  </View>
+                  <View style={styles.rowTitleWrap}>
+                    <AppText variant="subhead" weight="500" color={semantic.textPrimary} numberOfLines={1}>
+                      {row.name}
+                    </AppText>
+                  </View>
+                  {/* 稿：百分比 22/600 主文字色 —— 是否超支只由条色表达，数字不重复上色 */}
+                  <AppText
+                    variant="subhead"
+                    weight="600"
+                    color={toneColor(pct.tone)}
+                    style={styles.pctText}
+                    accessibilityLabel={pct.a11y}
+                    testID={`budget-cat-pct-${row.categoryId}`}
+                  >
+                    {row.limit > 0 && row.used > row.limit
+                      ? t('home.budgetOver', { amount: formatMoney(row.used - row.limit, { showCurrency: false }) })
+                      : pct.text}
+                  </AppText>
+                </View>
+                <View style={[styles.barTrack, { height: 8, backgroundColor: semantic.hairline }]}>
+                  {row.limit > 0 && row.used > row.limit ? (
+                    <View style={[styles.barFill, { height: 8, width: '100%', backgroundColor: semantic.danger }]} />
+                  ) : (
+                    <LinearGradient
+                      colors={[withAlpha(semantic.accent, 0.55), semantic.accent] as const}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={[styles.barFill, { height: 8, width: `${Math.min(1, row.limit > 0 ? row.used / row.limit : 0) * 100}%` }]}
+                    />
+                  )}
+                </View>
+                <View style={styles.totalAmountRow}>
+                  <MoneyText value={row.used} kind="plain" variant="caption" color={semantic.textPrimary} />
+                  <AppText variant="caption" color={semantic.textTertiary}>
+                    {' / '}
+                  </AppText>
+                  <MoneyText value={row.limit} kind="plain" variant="caption" color={semantic.textSecondary} />
+                </View>
+              </PressableScale>
+            );
+          })}
+        </View>
 
         {/* 新增预算：原来藏在面板最底部 → 提到分类预算上方（用户 2026-10-29） */}
         {unsetRows.length > 0 && (
@@ -259,77 +373,6 @@ export function MonthlyBudgetSheet({
             </View>
           </>
         )}
-
-        {/* 分类预算 */}
-        <View style={styles.sectionHead}>
-          <AppText variant="caption" weight="600" color={semantic.textSecondary}>
-            {t('home.budgetCategorySection')}
-          </AppText>
-          <AppText variant="caption" color={semantic.textTertiary}>
-            {rows.length}
-          </AppText>
-        </View>
-
-        {rows.length === 0 && (
-          <AppText variant="footnote" color={semantic.textTertiary} style={styles.emptyHint}>
-            {t('home.budgetCategoryEmpty')}
-          </AppText>
-        )}
-        {rows.length > 0 && (
-          <AppText variant="caption2" color={semantic.textTertiary} style={styles.emptyHint}>
-            {t('home.budgetLongPressHint')}
-          </AppText>
-        )}
-
-        <View style={styles.rowList}>
-          {rows.map((row) => {
-            const pct = formatBudgetPct(row.used, row.limit, t);
-            const iconName = (row.icon ?? FALLBACK_ICON) as React.ComponentProps<typeof Ionicons>['name'];
-            const tint = row.color ?? semantic.accent;
-            return (
-              <PressableScale
-                key={row.categoryId}
-                activeScale={0.98}
-                onPress={() => onEditCategory(row.categoryId)}
-                onLongPress={() => onRenameCategory?.(row.categoryId, row.name)}
-                accessibilityRole="button"
-                accessibilityLabel={`${row.name} ${pct.a11y}`}
-                style={styles.card}
-                testID={`budget-cat-${row.categoryId}`}
-              >
-                <View style={styles.rowHead}>
-                  <View style={[styles.iconBox, { backgroundColor: withAlpha(tint, 0.12) }]}>
-                    <Ionicons name={iconName} size={16} color={tint} />
-                  </View>
-                  <View style={styles.rowTitleWrap}>
-                    <AppText variant="subhead" weight="500" color={semantic.textPrimary} numberOfLines={1}>
-                      {row.name}
-                    </AppText>
-                  </View>
-                  {/* 稿：百分比 22/600 主文字色 —— 是否超支只由条色表达，数字不重复上色 */}
-                  <AppText
-                    variant="title2"
-                    weight="600"
-                    color={toneColor(pct.tone)}
-                    style={styles.pctText}
-                    accessibilityLabel={pct.a11y}
-                    testID={`budget-cat-pct-${row.categoryId}`}
-                  >
-                    {pct.text}
-                  </AppText>
-                </View>
-                <ProgressBar ratio={pct.fillRatio} tone={pct.tone} height={8} testID={`budget-cat-bar-${row.categoryId}`} />
-                <View style={styles.totalAmountRow}>
-                  <MoneyText value={row.used} kind="plain" variant="caption" color={semantic.textTertiary} hidden={hidden} />
-                  <AppText variant="caption" color={semantic.textTertiary}>
-                    {' / '}
-                  </AppText>
-                  <MoneyText value={row.limit} kind="plain" variant="caption" color={semantic.textTertiary} hidden={hidden} />
-                </View>
-              </PressableScale>
-            );
-          })}
-        </View>
 
       </ScrollView>
     </BottomSheet>

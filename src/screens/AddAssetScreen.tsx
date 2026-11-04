@@ -138,7 +138,10 @@ export default function AddAssetScreen({ route }: any) {
   const isEdit = !!editAsset;
 
   const [name, setName] = useState(editAsset?.name ?? '');
-  const [selectedType, setSelectedType] = useState<AssetType>(editAsset?.type ?? 'cash');
+  // 账户类型默认值：编辑回填 > 资产页筛选 chip 带过来的预选 > 现金
+  const [selectedType, setSelectedType] = useState<AssetType>(
+    editAsset?.type ?? route?.params?.presetType ?? 'cash'
+  );
   const [selectedCurrency, setSelectedCurrency] = useState(editAsset?.currency ?? currency);
 
   // 账单日 / 还款日（仅信用卡）：原来这两个值只能靠默认值写进数据，界面无处可改
@@ -466,6 +469,21 @@ export default function AddAssetScreen({ route }: any) {
     );
   };
 
+  // 账单日 / 还款日：内联展开 1–30 网格（与账户详情同一套交互）。
+  // 原来用 BottomSheet：安卓真机上弹层的 maxHeight / 安全区换算会把 6 行网格裁歪，
+  // 而内联展开跟着页面滚，不存在这个问题（用户 2026-11-03 对比两处后指定照抄详情页）。
+  const toggleDayPicker = (which: 'statement' | 'due') => {
+    // 计算器键盘是常驻的：不先收掉，它会压住刚展开的网格
+    if (amountField) {
+      if (amountField === 'balance') setBalanceValue(commitBalance());
+      else setAvailableValue(commitAvailable());
+      setAmountField(null);
+    }
+    Keyboard.dismiss();
+    nameInputRef.current?.blur();
+    setDaySheet((prev) => (prev === which ? null : which));
+  };
+
   const selectedTypeInfo = TYPE_OPTIONS.find((opt) => opt.type === selectedType);
   const selectedCurrencyInfo = CURRENCY_OPTIONS.find((c) => c.code === selectedCurrency);
 
@@ -626,7 +644,7 @@ export default function AddAssetScreen({ route }: any) {
                 <PressableScale
                   style={[styles.selectBox, daySheet === 'statement' && { borderColor: semantic.accentText }]}
                   activeScale={0.98}
-                  onPress={() => setDaySheet('statement')}
+                  onPress={() => toggleDayPicker('statement')}
                   accessibilityRole="button"
                   testID="add-asset-statement-day"
                 >
@@ -643,7 +661,7 @@ export default function AddAssetScreen({ route }: any) {
                 <PressableScale
                   style={[styles.selectBox, daySheet === 'due' && { borderColor: semantic.accentText }]}
                   activeScale={0.98}
-                  onPress={() => setDaySheet('due')}
+                  onPress={() => toggleDayPicker('due')}
                   accessibilityRole="button"
                   testID="add-asset-due-day"
                 >
@@ -654,6 +672,35 @@ export default function AddAssetScreen({ route }: any) {
                 </PressableScale>
               </View>
             </View>
+
+            {/* 1–30 网格：点上面任一格就地展开，选中即收起（与账户详情完全同一套） */}
+            {daySheet !== null && (
+              <View style={styles.dayInlineList} testID="add-asset-day-list">
+                <PressableScale
+                  activeScale={0.98}
+                  onPress={() => setDaySheet(null)}
+                  accessibilityRole="button"
+                  style={styles.dayInlineCloseRow}
+                  testID="add-asset-day-close"
+                >
+                  <AppText variant="caption" color={semantic.textTertiary}>
+                    {t('asset.dayListCollapse')}
+                  </AppText>
+                  <Ionicons name="chevron-up" size={14} color={semantic.textTertiary} />
+                </PressableScale>
+                <DayGrid
+                  value={daySheet === 'due' ? dueDay : statementDay}
+                  max={30}
+                  testIDPrefix="add-asset-day"
+                  onPick={(day) => {
+                    // 与改造前一致：写状态后立即收起网格
+                    if (daySheet === 'due') setDueDay(day);
+                    else setStatementDay(day);
+                    setDaySheet(null);
+                  }}
+                />
+              </View>
+            )}
           </View>
         )}
 
@@ -799,25 +846,6 @@ export default function AddAssetScreen({ route }: any) {
       {/* 币种抽屉：统一 BottomSheet（把手 + 遮罩 + 下拉收起 + 安全区都由组件负责）。
           ⚠ 挂在页面根（SafeAreaView）的最后一个子节点上，不能放进 ScrollView —— 组件按 absoluteFill
           铺满父容器，放进滚动容器里会跟着内容滚走 */}
-      {/* 账单日 / 还款日选择：1–30（31 号不入选项：小月没有 31 号） */}
-      <BottomSheet
-        visible={daySheet !== null}
-        onClose={() => setDaySheet(null)}
-        title={daySheet === 'due' ? t('asset.dueDayLabel') : t('asset.statementDayLabel')}
-        testID="add-asset-day-sheet"
-      >
-        <DayGrid
-          value={daySheet === 'due' ? dueDay : statementDay}
-          max={30}
-          testIDPrefix="add-asset-day"
-          onPick={(day) => {
-            // 与改造前一致：写状态后立即关闭弹层（弹层不再需要滚动，也不再有 maxHeight）
-            if (daySheet === 'due') setDueDay(day);
-            else setStatementDay(day);
-            setDaySheet(null);
-          }}
-        />
-      </BottomSheet>
 
       {/* 类型抽屉：高度随内容自适应（BottomSheet 最高 85% 屏），列表超长时在抽屉内滚动，
           底部留「安全区 + 16」——6 档在 360×640 也能全部选到（验收退回 · 严重项） */}
@@ -1039,6 +1067,17 @@ function makeStyles(
     creditUsedLine: { marginTop: spacing.md },
     // 账单日 / 还款日两行
     dayRows: { marginTop: spacing.md, marginBottom: spacing.lg },
+    // 内联网格：与账户详情的 creditDayList / creditDayCloseRow 同一套规格
+    dayInlineList: { marginTop: spacing.sm },
+    dayInlineCloseRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.sm,
+      marginBottom: spacing.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: semantic.hairline,
+    },
     dayRowInner: { flexDirection: 'row', columnGap: 10 },
     daySelect: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
     amountLabel: {

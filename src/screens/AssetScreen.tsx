@@ -714,7 +714,7 @@ function computeAssetFlowStats(
   return { inflowAmount, inflowCount, outflowAmount, outflowCount };
 }
 
-export default function AssetScreen() {
+export default function AssetScreen({ route }: any) {
   const {
     assets,
     activeAssets,
@@ -723,6 +723,7 @@ export default function AssetScreen() {
     currency,
     categories,
     getAssetBalance,
+    getAssetById,
     deleteAsset,
     deleteAssetDeep,
     archiveAsset,
@@ -745,7 +746,10 @@ export default function AssetScreen() {
   );
   const [archivedOpen, setArchivedOpen] = useState(false);
   // 账户类型筛选（设计稿 02 屏分段 Tab）：只过滤展示，不动 assets / 余额口径
-  const [accountFilter, setAccountFilter] = useState<'all' | 'cash' | 'bank' | 'ewallet'>('all');
+  // 'credit' 原来漏在联合类型外（运行时能选中，靠下面 onPress 里的 as 硬转才过编译）；一并补上
+  const [accountFilter, setAccountFilter] = useState<'all' | AssetType>('all');
+  // 当前筛选 chip → 添加账户表单的预选类型（'all' 不带，沿用表单默认「现金」）
+  const addAssetParams = accountFilter === 'all' ? undefined : { presetType: accountFilter };
   // 总资产卡的隐私开关（稿里的眼睛）：只切显示，不写数据
   const [balanceHidden, setBalanceHidden] = useState(false);
   // 卡上的币种切换器：null = 自动（全局币种所在分组，否则第一个分组）；
@@ -871,6 +875,14 @@ export default function AssetScreen() {
   const lastViewingRef = useRef<AssetItem | undefined>(undefined);
   if (viewingAsset) lastViewingRef.current = viewingAsset;
   const sheetAsset = viewingAsset ?? lastViewingRef.current;
+  // 转账保存后从「记一笔」跳过来：route.params.focusAssetId = 转入账户，直接打开它的详情。
+  // 用完立刻把参数清掉，否则下次从底部 Tab 进资产页会又弹一次（参数一直留在路由上）。
+  useEffect(() => {
+    const focusAssetId = route?.params?.focusAssetId;
+    if (!focusAssetId) return;
+    setViewingAssetId(focusAssetId);
+    navigation?.setParams?.({ focusAssetId: undefined });
+  }, [route?.params?.focusAssetId, navigation]);
   // 同一次编辑会话（"放弃修改"对话框点取消后抽屉弹回）不重新预填，用户已输入的内容不丢
   const prefilledIdRef = useRef<string | null>(null);
 
@@ -1318,7 +1330,7 @@ export default function AssetScreen() {
                 <GlassPillButton
                   label={t('asset.addAccount')}
                   icon="add"
-                  onPress={() => navigation.navigate(ROUTES.ADD_ASSET)}
+                  onPress={() => navigation.navigate(ROUTES.ADD_ASSET, addAssetParams)}
                   testID="asset-add-button"
                 />
               ))}
@@ -1373,7 +1385,7 @@ export default function AssetScreen() {
                 title={t('asset.emptyTitle')}
                 description={t('asset.emptyHint')}
                 actionLabel={t('asset.addAccount')}
-                onAction={() => navigation.navigate(ROUTES.ADD_ASSET)}
+                onAction={() => navigation.navigate(ROUTES.ADD_ASSET, addAssetParams)}
                 testID="asset-empty"
               />
             </Card>
@@ -1434,7 +1446,7 @@ export default function AssetScreen() {
                   accountFilter === 'all' ? t('asset.addAccount') : t('asset.showAllAccounts')
                 }
                 onAction={() => {
-                  if (accountFilter === 'all') navigation.navigate(ROUTES.ADD_ASSET);
+                  if (accountFilter === 'all') navigation.navigate(ROUTES.ADD_ASSET, addAssetParams);
                   else setAccountFilter('all');
                 }}
                 testID="asset-empty-filtered"
@@ -1718,6 +1730,7 @@ export default function AssetScreen() {
                     categories={categories}
                     assetId={sheetAsset.id}
                     currency={sheetAsset.currency}
+                    resolveAsset={getAssetById}
                     // 点行 → 账单详情（带上「这个钱包」视角：转出钱包看 −，转入钱包看 +）
                     onPressTx={(tx) =>
                       navigation.navigate(ROUTES.TX_DETAIL, {

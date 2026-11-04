@@ -41,6 +41,11 @@ export interface AccountTransactionListProps {
   assetId?: string;
   /** 本账户币种（转账明细里跟金额一起显示，避免两个币种的数字看起来一样） */
   currency?: string;
+  /**
+   * 账户 id → 账户：转账行要取「对向账户」的名字做副标题，跨币种判定还要两侧币种。
+   * 不传则副标题只剩日期（老调用点外观不变）。
+   */
+  resolveAsset?: (id: string) => { name: string; currency?: string } | undefined;
   /** 点某一行（传出去跳账单详情；不传则整行不可点，行为与以前一致） */
   onPressTx?: (tx: Transaction) => void;
   categories: Category[];
@@ -63,6 +68,7 @@ export function AccountTransactionList({
   categories,
   assetId,
   currency,
+  resolveAsset,
   onPressTx,
   limit = 8,
   hideAmount,
@@ -123,6 +129,18 @@ export function AccountTransactionList({
           // 以前一律取 convertedAmount，导致转出账户的明细里显示的是到账额（用户 2026-10-28 反馈）。
           const isTransfer = tx.type === 'transfer';
           const isOutgoing = isTransfer && !!assetId && tx.fromAssetId === assetId;
+          const fromAsset = isTransfer && tx.fromAssetId ? resolveAsset?.(tx.fromAssetId) : undefined;
+          const toAsset = isTransfer && tx.toAssetId ? resolveAsset?.(tx.toAssetId) : undefined;
+          // 跨币种（两侧币种不同）＝兑换，同币种才是转账 —— 与首页 / 账单详情同一判定
+          const isExchange =
+            !!fromAsset?.currency && !!toAsset?.currency && fromAsset.currency !== toAsset.currency;
+          const typeName = isTransfer
+            ? t(isExchange ? 'txDetail.typeExchange' : 'txDetail.typeTransfer')
+            : (tx.displayName ?? t(FEE_LABEL_KEY));
+          // 副标题第二段：转账写「对向账户」（→ 转出到谁 / ← 从谁转入）。本账户是自己的流水，不重复写；
+          // 类别那一段由 TransactionRow 按「与标题重复就不出现」的规则自动裁掉。
+          const counterpart = isTransfer ? (isOutgoing ? toAsset : fromAsset) : undefined;
+          const counterpartLabel = counterpart ? `${isOutgoing ? '→' : '←'} ${counterpart.name}` : undefined;
           const kind: MoneyKind = !isTransfer
             ? tx.type === 'expense'
               ? 'expense'
@@ -139,10 +157,8 @@ export function AccountTransactionList({
             <TransactionRow
               key={tx.id}
               note={tx.note || tx.displayName}
-              categoryName={
-                cat?.name ??
-                (tx.type === 'transfer' ? t('addTx.transfer') : (tx.displayName ?? t(FEE_LABEL_KEY)))
-              }
+              categoryName={cat?.name ?? typeName}
+              accountName={counterpartLabel}
               categoryIcon={cat?.icon as React.ComponentProps<typeof TransactionRow>['categoryIcon']}
               categoryColor={cat?.color}
               amount={amount}
