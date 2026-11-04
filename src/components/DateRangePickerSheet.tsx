@@ -585,16 +585,17 @@ const makeStyles = (colors: ThemeColors) =>
     presetText: { fontSize: typography.caption.fontSize, lineHeight: typography.caption.lineHeightCjk, color: colors.textSecondary, fontWeight: '500' },
     presetTextActive: { color: colors.link, fontWeight: '700' },
     calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-    calTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+    calTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, textAlignVertical: 'center', includeFontPadding: false },
     calWeekRow: { flexDirection: 'row', marginBottom: 2 },
     calWeekCell: { textAlign: 'center', fontSize: 11, lineHeight: typography.footnote.lineHeightCjk, fontWeight: '600', color: colors.textTertiary },
     calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
     // 每个日期 Pressable 铺满单元格（不加 hitSlop，避免相邻格重叠）
     calCell: { height: 40, alignItems: 'center', justifyContent: 'center' },
-    calDay: { width: 28, height: 28, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
+    // 28×28 + radius 14（= 半边长）：显式数值，不用 999，Android 轮廓才稳定成圆
+    calDay: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
     calDayInRange: { backgroundColor: 'transparent' },
-    calDaySelected: { backgroundColor: colors.link, shadowColor: colors.link, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-    calDayText: { fontSize: 14, lineHeight: typography.subhead.lineHeight, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+    calDaySelected: { backgroundColor: colors.link },
+    calDayText: { fontSize: 14, lineHeight: typography.subhead.lineHeight, color: colors.textPrimary, fontVariant: ['tabular-nums'], textAlignVertical: 'center', includeFontPadding: false },
     calDayMuted: { color: colors.divider },
     calDayToday: { color: colors.link, fontWeight: '700' },
     calDayTextSelected: { color: colors.fabIcon, fontWeight: '700' },
@@ -628,11 +629,11 @@ const makeStyles = (colors: ThemeColors) =>
       overflow: 'hidden',
     },
     chipActive: {
+      // 只保留 iOS 阴影：Android 的 elevation 会按矩形轮廓投影（真机上是日历上方那道灰带）
       shadowColor: colors.link,
       shadowOpacity: 0.25,
       shadowRadius: 4,
       shadowOffset: { width: 0, height: 2 },
-      elevation: 2,
     },
     chipFill: {
       position: 'absolute',
@@ -644,7 +645,7 @@ const makeStyles = (colors: ThemeColors) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    chipText: { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+    chipText: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', textAlignVertical: 'center', includeFontPadding: false },
     chipTextActive: { color: colors.fabIcon, fontWeight: '700' },
     calWrap: {
       position: 'relative',
