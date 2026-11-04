@@ -327,7 +327,8 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   if (!visible) return null;
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 90, elevation: 90 }]}>
+    // elevation 在 Android 上同时是投影属性：全屏透明 View 会按屏幕矩形投影（真机那片厚重灰影）
+    <View style={[StyleSheet.absoluteFill, { zIndex: 90 }]}>
       {/* 遮罩:点空白处收起;透明度随拖动变深 */}
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
         <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: scrimColor }, scrimAnimStyle]} />
@@ -608,7 +609,6 @@ const makeStyles = (colors: ThemeColors) =>
       shadowOpacity: 0.1,
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 4 },
-      elevation: 2,
     },
     mainCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.dividerHair, overflow: 'hidden' },
     mainHighlight: { position: 'absolute', left: 20, right: 20, top: 0, height: 1, backgroundColor: colors.card },
@@ -646,25 +646,7 @@ const makeStyles = (colors: ThemeColors) =>
       justifyContent: 'center',
     },
     chipText: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', textAlignVertical: 'center', includeFontPadding: false },
-    chipTextActive: { color: colors.fabIcon, fontWeight: '700' },
-    calWrap: {
-      position: 'relative',
-      borderRadius: radius.lg,
-      shadowColor: colors.textSecondary,
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 2,
-    },
-    calPlate: {
-      position: 'absolute',
-      left: 6,
-      right: 6,
-      bottom: -3,
-      height: 60,
-      borderRadius: radius.lg,
-      backgroundColor: colors.link + '12',
-    },
+    chipTextActive: { color: colors.fabIcon, fontWeight: '700' },
     calCard: {
       borderRadius: radius.lg,
       borderWidth: 1,
