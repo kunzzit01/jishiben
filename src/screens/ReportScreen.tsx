@@ -845,6 +845,8 @@ export default function ReportScreen() {
             <View style={[styles.rankList, { marginHorizontal: pagePadding }]}>
               {/* 排行卡圆角按稿 26（Card 默认 radius.lg 20） */}
               <Card padded={false} style={{ borderRadius: 26 }}>
+                {/* 裁切层：选中行是整行底色，必须被卡片圆角裁掉，否则两角是直角（真机实测） */}
+                <View style={{ borderRadius: 26, overflow: 'hidden' }}>
                 {categoryBreakdown.map((c, index) => {
                   const pct = periodTotal > 0 ? (c.value / periodTotal) * 100 : 0;
                   const expanded = expandedCategoryId === c.categoryId;
@@ -920,6 +922,7 @@ export default function ReportScreen() {
                   </View>
                 );
                 })}
+                </View>
               </Card>
             </View>
           </>
