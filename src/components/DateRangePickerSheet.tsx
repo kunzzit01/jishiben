@@ -116,6 +116,8 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
   const [selStart, setSelStart] = useState<string | null>(null);
   // 日历内容区实测宽度：星期与日期共用同一列宽（不各自算）
   const [calW, setCalW] = useState(0);
+  // 真机上百分比/测量宽会被字号放大撑破 → 直接按窗口宽度算死：左右各 12 边距 + 卡片内 8×2 + 导轨 52 + 分隔线 1 + 日历内 2×2
+  const CAL_CELL_W = Math.max(28, Math.floor((windowWidth - 12 * 2 - 8 * 2 - 56 - 1 - 4) / 7));
   const [selEnd, setSelEnd] = useState<string | null>(null);
 
   // 打开时以当前范围初始化选择和视图月份
@@ -438,10 +440,10 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
                               end={{ x: 0.9, y: 1 }}
                               style={s.chipFill}
                             >
-                              <Text style={[s.chipText, s.chipTextActive]}>{t(QUICK_KEYS[p.label])}</Text>
+                              <Text style={[s.chipText, s.chipTextActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t(QUICK_KEYS[p.label])}</Text>
                             </LinearGradient>
                           ) : (
-                            <Text style={s.chipText}>{t(QUICK_KEYS[p.label])}</Text>
+                            <Text style={s.chipText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t(QUICK_KEYS[p.label])}</Text>
                           )}
                         </PressableScale>
                       );
@@ -464,7 +466,7 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
                       </View>
                       <View style={s.calWeekRow}>
                         {t('home.weekdays').split(',').map((w, i) => (
-                          <Text key={w + i} style={[s.calWeekCell, { width: calW ? calW / 7 : undefined }]}>{w}</Text>
+                          <Text key={w + i} style={[s.calWeekCell, { width: CAL_CELL_W }]}>{w}</Text>
                         ))}
                       </View>
                       <View style={s.calGrid} onLayout={(e) => setCalW(Math.round(e.nativeEvent.layout.width))}>
@@ -476,7 +478,7 @@ export default function DateRangePickerSheet({ visible, start, end, onClose, onA
                           const afterStart = !!selStart && cell.key > selStart;
                           const beforeEnd = !!selEnd && cell.key < selEnd;
                           return (
-                            <PressableScale key={cell.key} style={[s.calCell, calW ? { width: calW / 7 } : null, hitDbg]} activeScale={1} pressedOverlayColor={colors.link + '14'} onPress={() => onCalTap(cell.key)}>
+                            <PressableScale key={cell.key} style={[s.calCell, { width: CAL_CELL_W }, hitDbg]} activeScale={1} pressedOverlayColor={colors.link + '14'} onPress={() => onCalTap(cell.key)}>
                               <View
                                 style={[
                                   s.calBand,
@@ -588,7 +590,7 @@ const makeStyles = (colors: ThemeColors) =>
     calWeekCell: { textAlign: 'center', fontSize: 11, lineHeight: typography.footnote.lineHeightCjk, fontWeight: '600', color: colors.textTertiary },
     calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
     // 每个日期 Pressable 铺满单元格（不加 hitSlop，避免相邻格重叠）
-    calCell: { width: `${100 / 7}%` as any, height: 40, alignItems: 'center', justifyContent: 'center' },
+    calCell: { height: 40, alignItems: 'center', justifyContent: 'center' },
     calDay: { width: 28, height: 28, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
     calDayInRange: { backgroundColor: 'transparent' },
     calDaySelected: { backgroundColor: colors.link, shadowColor: colors.link, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
@@ -612,7 +614,7 @@ const makeStyles = (colors: ThemeColors) =>
     vDivider: { width: 1, backgroundColor: colors.dividerHair },
     rangeRow: { flexDirection: 'row', alignItems: 'stretch' },
     // 左栏：一整块浅蓝导航条（不再逐个胶囊描边）
-    presetCol: { width: 52, paddingVertical: 0, paddingHorizontal: 0, alignItems: 'stretch' },
+    presetCol: { width: 56, paddingVertical: 0, paddingHorizontal: 0, alignItems: 'stretch' },
     calCol: { flex: 1, paddingVertical: 4, paddingHorizontal: 2 },
     chipRow: { gap: 6 },
     chip: {

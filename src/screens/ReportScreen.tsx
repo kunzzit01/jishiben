@@ -301,17 +301,17 @@ function RankRow({
     >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <CategoryIcon color={color} icon={icon} />
-        <View style={{ flexGrow: 1, flexShrink: 1, marginLeft: spacing.md }}>
+        <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, marginLeft: spacing.md }}>
           <AppText variant="headline" weight={selected ? '700' : undefined} numberOfLines={2}>
             {title}
           </AppText>
         </View>
         {/* 金额（中性色、不带正负号）+ 百分比统一 1 位小数，同一行右对齐（baseline 对齐 17/12 两种字号）；
             flexShrink:0，永不被标题挤走 */}
-        <View style={{ flexShrink: 0, marginLeft: spacing.sm, flexDirection: 'row', alignItems: 'baseline' }}>
+        <View style={{ flexShrink: 1, minWidth: 0, marginLeft: spacing.sm, flexDirection: 'row', alignItems: 'baseline' }}>
           <MoneyText value={amount} variant="body" />
           {/* 百分比 12pt（稿）→ caption 档；次要色（稿 #82829A）→ textSecondary */}
-          <AppText variant="caption" color={semantic.textSecondary} align="right" style={{ marginLeft: spacing.xs }}>
+          <AppText variant="caption" color={semantic.textSecondary} align="right" numberOfLines={1} style={{ marginLeft: spacing.xs }}>
             {pctText}
           </AppText>
         </View>
