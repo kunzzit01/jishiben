@@ -602,8 +602,10 @@ function makeTxRowStyles(palette: HomePalette, spacing: Spacing, radius: Radius)
       paddingHorizontal: pageLayout.card,
       paddingVertical: 9,
       backgroundColor: palette.panel,
-      // 面板不再画左右边线：每一段各带一条 1px 蓝边，叠起来就是两条显眼的竖条（用户实测）
-      // 面板靠「白底 vs 冰蓝页面」的对比成形，比描边干净
+      // 面板四面统一描边：左右边线在所有段上都画（同 width/同色），上下分别由标题段与末行承担
+      borderLeftWidth: PANEL_BORDER,
+      borderRightWidth: PANEL_BORDER,
+      borderColor: palette.border,
       marginHorizontal: LIST_CARD_MARGIN,
     },
     // 末行 = 面板底边：只圆下两角（行高 60 足够撑出真圆角）+ 面板下描边
@@ -611,6 +613,9 @@ function makeTxRowStyles(palette: HomePalette, spacing: Spacing, radius: Radius)
       borderBottomLeftRadius: LIST_CARD_RADIUS,
       borderBottomRightRadius: LIST_CARD_RADIUS,
       borderBottomWidth: PANEL_BORDER,
+      borderLeftWidth: PANEL_BORDER,
+      borderRightWidth: PANEL_BORDER,
+      borderColor: palette.border,
       paddingBottom: spacing.sm + LIST_CARD_EDGE,
     },
     // 分类图标：38 圆下沉底（参考图：浅蓝圆 + 类别色线条图标）
@@ -3936,6 +3941,10 @@ function makeStyles(
     //    面板的圆角只在首段（RecentHeader 上两角）与末行（下两角），中间各段一律直角 ──
     dayHeaderWrap: {
       backgroundColor: palette.panel,
+      // 日期头是面板的一段，左右边线必须与交易行完全一致（同 width / 同色）
+      borderLeftWidth: PANEL_BORDER,
+      borderRightWidth: PANEL_BORDER,
+      borderColor: palette.border,
       marginHorizontal: LIST_CARD_MARGIN,
     },
     // 跨月月份分隔（只在当月第一次出现时渲染）：caption（12pt，≥ 令牌最小档）
