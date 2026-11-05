@@ -352,6 +352,23 @@ const CATEGORY_ORDER_KEY = '@jizhang/categoryOrder';
 // TASK-009：不设上限——历史里有多少就往网格铺多少，直到"全部"按钮碰到自绘计算器为止
 const RECENT_CATEGORY_HISTORY_LIMIT = Infinity;
 
+/**
+ * 汇率「等式」的唯一展示口径（纯展示，不参与计算）：
+ * 内部 rate 永远是「1 单位 from 换多少单位 to」，所以 rate < 1 时会变成 0.128205 这种小数。
+ * 这里翻成「把 ≥1 的一侧放左边」的人话：
+ *   rate 7.8（MYR→TWD）      → 「1 MYR = 7.8 TWD」
+ *   rate 0.128205（TWD→MYR） → 「7.8 TWD = 1 MYR」（1/rate = 1 单位 to 等于多少 from）
+ * 点 Reverse 交换币种与金额后 rate 变倒数，等式左右自动镜像。
+ */
+function formatRateEquation(rate: number, from: string, to: string): string {
+  if (!Number.isFinite(rate) || rate <= 0) return '—';
+  const trim = (n: number) => {
+    const s = n >= 1000 ? n.toFixed(0) : n >= 100 ? n.toFixed(1) : n >= 10 ? n.toFixed(2) : n.toFixed(4);
+    return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+  };
+  return rate >= 1 ? `1 ${from} = ${trim(rate)} ${to}` : `${trim(1 / rate)} ${from} = 1 ${to}`;
+}
+
 export default function AddTransactionScreen({ navigation, route }: any) {
   const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan } =
     useApp();
@@ -2179,7 +2196,7 @@ function fxAmountText(raw: string, live: string | null): string {
                 </AppText>
                 <AppText variant="subhead" weight="600" color={semantic.textPrimary} align="right" style={styles.fxRateValue} numberOfLines={1}>
                   {exchangeRate && fromAsset && toAsset
-                    ? '1 ' + fromAsset.currency + ' = ' + exchangeRate + ' ' + toAsset.currency
+                    ? formatRateEquation(parseFloat(exchangeRate) || 0, fromAsset.currency, toAsset.currency)
                     : '—'}
                 </AppText>
               </View>
