@@ -87,11 +87,7 @@ export default function AboutAppScreen({ navigation }: any) {
           ? t('addTx.updateLatest')
           : phase === 'ready'
             ? t('addTx.updateReady')
-            : phase === 'failed'
-              ? t('addTx.updateFailed')
-              : phase === 'unsupported'
-                ? t('addTx.updateUnsupported')
-                : '';
+            : '';
 
   const handleCheckUpdate = async () => {
     if (busyRef.current) return;
@@ -183,7 +179,7 @@ export default function AboutAppScreen({ navigation }: any) {
           </TouchableOpacity>
 
           {/* 排查用：显示 expo-updates 抛出的真实错误（只有「检查失败」时无从定位） */}
-          {phase === 'failed' && !!updateError && (
+          {__DEV__ && phase === 'failed' && !!updateError && (
             <AppText variant="caption" color={semantic.textTertiary} style={styles.diagnostic}>
               {updateError}
             </AppText>
@@ -191,7 +187,7 @@ export default function AboutAppScreen({ navigation }: any) {
           <AppText variant="caption" color={semantic.textTertiary} style={styles.diagnostic}>
             {`channel=${Updates.channel || '∅'} · runtime=${Updates.runtimeVersion || '∅'} · id=${(Updates.updateId || '∅').slice(0, 8)}`}
           </AppText>
-          {!!probeInfo && (
+          {__DEV__ && !!probeInfo && (
             <AppText variant="caption" color={semantic.textTertiary} style={styles.diagnostic}>
               {probeInfo}
             </AppText>
