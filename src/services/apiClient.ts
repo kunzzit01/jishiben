@@ -746,3 +746,13 @@ export async function listAllTransactions(): Promise<TransactionDto[]> {
   }
   return out;
 }
+
+
+/** 管理员广播：把一条通知发给所有已注册设备（服务端只允许 ADMIN 或配置的管理员邮箱） */
+export async function broadcastPush(title: string, body: string) {
+  return authorizedRequest<{ total: number; sent: number; failed: number; errors: string[] }>(
+    'POST',
+    '/api/admin/broadcast',
+    { body: { title, body } }
+  );
+}

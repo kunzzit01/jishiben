@@ -530,6 +530,11 @@ export const en = {
     testNow: 'Send now',
     testIn10s: 'Send in 10s',
     testResult: 'Last result',
+    broadcastSection: 'Broadcast (admin only)',
+    broadcastRow: 'Send to all devices',
+    broadcastRunning: 'Sending…',
+    broadcastResult: 'Sent %{sent}/%{total} (failed %{failed})',
+    broadcastFail: 'Failed: %{reason}',
 
     budgetSectionTitle: 'Budget alerts',
     rulesSectionTitle: 'Reminder rules',

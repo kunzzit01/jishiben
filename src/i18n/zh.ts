@@ -540,6 +540,11 @@ export const zh = {
     testNow: '立即发一条',
     testIn10s: '10 秒后发一条',
     testResult: '上次结果',
+    broadcastSection: '广播（仅管理员）',
+    broadcastRow: '给所有设备发一条通知',
+    broadcastRunning: '发送中…',
+    broadcastResult: '已发送 %{sent}/%{total}（失败 %{failed}）',
+    broadcastFail: '发送失败：%{reason}',
 
     budgetSectionTitle: '预算提醒',
     rulesSectionTitle: '提醒规则',

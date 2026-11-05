@@ -16,6 +16,8 @@ import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
 import * as NotificationsModule from 'expo-notifications';
 import { sendTestReminder } from '../utils/notifications';
+import { broadcastPush } from '../services/apiClient';
+import { useAuth } from '../context/AuthContext';
 
 /**
  * 提醒设置（设置 → 功能）：提醒规则开关 + 预算提醒管理。展示的是"规则"，不是排期实例。
@@ -38,6 +40,22 @@ export default function ReminderSettingsScreen({ navigation }: any) {
 
   // 通知状态诊断：权限 / 已排期条数 / 下一条触发时间 —— 用户「为什么没弹」时一眼能看出来
   const [testResult, setTestResult] = useState<string>('');
+  // 管理员广播：只有 ADMIN 角色或配置里的管理员邮箱能看到这一行
+  const { user } = useAuth();
+  const isBroadcastAdmin =
+    user?.role === 'ADMIN' || (user?.email ?? '').toLowerCase() === 'mingsoon249@gmail.com';
+  const [broadcastResult, setBroadcastResult] = useState<string>('');
+  const runBroadcast = useCallback(async () => {
+    setBroadcastResult(t('reminder.broadcastRunning'));
+    try {
+      const res = await broadcastPush(t('reminder.dailyTitle'), t('reminder.dailyBody'));
+      setBroadcastResult(
+        t('reminder.broadcastResult', { sent: res.sent, total: res.total, failed: res.failed })
+      );
+    } catch (e) {
+      setBroadcastResult(t('reminder.broadcastFail', { reason: String((e as Error)?.message ?? e) }));
+    }
+  }, [t]);
   const runTest = useCallback(async (delay: number) => {
     const r = await sendTestReminder(delay, t('reminder.dailyTitle'), t('reminder.dailyBody'));
     setTestResult(r.ok ? `已排期（${delay}s）id=${r.id}` : `失败：${r.reason}`);
@@ -189,6 +207,20 @@ export default function ReminderSettingsScreen({ navigation }: any) {
           <ListRow icon="timer-outline" title={t('reminder.testIn10s')} onPress={() => void runTest(10)} />
           {testResult ? <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={testResult} /> : null}
         </ListSection>
+
+        {/* 管理员广播：给所有已注册设备发一条（服务端还会再校验一次身份） */}
+        {isBroadcastAdmin ? (
+          <ListSection title={t('reminder.broadcastSection')} testID="reminder-broadcast">
+            <ListRow
+              icon="megaphone-outline"
+              title={t('reminder.broadcastRow')}
+              onPress={() => void runBroadcast()}
+            />
+            {broadcastResult ? (
+              <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={broadcastResult} />
+            ) : null}
+          </ListSection>
+        ) : null}
 
         {/* 预算超支：本月已经触发的阈值，删掉 = 这个月不再为它提醒 */}
         {budgetAlerts.length > 0 ? (
