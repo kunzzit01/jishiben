@@ -610,7 +610,14 @@ const makeStyles = (colors: ThemeColors) =>
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 4 },
     },
-    mainCard: { borderRadius: 20, borderWidth: 1, borderColor: colors.dividerHair, overflow: 'hidden' },
+    mainCard: {
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.dividerHair,
+      overflow: 'hidden',
+      // 必填实底：顶部渐变档是 link+'0A'（≈4% 不透明），没有底色就会透出背后的 scrim → 真机上卡片上沿一条灰带
+      backgroundColor: colors.card,
+    },
     mainHighlight: { position: 'absolute', left: 20, right: 20, top: 0, height: 1, backgroundColor: colors.card },
     vDivider: { width: 1, backgroundColor: colors.dividerHair },
     rangeRow: { flexDirection: 'row', alignItems: 'stretch' },
