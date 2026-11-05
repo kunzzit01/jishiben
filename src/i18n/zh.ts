@@ -837,6 +837,15 @@ export const zh = {
     reminderSettings: '提醒设置',
     // Tab 根页大标题（与 Tab 名「设置」一致；改成根页后去掉返回键，不再叫「个人设置」）
     title: '设置',
+    // 删除账号（安全分组）
+    deleteAccount: '删除账号',
+    deleteAccountHint: '永久删除账号与全部账目',
+    deleteAccountWarn: '删除后不可恢复：账本、流水、预算、资产、规划都会被永久清除。',
+    deleteAskPassword: '输入当前密码以确认',
+    deleteAskEmail: '输入你的账号邮箱以确认',
+    deleteConfirm: '永久删除',
+    deleteDone: '账号已删除',
+    deleteFailed: '删除失败',
     myAccount: '我的账户',
     myAccountSub: '查看与编辑个人资料',
     aiZone: 'AI 专区',

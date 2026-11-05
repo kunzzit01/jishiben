@@ -822,6 +822,15 @@ export const en = {
     saveFailedMsg: 'This ledger is no longer in the local ledger list (not synced yet, or deleted on another device). Please try again.',
   },
   profile: {
+    // Delete account (security section)
+    deleteAccount: 'Delete account',
+    deleteAccountHint: 'Permanently delete the account and all data',
+    deleteAccountWarn: 'This cannot be undone: ledgers, transactions, budgets, assets and plans will be erased.',
+    deleteAskPassword: 'Enter your current password to confirm',
+    deleteAskEmail: 'Type your account email to confirm',
+    deleteConfirm: 'Delete forever',
+    deleteDone: 'Account deleted',
+    deleteFailed: 'Delete failed',
     reminderSettings: 'Reminder settings',
     title: 'Settings',
     myAccount: 'My Account',
