@@ -263,3 +263,38 @@ export function seedAmountCategory(
   hydrated = true;
   persist();
 }
+
+/**
+ * 撤销一票：删除或改写一笔账时调用。
+ * 票数减到 0 就把该类别从金额下移除，金额下没有任何类别时整条金额记录删除 ——
+ * 这样「删掉那笔账之后，再输入同一金额不会又跳回被删的分类」。
+ */
+export function forgetAmountCategory(
+  type: AmountCategoryType,
+  amount: number,
+  categoryId: string | null | undefined,
+  scope?: AmountScope
+): void {
+  if (!categoryId) return;
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  const sk = scopeKey(scope);
+  const ak = amountKey(amount);
+  const bucket = snapshot[type][sk];
+  const candidates = bucket?.[ak];
+  if (!bucket || !candidates || !candidates[categoryId]) return;
+
+  const nextCandidates = { ...candidates };
+  const n = (nextCandidates[categoryId]?.n ?? 0) - 1;
+  if (n > 0) {
+    nextCandidates[categoryId] = { ...nextCandidates[categoryId], n };
+  } else {
+    delete nextCandidates[categoryId];
+  }
+
+  const nextBucket = { ...bucket };
+  if (Object.keys(nextCandidates).length === 0) delete nextBucket[ak];
+  else nextBucket[ak] = nextCandidates;
+
+  snapshot = { ...snapshot, [type]: { ...snapshot[type], [sk]: nextBucket } };
+  persist();
+}

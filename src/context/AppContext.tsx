@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { forgetAmountCategory, rememberAmountCategory } from '../utils/amountCategory';
 import {
   Transaction,
   Category,
@@ -321,6 +322,8 @@ function genId() {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  // state 的镜像 ref：delete/update 回调里要读「当前」账目（state 闭包会过期）
+  const transactionsRef = useRef<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   // 账本列表由存档驱动：读取前是空的。空账本表不等于"该建一本"——真账本要么来自存档，
@@ -328,6 +331,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   // 同步 ledgers 最新值的 ref：deleteLedger 在同一帧内做「删除+回落/重建」时读最新列表
   const ledgersRef = useRef<Ledger[]>([]);
+  useEffect(() => {
+    transactionsRef.current = transactions;
+  }, [transactions]);
+
   useEffect(() => {
     ledgersRef.current = ledgers;
   }, [ledgers]);
@@ -658,6 +665,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateTransaction: AppContextValue['updateTransaction'] = async (id, updates) => {
+    // 改了金额或类别：先把旧的一票撤掉，新的交给「记完账」流程重新累计
+    const before = transactionsRef.current.find((item) => item.id === id);
+    if (before && (before.type === 'expense' || before.type === 'income')) {
+      const amountChanged = updates.amount != null && updates.amount !== before.amount;
+      const categoryChanged = updates.categoryId != null && updates.categoryId !== before.categoryId;
+      if (amountChanged || categoryChanged) {
+        forgetAmountCategory(before.type, before.amount, before.categoryId, {
+          ledgerId: before.ledgerId,
+          currency: assets.find((asset) => asset.id === before.assetId)?.currency ?? null,
+        });
+      }
+    }
     setTransactions((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   };
 
