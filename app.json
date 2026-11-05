@@ -10,7 +10,10 @@
       "url": "https://187.127.125.136/updates",
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "preview"
+      }
     },
     "orientation": "portrait",
     "icon": "./assets/icon.png",

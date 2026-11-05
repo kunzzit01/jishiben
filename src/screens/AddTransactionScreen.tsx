@@ -2204,6 +2204,10 @@ function fxAmountText(raw: string, live: string | null): string {
                     onCursorChange={setAmountCursor}
                   />
                 </PressableScale>
+            {/* ⚠ 临时调试行：定位「不自动带类别」，排查完删除 */}
+            <AppText variant="caption" numberOfLines={3} style={{ fontSize: 9, opacity: 0.75, color: '#c0392b' }}>
+              {memoryDebugLine}
+            </AppText>
                 <PressableScale
                   style={styles.fxClearBtn}
                   activeScale={0.9}
@@ -2550,6 +2554,10 @@ function fxAmountText(raw: string, live: string | null): string {
                 onCursorChange={setAmountCursor}
               />
             </PressableScale>
+            {/* ⚠ 临时调试行：定位「不自动带类别」，排查完删除 */}
+            <AppText variant="caption" numberOfLines={3} style={{ fontSize: 9, opacity: 0.75, color: '#c0392b' }}>
+              {memoryDebugLine}
+            </AppText>
           </View>
         </View>
 
