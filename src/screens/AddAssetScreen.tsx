@@ -286,15 +286,22 @@ export default function AddAssetScreen({ route }: any) {
   const liveBalance = balanceEditing ? balanceExpr.total : balanceValue;
   const liveAvailable = availableEditing ? availableExpr.total : availableValue;
   const liveUsed = liveBalance - liveAvailable;
-
-  // 额度 ↔ 可用额度联动：没手动填过「可用」就等于「额度」（即已用 0）。
-  // 否则新建卡只填额度、可用留空，会被换算成「全额已用」（可用 = 0 → initialBalance = −额度）。
-  // 用户一旦手动改过可用（availableTouchedRef），立即停用；正在敲可用那一格时也不覆盖。
+  // 额度 ↔ 可用额度联动（用户 2026-11-05 定策）：
+  //   已用额度 = 0  →  可用额度 = 总信用额度（新建卡的常态）
+  //   已用额度 > 0  →  改总额度时**保持已用不变**，可用 = 新额度 − 已用（按差额调整）
+  // 只在「总信用额度」变化时触发；正在输入「可用额度」那一格时一律不动它。
+  const prevBalanceRef = useRef<number | null>(null);
   useEffect(() => {
-    if (selectedType !== 'credit' || availableTouchedRef.current) return;
+    if (selectedType !== 'credit') return;
     if (amountField === 'available') return;
-    setAvailableValue(liveBalance);
-  }, [selectedType, amountField, liveBalance]);
+    const prev = prevBalanceRef.current;
+    prevBalanceRef.current = liveBalance;
+    if (prev == null || !Number.isFinite(prev)) return; // 首次只记基线，不动用户已填的可用
+    if (Math.abs(prev - liveBalance) < 0.005) return;    // 额度没变
+    const used = prev - liveAvailable;
+    const nextAvailable = used > 0.005 ? Math.max(0, liveBalance - used) : liveBalance;
+    if (Math.abs(nextAvailable - liveAvailable) >= 0.005) setAvailableValue(nextAvailable);
+  }, [liveBalance, selectedType, amountField, liveAvailable]);
 
   // 键盘当前作用在哪个金额字段上
   const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
