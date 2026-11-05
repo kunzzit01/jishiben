@@ -538,7 +538,8 @@ export default function AddAssetScreen({ route }: any) {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingHorizontal: pagePadding,
-            paddingBottom: spacing.xxl,
+            // 自绘键盘出现时按实测高度让位：最后一行表单不会被键盘盖住
+            paddingBottom: spacing.xxl + (amountField && !sysKeyboardVisible ? keypadHeight + 14 : 0),
           }}
         >
         {/* 金额区（用户 2026-10-29 重排：原来信用卡是上下两张巨型卡，占满一屏且第二张抢主角）
@@ -816,6 +817,8 @@ export default function AddAssetScreen({ route }: any) {
             // 不再垫满 insets——那会在键盘下方多出一条空位
             { paddingBottom: Math.max(bottomInset - 40, 8), backgroundColor: colors.card, borderTopColor: colors.dividerHair },
           ]}
+          // 实测高度回传给滚动容器，避免最后一行表单被键盘盖住
+          onLayout={(e) => setKeypadHeight(e.nativeEvent.layout.height)}
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => {
@@ -1180,6 +1183,12 @@ function makeStyles(
     // 键盘底座：与"记一笔"的 stickyFooter 同规格（左右留白 + 顶部分隔线），
     // 底部安全区 padding 在 JSX 里用 insets 算
     keypadFooter: {
+    // 绝对贴底：表单再长也不会把键盘挤出屏幕（真机上曾出现底部被裁掉）
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
       paddingHorizontal: 0,
       paddingTop: 6,
       borderTopWidth: 1,
