@@ -120,8 +120,11 @@ export default function AuthScreen({ navigation }: any) {
   const isShort = windowHeight < 700;
   // 插画高度随屏高自适应：矮屏 90–110、常规 112–140（不写死一个值）
   const heroHeight = isShort
-    ? Math.round(Math.min(110, Math.max(90, windowHeight * 0.15)))
-    : Math.round(Math.min(140, Math.max(112, windowHeight * 0.1)));
+    ? Math.round(Math.min(110, Math.max(90, windowHeight * 0.14)))
+    : Math.round(Math.min(132, Math.max(104, windowHeight * 0.085)));
+  // 图片原始 720×360（2:1），左侧约 17% 是透明留白 → 按主体对齐时只取 0.83 宽，
+  // 这样钱包/记账本的右边缘正好贴住内容右边缘，不会被留白顶偏。
+  const heroArtWidth = Math.round(heroHeight * 2 * 0.83);
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const { signIn, signUp, signInWithGoogle, updateDisplayName, signOut, sessionExpired, user, syncStatus, lastSyncAt, syncNow } = useAuth();
@@ -519,20 +522,25 @@ export default function AuthScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* 顶部插画：透明底 WebP，contain 不拉伸，主体偏右（左侧留呼吸空间） */}
-            <Image
-              source={require('../../assets/auth_header.webp')}
-              style={[styles.authHero, { height: heroHeight }]}
-              resizeMode="contain"
-              accessibilityIgnoresInvertColors
-            />
-            <AppText variant="title1" weight="600" style={styles.welcome}>
-              {mode === 'signin' ? tr('auth.welcomeBack') : tr('auth.signUpTitle')}
-            </AppText>
-            <AppText variant="subhead" color={semantic.textSecondary} style={styles.subtitle}>
-              {mode === 'signin' ? tr('auth.subtitleSignIn') : tr('auth.subtitleSignUp')}
-            </AppText>
-
+            {/* 头部区域：左侧标题/副标题，右侧插画（同一行，表单因此上移） */}
+            <View style={[styles.heroRow, { minHeight: heroHeight }]}>
+              {/* 插画绝对定位贴右：图片左半是透明留白，主体（钱包/记账本）落在这半边，
+                  所以按主体对齐 = 让图片右边缘贴住内容右边缘 */}
+              <Image
+                source={require('../../assets/auth_header.webp')}
+                style={[styles.heroArt, { width: heroArtWidth, height: heroHeight }]}
+                resizeMode="contain"
+                accessibilityIgnoresInvertColors
+              />
+              <View style={[styles.heroText, { paddingRight: heroArtWidth * 0.42 }]}>
+                <AppText variant="title1" weight="600" style={styles.welcome}>
+                  {mode === 'signin' ? tr('auth.welcomeBack') : tr('auth.signUpTitle')}
+                </AppText>
+                <AppText variant="subhead" color={semantic.textSecondary} style={styles.subtitle}>
+                  {mode === 'signin' ? tr('auth.subtitleSignIn') : tr('auth.subtitleSignUp')}
+                </AppText>
+              </View>
+            </View>
             {/* 表单卡：Google 按钮 → 或使用邮箱 → 邮箱/密码 → 主按钮 → 切换模式 */}
             <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.authCard}>
               {GOOGLE_ENABLED ? (
@@ -762,8 +770,11 @@ const styles = StyleSheet.create({
 
   // ============ 未登录:登录/注册表单 ============
     // 顶部插画：透明 WebP，宽度撑满内容区，高度由 JSX 按矮屏分级；无背景/边框/圆角
-  authHero: { width: '88%', marginTop: 6, alignSelf: 'flex-end' },
-  welcome: { marginTop: 18 },
+  // 头部行：标题在左、插画在右（插画绝对贴右，文字右侧留出主体宽度避免压字）
+  heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 10 },
+  heroArt: { position: 'absolute', right: -4, bottom: -2 },
+  heroText: { flexShrink: 1 },
+  welcome: { marginTop: 0 },
   subtitle: { marginTop: 6 },
   modeSwitchWrap: { marginTop: 22 },
   authCard: { marginTop: 16, padding: 16, gap: 12 },
