@@ -52,6 +52,7 @@ import {
   StatusBarGlass,
   Switch,
 } from '../components/ui';
+import AccountAvatar from '../components/AccountAvatar';
 
 /**
  * 玻璃材质（UI V2.1 §2）在 web 上的偏差修正 —— 与其它二级页同一份取值：
@@ -250,7 +251,7 @@ export default function ProfileScreen({ navigation }: any) {
           testID="profile-account-card"
         >
           <View style={styles.accountRow}>
-            <RowIcon size={48} icon="person" tone="accent" />
+            <AccountAvatar size={48} />
             <View style={styles.accountTextBlock}>
               <AppText variant="headline" numberOfLines={2}>
                 {authInitializing
@@ -262,13 +263,8 @@ export default function ProfileScreen({ navigation }: any) {
               {/* 副行：登录后是同步状态一句话；未登录是登录说明。说明文字随内容换行（不截断） */}
               {!authInitializing && (<>
                 <AppText variant="footnote" color={semantic.textSecondary} style={styles.accountSub}>
-                  {user ? user.email : tr('auth.subtitle')}
+                  {user ? syncText : tr('auth.subtitle')}
                 </AppText>
-                {user ? (
-                  <AppText variant="footnote" color={semantic.textSecondary} style={styles.accountSub}>
-                    {syncText}
-                  </AppText>
-                ) : null}
               </>)}
             </View>
             <Ionicons name="chevron-forward" size={16} color={semantic.textTertiary} />
