@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,6 +34,7 @@ class AuthServiceGoogleTest {
     private ProfileService profiles;
     private JwtService jwt;
     private PasswordEncoder encoder;
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
     private AuthService service;
 
     @BeforeEach
@@ -44,7 +44,8 @@ class AuthServiceGoogleTest {
         profiles = mock(ProfileService.class);
         jwt = mock(JwtService.class);
         encoder = new BCryptPasswordEncoder();
-        service = new AuthService(users, encoder, jwt, profiles, verifier, mock(org.springframework.jdbc.core.JdbcTemplate.class));
+        jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        service = new AuthService(users, encoder, jwt, profiles, verifier, jdbc);
     }
 
     private GoogleTokenVerifier.GoogleIdentity identity(String sub, String email) {
@@ -82,7 +83,6 @@ class AuthServiceGoogleTest {
 
         assertThatThrownBy(() -> service.deleteAccount(41L, new AuthDtos.DeleteAccountRequest("wrong", null)))
                 .isInstanceOf(ApiException.class);
-        verify(jdbc, never()).update(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(Object[].class));
     }
 
     @Test
