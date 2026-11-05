@@ -215,6 +215,34 @@ export async function scheduleLocalNotification(
 }
 
 /**
+ * 测试用：立刻（或 N 秒后）发一条本地通知，返回 { ok, id } 或失败原因。
+ * 排查「21:00 一条都没弹」时，用它能在真机上当场验证权限/渠道/排期这条链，不必等到整点。
+ */
+export async function sendTestReminder(
+  delaySeconds: number,
+  title: string,
+  body: string
+): Promise<{ ok: boolean; id?: string; reason?: string }> {
+  if (!NotificationsModule) return { ok: false, reason: 'notifications-unavailable' };
+  const ready = await ensureLocalReminderReady();
+  if (!ready.granted) return { ok: false, reason: 'permission-denied' };
+  try {
+    const when = new Date(Date.now() + Math.max(1, delaySeconds) * 1000);
+    const id = await NotificationsModule.scheduleNotificationAsync({
+      content: { title, body },
+      trigger: {
+        type: (require('expo-notifications') as NotificationsModule).SchedulableTriggerInputTypes.DATE,
+        date: when,
+        channelId: ready.channelId,
+      } as Parameters<NotificationsModule['scheduleNotificationAsync']>[0]['trigger'],
+    });
+    return { ok: true, id };
+  } catch (e) {
+    return { ok: false, reason: String((e as Error)?.message ?? e) };
+  }
+}
+
+/**
  * 按 id 取消一条还没触发的通知。
  * id 可能已经触发过或被系统清理掉,取消失败只记日志:取消是清理动作,
  * 不该因为某条已不存在就让调用方中断后续清理。

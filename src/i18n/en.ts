@@ -526,6 +526,10 @@ export const en = {
     statusScheduledNone: '0: scheduling failed or permission denied',
     statusNext: 'Next',
     statusNextNone: 'Nothing scheduled',
+    testSection: 'Send a test notification',
+    testNow: 'Send now',
+    testIn10s: 'Send in 10s',
+    testResult: 'Last result',
 
     budgetSectionTitle: 'Budget alerts',
     rulesSectionTitle: 'Reminder rules',

@@ -536,6 +536,10 @@ export const zh = {
     statusScheduledNone: '0 条：排期没成功，或权限被关掉了',
     statusNext: '下一条',
     statusNextNone: '没有排期',
+    testSection: '发送测试通知',
+    testNow: '立即发一条',
+    testIn10s: '10 秒后发一条',
+    testResult: '上次结果',
 
     budgetSectionTitle: '预算提醒',
     rulesSectionTitle: '提醒规则',

@@ -15,6 +15,7 @@ import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHe
 import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
 import * as NotificationsModule from 'expo-notifications';
+import { sendTestReminder } from '../utils/notifications';
 
 /**
  * 提醒设置（设置 → 功能）：提醒规则开关 + 预算提醒管理。展示的是"规则"，不是排期实例。
@@ -36,6 +37,11 @@ export default function ReminderSettingsScreen({ navigation }: any) {
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
 
   // 通知状态诊断：权限 / 已排期条数 / 下一条触发时间 —— 用户「为什么没弹」时一眼能看出来
+  const [testResult, setTestResult] = useState<string>('');
+  const runTest = useCallback(async (delay: number) => {
+    const r = await sendTestReminder(delay, t('reminder.dailyTitle'), t('reminder.dailyBody'));
+    setTestResult(r.ok ? `已排期（${delay}s）id=${r.id}` : `失败：${r.reason}`);
+  }, [t]);
   const [notifState, setNotifState] = useState<{ perm: string; scheduled: number; nextAt: Date | null }>({
     perm: 'unknown',
     scheduled: 0,
@@ -175,6 +181,13 @@ export default function ReminderSettingsScreen({ navigation }: any) {
                 : t('reminder.statusNextNone')
             }
           />
+        </ListSection>
+
+        {/* 测试：当场验证权限/渠道/排期这条链通不通（真机排查用） */}
+        <ListSection title={t('reminder.testSection')} testID="reminder-notif-test">
+          <ListRow icon="notifications-outline" title={t('reminder.testNow')} onPress={() => void runTest(1)} />
+          <ListRow icon="timer-outline" title={t('reminder.testIn10s')} onPress={() => void runTest(10)} />
+          {testResult ? <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={testResult} /> : null}
         </ListSection>
 
         {/* 预算超支：本月已经触发的阈值，删掉 = 这个月不再为它提醒 */}
