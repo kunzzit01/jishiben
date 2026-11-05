@@ -632,13 +632,6 @@ export const authApi = {
       body: { idToken, password },
     }).then(adoptTokens),
 
-  /** 解绑 Google：只清关联，不动账号；Google-only 账号会被服务端拒绝 */
-  googleUnlink: () =>
-    authorizedRequest<SessionUser>('DELETE', '/api/auth/google/link').then((user) => {
-      setSessionUser(user);
-      return user;
-    }),
-
   me: () => authorizedRequest<SessionUser>('GET', '/api/auth/me'),
 
   updateMe: (displayName: string) =>

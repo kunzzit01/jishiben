@@ -40,8 +40,6 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
   /** 修改昵称：服务端会打上「用户自定义」标记，之后 Google 登录不再覆盖 */
   updateDisplayName: (name: string) => Promise<AuthActionResult>;
-  /** 解绑 Google（设置页用）：成功后 user.googleLinked 变 false */
-  unlinkGoogle: () => Promise<AuthActionResult>;
   syncStatus: SyncStatus;
   lastSyncAt: number | null;
   /** 手动"立即同步"：拉取云端并合并 → 推送本地 */
@@ -178,15 +176,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const unlinkGoogle: AuthContextValue['unlinkGoogle'] = async () => {
-    try {
-      await authApi.googleUnlink();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
-    }
-  };
-
   const signInWithGoogle: AuthContextValue['signInWithGoogle'] = async (intent = 'login') => {
     const tokenResult = await getGoogleIdToken();
     if (tokenResult.kind === 'cancelled') {
@@ -237,7 +226,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
     signInWithGoogle,
-    unlinkGoogle,
     updateDisplayName,
         signOut,
         syncStatus: syncState.status,
