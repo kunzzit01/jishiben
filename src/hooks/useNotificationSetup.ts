@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import {
   registerForPushNotificationsAsync,
   sendTokenToBackend,
@@ -14,6 +15,9 @@ import {
  * - 同时挂载通知监听器（收到通知 / 用户点击通知），组件卸载时自动清理
  */
 export function useNotificationSetup() {
+  // 登录后要再注册一次：首帧往往还没有访问令牌，sendTokenToBackend 会跳过
+  const { user } = useAuth();
+  const uid = user?.id ?? 0;
   useEffect(() => {
     (async () => {
       try {
@@ -31,5 +35,5 @@ export function useNotificationSetup() {
       (response) => console.log('用户点击了通知', response)
     );
     return cleanup;
-  }, []);
+  }, [uid]);
 }

@@ -37,6 +37,12 @@ if (NotificationsModule) {
  * 必须在真机上运行，模拟器拿不到有效token。
  * 在 Expo Go 里会直接跳过并返回 null，要用 development build 才会真正执行。
  */
+/** 最近一次推送 token 注册失败的原因（页面直接显示给用户/我们排查用） */
+let lastPushError = '';
+export function getLastPushError(): string {
+  return lastPushError;
+}
+
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (isExpoGo) {
     console.warn('当前是Expo Go环境，推送token功能不可用，需要development build才能测试');
@@ -277,5 +283,21 @@ export async function getScheduledNotificationIds(): Promise<string[]> {
   } catch (e) {
     console.warn('读取已排期通知失败', e);
     return [];
+  }
+}
+
+
+/**
+ * 探测推送注册全链路：拿 token → 上报后端，返回每一步的结果（页面直接显示）。
+ * 和 useNotificationSetup 的区别：它不看登录态、每次都真跑一次，专为排查。
+ */
+export async function probePushRegistration(): Promise<{ ok: boolean; token?: string; reason?: string }> {
+  const token = await registerForPushNotificationsAsync();
+  if (!token) return { ok: false, reason: lastPushError || 'unknown' };
+  try {
+    await sendTokenToBackend(token);
+    return { ok: true, token };
+  } catch (e) {
+    return { ok: false, token, reason: '上报后端失败：' + String((e as Error)?.message ?? e) };
   }
 }

@@ -535,6 +535,10 @@ export const en = {
     broadcastRunning: 'Sending…',
     broadcastResult: 'Sent %{sent}/%{total} (failed %{failed})',
     broadcastFail: 'Failed: %{reason}',
+    pushProbeRow: 'Register push token (diagnostic)',
+    pushProbeRunning: 'Registering…',
+    pushProbeOk: 'Registered and reported: %{token}',
+    pushProbeFail: 'Failed: %{reason}',
 
     budgetSectionTitle: 'Budget alerts',
     rulesSectionTitle: 'Reminder rules',

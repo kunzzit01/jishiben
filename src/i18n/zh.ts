@@ -545,6 +545,10 @@ export const zh = {
     broadcastRunning: '发送中…',
     broadcastResult: '已发送 %{sent}/%{total}（失败 %{failed}）',
     broadcastFail: '发送失败：%{reason}',
+    pushProbeRow: '注册推送 token（排查用）',
+    pushProbeRunning: '注册中…',
+    pushProbeOk: '已注册并上报后端：%{token}',
+    pushProbeFail: '注册失败：%{reason}',
 
     budgetSectionTitle: '预算提醒',
     rulesSectionTitle: '提醒规则',

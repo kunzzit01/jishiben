@@ -15,7 +15,7 @@ import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHe
 import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
 import * as NotificationsModule from 'expo-notifications';
-import { sendTestReminder } from '../utils/notifications';
+import { sendTestReminder, probePushRegistration } from '../utils/notifications';
 import { broadcastPush } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 
@@ -45,6 +45,16 @@ export default function ReminderSettingsScreen({ navigation }: any) {
   const isBroadcastAdmin =
     user?.role === 'ADMIN' || (user?.email ?? '').toLowerCase() === 'mingsoon249@gmail.com';
   const [broadcastResult, setBroadcastResult] = useState<string>('');
+  const [pushProbe, setPushProbe] = useState<string>('');
+  const runPushProbe = useCallback(async () => {
+    setPushProbe(t('reminder.pushProbeRunning'));
+    const res = await probePushRegistration();
+    setPushProbe(
+      res.ok
+        ? t('reminder.pushProbeOk', { token: (res.token ?? '').slice(0, 22) + '…' })
+        : t('reminder.pushProbeFail', { reason: res.reason ?? 'unknown' })
+    );
+  }, [t]);
   const runBroadcast = useCallback(async () => {
     setBroadcastResult(t('reminder.broadcastRunning'));
     try {
@@ -218,6 +228,14 @@ export default function ReminderSettingsScreen({ navigation }: any) {
             />
             {broadcastResult ? (
               <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={broadcastResult} />
+            ) : null}
+            <ListRow
+              icon="key-outline"
+              title={t('reminder.pushProbeRow')}
+              onPress={() => void runPushProbe()}
+            />
+            {pushProbe ? (
+              <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={pushProbe} />
             ) : null}
           </ListSection>
         ) : null}
