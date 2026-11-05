@@ -72,7 +72,7 @@ export default function ProfileScreen({ navigation }: any) {
   const tr = useT();
   const styles = useMemo(() => makeStyles(semantic, spacing, layout), [semantic, spacing, layout]);
   // ── 账号与同步 ──
-  const { user, authInitializing, syncStatus, lastSyncAt } = useAuth();
+  const { user, authInitializing, syncStatus, lastSyncAt, unlinkGoogle } = useAuth();
   // ── 数据分组：清空所有数据。数量文案与清空动作都走 AppContext（不在这里自己拼 state）──
   const { ledgers, assets, transactions, budgets, paymentPlans, clearAllData } = useApp();
 
@@ -278,6 +278,39 @@ export default function ProfileScreen({ navigation }: any) {
                 void applyBio(v);
               }}
               testID="profile-bio-row"
+            />
+            {/* Google 绑定状态：已绑定可解绑；未绑定说明用 Google 登录会自动绑定 */}
+            <ListRow
+              leading={<RowIcon icon="logo-google" />}
+              title={tr('profile.googleAccount')}
+              value={user.googleLinked ? tr('profile.googleLinked') : tr('profile.googleNotLinked')}
+              chevron={!!user.googleLinked}
+              onPress={
+                user.googleLinked
+                  ? () =>
+                      dialog.alert({
+                        title: tr('profile.googleUnlinkTitle'),
+                        message: tr('profile.googleUnlinkMessage'),
+                        buttons: [
+                          { text: tr('common.cancel'), style: 'cancel' },
+                          {
+                            text: tr('profile.googleUnlink'),
+                            style: 'destructive',
+                            onPress: () => {
+                              void (async () => {
+                                const r = await unlinkGoogle();
+                                dialog.alert({
+                                  title: r.ok ? tr('profile.googleUnlinked') : tr('profile.googleUnlinkFailed'),
+                                  message: r.ok ? undefined : r.detail,
+                                });
+                              })();
+                            },
+                          },
+                        ],
+                      })
+                  : undefined
+              }
+              testID="profile-google-row"
             />
             <ListRow
               leading={<RowIcon icon="key-outline" />}

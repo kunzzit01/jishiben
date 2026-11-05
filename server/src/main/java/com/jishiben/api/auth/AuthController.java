@@ -39,6 +39,12 @@ public class AuthController {
     }
 
     /** 绑定：必须已登录（CurrentUser），并且再验一次本 App 密码 + Google Token。 */
+    /** 解绑 Google：需要当前登录态；Google-only 账号会被服务端拒绝 */
+    @org.springframework.web.bind.annotation.DeleteMapping("/google/link")
+    public AuthDtos.UserResponse unlinkGoogle() {
+        return auth.unlinkGoogle(CurrentUser.id());
+    }
+
     @PostMapping("/google/link")
     public AuthDtos.TokenResponse linkGoogle(@Valid @RequestBody AuthDtos.GoogleLinkRequest request) {
         return auth.linkGoogle(CurrentUser.id(), request);

@@ -38,6 +38,8 @@ interface AuthContextValue {
   /** Google 登录（Android 原生）：成功后写入本系统会话，失败返回稳定错误码 */
   signInWithGoogle: (intent?: 'login' | 'signup') => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
+  /** 解绑 Google（设置页用）：成功后 user.googleLinked 变 false */
+  unlinkGoogle: () => Promise<AuthActionResult>;
   syncStatus: SyncStatus;
   lastSyncAt: number | null;
   /** 手动"立即同步"：拉取云端并合并 → 推送本地 */
@@ -163,6 +165,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const unlinkGoogle: AuthContextValue['unlinkGoogle'] = async () => {
+    try {
+      await authApi.googleUnlink();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
   const signInWithGoogle: AuthContextValue['signInWithGoogle'] = async (intent = 'login') => {
     const tokenResult = await getGoogleIdToken();
     if (tokenResult.kind === 'cancelled') {
@@ -213,6 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
     signInWithGoogle,
+    unlinkGoogle,
         signOut,
         syncStatus: syncState.status,
         lastSyncAt: syncState.lastSyncAt,

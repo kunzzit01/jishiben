@@ -221,6 +221,23 @@ public class AuthService {
                         "This account no longer exists"));
     }
 
+    /**
+     * 解绑 Google：只清 google_sub，不动账号本身。
+     * 没有密码的账号（Google-only）不允许解绑 —— 否则会把自己锁在门外。
+     */
+    @Transactional
+    public AuthDtos.UserResponse unlinkGoogle(long ownerId) {
+        User user = requireUser(ownerId);
+        if (user.getGoogleSub() == null) {
+            return toResponse(user);
+        }
+        if (user.getPasswordHash() == null) {
+            throw ApiException.badRequest("This account signs in with Google only; set a password before unlinking");
+        }
+        user.setGoogleSub(null);
+        return toResponse(users.save(user));
+    }
+
     private AuthDtos.TokenResponse tokens(User user) {
         AuthPrincipal principal = new AuthPrincipal(user.getId(), user.getEmail(), user.getUserRole(),
                 user.getTokenVersion());
@@ -231,7 +248,8 @@ public class AuthService {
 
     private AuthDtos.UserResponse toResponse(User user) {
         return new AuthDtos.UserResponse(user.getId(), user.getEmail(), user.getDisplayName(),
-                user.getUserRole(), user.getEmailVerifiedAt() != null, user.getCreatedAt());
+                user.getUserRole(), user.getEmailVerifiedAt() != null, user.getCreatedAt(),
+                user.getGoogleSub() != null);
     }
 
     private static String normaliseEmail(String email) {

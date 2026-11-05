@@ -17,6 +17,8 @@ export interface SessionUser {
   displayName?: string | null;
   role?: string;
   emailVerified?: boolean;
+  /** 是否已绑定 Google（设置页显示 已绑定/未绑定） */
+  googleLinked?: boolean;
 }
 
 export interface TokenPair {

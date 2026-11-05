@@ -55,7 +55,9 @@ public final class AuthDtos {
             String displayName,
             String role,
             boolean emailVerified,
-            Instant createdAt) {
+            Instant createdAt,
+            /** 是否已绑定 Google（UI 用它显示 已绑定/未绑定 + 决定「解绑」是否可点） */
+            boolean googleLinked) {
     }
 
     public record TokenResponse(
