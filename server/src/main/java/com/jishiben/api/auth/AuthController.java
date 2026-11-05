@@ -33,6 +33,16 @@ public class AuthController {
         return auth.login(request);
     }
 
+    @PostMapping("/google")
+    public AuthDtos.TokenResponse google(@Valid @RequestBody AuthDtos.GoogleLoginRequest request) {
+        return auth.loginWithGoogle(request);
+    }
+
+    /** 绑定：必须已登录（CurrentUser），并且再验一次本 App 密码 + Google Token。 */
+    @PostMapping("/google/link")
+    public AuthDtos.TokenResponse linkGoogle(@Valid @RequestBody AuthDtos.GoogleLinkRequest request) {
+        return auth.linkGoogle(CurrentUser.id(), request);
+    }
     @PostMapping("/refresh")
     public AuthDtos.TokenResponse refresh(@Valid @RequestBody AuthDtos.RefreshRequest request) {
         return auth.refresh(request);

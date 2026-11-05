@@ -1,5 +1,6 @@
 package com.jishiben.api.auth;
 
+import com.google.api.client.json.gson.GsonFactory;
 import com.jishiben.api.common.ApiException;
 import com.jishiben.api.common.ErrorCode;
 import com.jishiben.api.common.Texts;
@@ -29,13 +30,15 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final ProfileService profiles;
+    private final GoogleTokenVerifier googleVerifier;
 
     public AuthService(UserRepository users, PasswordEncoder passwordEncoder, JwtService jwtService,
-                       ProfileService profiles) {
+                       ProfileService profiles, GoogleTokenVerifier googleVerifier) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.profiles = profiles;
+        this.googleVerifier = googleVerifier;
     }
 
     @Transactional
@@ -98,6 +101,70 @@ public class AuthService {
         return tokens(users.save(user));
     }
 
+    /**
+     * Google 登录：已验证邮箱才创建账号；同邮箱已有密码账号时**不**直接登录，返回 GOOGLE_LINK_REQUIRED。
+     * 身份只认 Google 服务端验证过的载荷，客户端提交的邮箱 / 姓名 / sub 一律不采信。
+     */
+    @Transactional
+    public AuthDtos.TokenResponse loginWithGoogle(AuthDtos.GoogleLoginRequest request) {
+        GoogleTokenVerifier.GoogleIdentity identity = googleVerifier.verify(request.idToken());
+        if (!identity.emailVerified() || identity.email() == null || identity.email().isBlank()) {
+            throw ApiException.badRequest("Google account has no verified email");
+        }
+
+        // 1) 已绑定：按 sub 直接登录（邮箱后续变化也不影响）
+        User bound = users.findByGoogleSub(identity.sub()).orElse(null);
+        if (bound != null) {
+            bound.setLastLoginAt(Instant.now());
+            return tokens(users.save(bound));
+        }
+
+        // 2) 同邮箱已有账号：必须先证明原账号所有权再绑定，绝不直接发这个账号的 token
+        if (users.existsByEmailIgnoreCase(identity.email())) {
+            throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_LINK_REQUIRED,
+                    "An account with this email already exists; sign in with your password to link Google");
+        }
+
+        // 3) 新账号：password_hash 保持 NULL（不造假密码），同一个事务里建 profile
+        User user = new User();
+        user.setEmail(normaliseEmail(identity.email()));
+        user.setPasswordHash(null);
+        user.setDisplayName(Texts.trimToNull(identity.name()));
+        user.setUserRole("USER");
+        user.setGoogleSub(identity.sub());
+        user.setEmailVerifiedAt(Instant.now());
+        User saved = users.save(user);
+        profiles.ensure(saved.getId());
+        return tokens(saved);
+    }
+
+    /**
+     * 把 Google 绑定到「当前已登录的」账号：需要本 App 密码再证一次身份 + 再验一次 Google Token。
+     * 索要的是本 App 密码，绝不向用户要 Google 密码。
+     */
+    @Transactional
+    public AuthDtos.TokenResponse linkGoogle(long ownerId, AuthDtos.GoogleLinkRequest request) {
+        GoogleTokenVerifier.GoogleIdentity identity = googleVerifier.verify(request.idToken());
+        User user = requireUser(ownerId);
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw ApiException.badRequest("Current password is incorrect");
+        }
+        if (user.getGoogleSub() != null) {
+            throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_ALREADY_LINKED,
+                    "This account already has a Google identity linked");
+        }
+        if (identity.email() == null || !identity.email().equalsIgnoreCase(user.getEmail())) {
+            throw ApiException.badRequest("Google account email does not match this account");
+        }
+        User other = users.findByGoogleSub(identity.sub()).orElse(null);
+        if (other != null && other.getId() != user.getId()) {
+            throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_SUB_TAKEN,
+                    "This Google account is already linked to another user");
+        }
+        user.setGoogleSub(identity.sub());
+        user.setLastLoginAt(Instant.now());
+        return tokens(users.save(user));
+    }
     @Transactional
     public AuthDtos.TokenResponse changePassword(long ownerId, AuthDtos.ChangePasswordRequest request) {
         User user = requireUser(ownerId);

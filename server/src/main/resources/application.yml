@@ -67,6 +67,9 @@ management:
         enabled: true
 
 app:
+  google:
+    # Google 登录的 ID Token 受众（Web application OAuth Client ID）。留空 = 该功能关闭，邮箱登录不受影响。
+    web-client-id: ${GOOGLE_WEB_CLIENT_ID:}
   jwt:
     # Must be supplied at runtime (>= 32 bytes for HS256). Empty default fails closed.
     secret: "${JWT_SECRET:}"

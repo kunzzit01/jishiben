@@ -11,6 +11,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmailIgnoreCase(String email);
 
+    /** Google sub 是大小写敏感的唯一标识，必须用精确匹配（不能复用邮箱的 IgnoreCase）。 */
+    Optional<User> findByGoogleSub(String googleSub);
+
     @Query("select u.tokenVersion from User u where u.id = :id")
     Optional<Integer> findTokenVersionById(@Param("id") long id);
 }

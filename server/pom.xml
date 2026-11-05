@@ -24,6 +24,12 @@
   </properties>
 
   <dependencies>
+    <!-- Google 登录：GoogleIdTokenVerifier（验签 / iss / exp / aud 的唯一来源） -->
+    <dependency>
+      <groupId>com.google.api-client</groupId>
+      <artifactId>google-api-client</artifactId>
+      <version>2.7.2</version>
+    </dependency>
     <!-- HTTP layer -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

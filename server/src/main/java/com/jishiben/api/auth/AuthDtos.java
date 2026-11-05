@@ -21,6 +21,16 @@ public final class AuthDtos {
             @NotBlank @Size(max = 72) String password) {
     }
 
+    /** Google 登录：只收 ID Token；邮箱/姓名一律以服务端验证后的载荷为准。 */
+    public record GoogleLoginRequest(@NotBlank @Size(max = 4096) String idToken) {
+    }
+
+    /** 同邮箱已有密码账号时的绑定：必须同时证明本 App 密码 + 再验一次 Google Token。 */
+    public record GoogleLinkRequest(
+            @NotBlank @Size(max = 4096) String idToken,
+            @NotBlank @Size(max = 72) String password) {
+    }
+
     public record RefreshRequest(@NotBlank String refreshToken) {
     }
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.jishiben.api.common.ApiException;
@@ -36,7 +37,7 @@ class AuthServiceTest {
     private ProfileService profiles;
 
     private AuthService service() {
-        return new AuthService(users, encoder, jwt, profiles);
+        return new AuthService(users, encoder, jwt, profiles, mock(GoogleTokenVerifier.class));
     }
 
     @Test

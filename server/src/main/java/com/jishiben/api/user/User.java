@@ -26,6 +26,10 @@ public class User {
     @Column(name = "password_hash", length = 100)
     private String passwordHash;
 
+    /** Google 账号的稳定标识（OIDC sub）：绑定后它就是身份定位依据，邮箱变化不影响登录。 */
+    @Column(name = "google_sub", length = 255)
+    private String googleSub;
+
     @Column(name = "display_name", length = 100)
     private String displayName;
 
@@ -132,5 +136,13 @@ public class User {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getGoogleSub() {
+        return googleSub;
+    }
+
+    public void setGoogleSub(String googleSub) {
+        this.googleSub = googleSub;
     }
 }
