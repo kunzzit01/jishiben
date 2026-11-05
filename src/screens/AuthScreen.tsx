@@ -30,13 +30,21 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
-import SegmentedControl from '../components/SegmentedControl';
+
 import BackButton from '../components/ui/BackButton';
 import GoogleLogo from '../components/GoogleLogo';
 
 import { AppText, GlassView, HeroGradient, withAlpha } from '../components/ui';
 
 type Mode = 'signin' | 'signup';
+
+/**
+ * Google 品牌按钮的固定配色：Google 规范要求按钮为浅底深字，
+ * 因此**不跟随主题**（夜间用 textPrimary 会变成白字压白底，完全看不清）。
+ */
+const GOOGLE_BTN_BG = '#FFFFFF';
+const GOOGLE_BTN_BORDER = 'rgba(60,64,67,0.40)';
+const GOOGLE_BTN_TEXT = '#1F1F1F';
 
 /**
  * 第一版 Google 登录只在原生端可用；生产 Web 不展示假入口（方案 §1）。
@@ -217,6 +225,7 @@ export default function AuthScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   // 后端密码最低 8 位；登录时同样要求（真密码不可能短于 8 位）
   const canSubmit = !!email.trim() && password.length >= 8 && !busy;
@@ -374,57 +383,43 @@ export default function AuthScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* 品牌方块（稿：64 圆角方 + accentSoft 底） */}
+            {/* 品牌方块 */}
             <View style={[styles.brandChip, { backgroundColor: semantic.accentSoft }]}>
               <Ionicons name="wallet-outline" size={30} color={semantic.textPrimary} />
             </View>
             <AppText variant="title1" weight="600" style={styles.welcome}>
-              {tr('auth.welcomeBack')}
+              {mode === 'signin' ? tr('auth.welcomeBack') : tr('auth.signUpTitle')}
             </AppText>
             <AppText variant="subhead" color={semantic.textSecondary} style={styles.subtitle}>
-              {tr('auth.subtitle')}
+              {mode === 'signin' ? tr('auth.subtitleSignIn') : tr('auth.subtitleSignUp')}
             </AppText>
 
-            {/* 登录 / 注册分段（§2 玻璃分段：夜白胶囊 / 日紫胶囊） */}
-            <View style={styles.modeSwitchWrap}>
-              <SegmentedControl
-                stretch
-                appearance="glass"
-                options={[
-                  { label: tr('auth.modeSignIn'), value: 'signin' },
-                  { label: tr('auth.modeSignUp'), value: 'signup' },
-                ]}
-                selected={mode}
-                onSelect={(v) => setMode(v as Mode)}
-              />
-            </View>
-
-            {/* Google 登录：第一版仅 Android 原生；Web 不渲染假入口 */}
-            {GOOGLE_ENABLED ? (
-              <>
-                <PressableScale
-                  style={styles.googleBtn}
-                  activeScale={0.98}
-                  disabled={busy}
-                  onPress={() => void handleGoogle()}
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('auth.googleContinue')}
-                  testID="auth-google"
-                >
-                  <GoogleLogo size={18} />
-                  <AppText variant="subhead" weight="600" color={semantic.textPrimary}>
-                    {tr('auth.googleContinue')}
-                  </AppText>
-                </PressableScale>
-                <View style={styles.orRow}>
-                  <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
-                  <AppText variant="caption" color={semantic.textTertiary}>{tr('auth.or')}</AppText>
-                  <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
-                </View>
-              </>
-            ) : null}
-
+            {/* 表单卡：Google 按钮 → 或使用邮箱 → 邮箱/密码 → 主按钮 → 切换模式 */}
             <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.authCard}>
+              {GOOGLE_ENABLED ? (
+                <>
+                  <PressableScale
+                    style={styles.googleBtn}
+                    activeScale={0.98}
+                    disabled={busy}
+                    onPress={() => void handleGoogle()}
+                    accessibilityRole="button"
+                    accessibilityLabel={tr('auth.googleContinue')}
+                    testID="auth-google"
+                  >
+                    <GoogleLogo size={18} />
+                    <AppText variant="subhead" weight="600" color={GOOGLE_BTN_TEXT}>
+                      {tr('auth.googleContinue')}
+                    </AppText>
+                  </PressableScale>
+                  <View style={styles.orRow}>
+                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                    <AppText variant="caption" color={semantic.textSecondary}>{tr('auth.orUseEmail')}</AppText>
+                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                  </View>
+                </>
+              ) : null}
+
               <View>
                 <AppText variant="caption" color={semantic.textSecondary} style={styles.fieldLabel}>
                   {tr('auth.email')}
@@ -440,32 +435,45 @@ export default function AuthScreen({ navigation }: any) {
                   autoCorrect={false}
                 />
               </View>
+
               <View>
                 <AppText variant="caption" color={semantic.textSecondary} style={styles.fieldLabel}>
                   {tr('auth.password')}
                 </AppText>
-                <TextInput
-                  style={[styles.authInput, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder={tr('auth.passwordPlaceholder')}
-                  placeholderTextColor={semantic.textSecondary}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
+                {/* 密码框 + 眼睛：与设计稿一致，可切明文 */}
+                <View>
+                  <TextInput
+                    style={[styles.authInput, styles.authInputWithIcon, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder={mode === 'signin' ? tr('auth.passwordPlaceholder') : tr('auth.passwordPlaceholderSignUp')}
+                    placeholderTextColor={semantic.textSecondary}
+                    secureTextEntry={!passwordVisible}
+                    autoCapitalize="none"
+                  />
+                  <PressableScale
+                    style={styles.eyeBtn}
+                    activeScale={0.9}
+                    onPress={() => setPasswordVisible((v) => !v)}
+                    accessibilityRole="button"
+                    accessibilityLabel={passwordVisible ? tr('auth.hidePassword') : tr('auth.showPassword')}
+                    testID="auth-password-eye"
+                  >
+                    <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={18} color={semantic.textSecondary} />
+                  </PressableScale>
+                </View>
+                <AppText variant="caption" color={semantic.textSecondary} style={styles.passwordHint}>
+                  {tr('auth.passwordHintShort')}
+                </AppText>
               </View>
-              <AppText variant="caption" color={semantic.textSecondary}>
-                {tr('auth.passwordHint')}
-              </AppText>
 
-              {/* 主按钮 = accent 渐变胶囊（§3：渐变实心按钮保持白字）；17pt 粗体走大字档 3:1 */}
               <PressableScale
                 style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
                 activeScale={0.97}
                 onPress={handleSubmit}
                 disabled={!canSubmit}
                 accessibilityRole="button"
-                accessibilityLabel={busy ? tr('auth.busy') : mode === 'signin' ? tr('auth.signIn') : tr('auth.signUp')}
+                accessibilityLabel={busy ? tr('auth.busy') : mode === 'signin' ? tr('auth.signIn') : tr('auth.createAccount')}
               >
                 <LinearGradient
                   colors={gradients.accent.colors}
@@ -475,7 +483,7 @@ export default function AuthScreen({ navigation }: any) {
                   style={styles.primaryBtnFill}
                 >
                   <AppText variant="headline" weight="700" color={semantic.onAccent} numberOfLines={1}>
-                    {busy ? tr('auth.busy') : mode === 'signin' ? tr('auth.signIn') : tr('auth.signUp')}
+                    {busy ? tr('auth.busy') : mode === 'signin' ? tr('auth.signIn') : tr('auth.createAccount')}
                   </AppText>
                 </LinearGradient>
               </PressableScale>
@@ -485,13 +493,14 @@ export default function AuthScreen({ navigation }: any) {
                 activeScale={0.95}
                 onPress={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
                 accessibilityRole="button"
-                accessibilityLabel={mode === 'signin' ? tr('auth.switchToSignUp') : tr('auth.switchToSignIn')}
+                accessibilityLabel={mode === 'signin' ? tr('auth.noAccountCta') : tr('auth.hasAccountCta')}
               >
                 <AppText variant="footnote" align="center" numberOfLines={2}>
-                  {mode === 'signin' ? tr('auth.switchToSignUp') : tr('auth.switchToSignIn')}
+                  {mode === 'signin' ? tr('auth.noAccountCta') : tr('auth.hasAccountCta')}
                 </AppText>
               </PressableScale>
             </GlassView>
+
           </ScrollView>
         </KeyboardAvoidingView>
       )}
@@ -521,13 +530,17 @@ const styles = StyleSheet.create({
     columnGap: 10,
     minHeight: 50,
     borderRadius: 999,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: GOOGLE_BTN_BG,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(60,64,67,0.28)',
+    borderColor: GOOGLE_BTN_BORDER,
   },
   // 「或」分隔：两条淡线夹一个字
   orRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginVertical: 14 },
   orLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  // 密码框右侧的眼睛（44 命中高度）
+  authInputWithIcon: { paddingRight: 44 },
+  eyeBtn: { position: 'absolute', right: 6, top: 0, bottom: 0, width: 40, alignItems: 'center', justifyContent: 'center' },
+  passwordHint: { marginTop: 6 },
   container: { flex: 1 },
   flex: { flex: 1 },
 
