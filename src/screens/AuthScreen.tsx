@@ -255,11 +255,17 @@ export default function AuthScreen({ navigation }: any) {
     }
     if (busy) return;
     setBusy(true);
-    const r = await signInWithGoogle();
+    const r = await signInWithGoogle(mode === 'signup' ? 'signup' : 'login');
     setBusy(false);
     if (r.ok) return;
     // 取消是正常操作：不弹错
     if (r.error === 'google_cancelled') return;
+    if (r.error === 'google_already_registered') {
+      // 注册页用 Google：这个身份已经有账号 → 引导去登录，而不是静默登录
+      dialog.alert({ title: tr('auth.googleAlreadyRegistered') });
+      setMode('signin');
+      return;
+    }
     if (r.error === 'google_link_required') {
       dialog.alert({ title: tr('auth.googleLinkRequired') });
       return;

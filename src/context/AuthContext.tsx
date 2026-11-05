@@ -36,7 +36,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<AuthActionResult>;
   signUp: (email: string, password: string) => Promise<AuthActionResult>;
   /** Google 登录（Android 原生）：成功后写入本系统会话，失败返回稳定错误码 */
-  signInWithGoogle: () => Promise<AuthActionResult>;
+  signInWithGoogle: (intent?: 'login' | 'signup') => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
   syncStatus: SyncStatus;
   lastSyncAt: number | null;
@@ -163,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle: AuthContextValue['signInWithGoogle'] = async () => {
+  const signInWithGoogle: AuthContextValue['signInWithGoogle'] = async (intent = 'login') => {
     const tokenResult = await getGoogleIdToken();
     if (tokenResult.kind === 'cancelled') {
       // 用户主动取消：不弹错、不动当前会话
@@ -173,13 +173,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: false, error: 'google_unavailable', detail: tokenResult.reason };
     }
     try {
-      await authApi.googleLogin(tokenResult.idToken);
+      await authApi.googleLogin(tokenResult.idToken, intent);
       await AsyncStorage.setItem(LAST_ACTIVE_KEY, String(Date.now())).catch(() => {});
       setSessionExpired(false);
       return { ok: true };
     } catch (e) {
       const code = e instanceof ApiError ? e.code : 'unknown';
       if (code === 'GOOGLE_LINK_REQUIRED') return { ok: false, error: 'google_link_required' };
+      if (code === 'GOOGLE_ALREADY_REGISTERED') return { ok: false, error: 'google_already_registered' };
       if (code === 'GOOGLE_NOT_CONFIGURED') return { ok: false, error: 'google_not_configured' };
       return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
     }

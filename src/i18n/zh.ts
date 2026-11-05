@@ -935,6 +935,7 @@ export const zh = {
     googleLinkRequired: '这个邮箱已有账号。请先用密码登录，再在设置里绑定 Google，账目会保留在同一账号中。',
     googleUnavailable: 'Google 登录暂时不可用，请改用邮箱登录。',
     googleNotConfigured: '服务器还没配置 Google 登录，请改用邮箱登录。',
+    googleAlreadyRegistered: '这个 Google 账号已经注册过了，请直接登录。',
     googleWebPreview: 'Web 版暂不支持 Google 登录，这里只用于预览按钮样式。',
     modeSignUp: '注册',
     welcomeBack: '欢迎回来',

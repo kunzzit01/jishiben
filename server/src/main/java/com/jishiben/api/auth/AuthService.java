@@ -108,6 +108,7 @@ public class AuthService {
     @Transactional
     public AuthDtos.TokenResponse loginWithGoogle(AuthDtos.GoogleLoginRequest request) {
         GoogleTokenVerifier.GoogleIdentity identity = googleVerifier.verify(request.idToken());
+        boolean signupMode = "signup".equalsIgnoreCase(request.mode());
         if (!identity.emailVerified() || identity.email() == null || identity.email().isBlank()) {
             throw ApiException.badRequest("Google account has no verified email");
         }
@@ -115,6 +116,10 @@ public class AuthService {
         // 1) 已绑定：按 sub 直接登录（邮箱后续变化也不影响）
         User bound = users.findByGoogleSub(identity.sub()).orElse(null);
         if (bound != null) {
+            if (signupMode) {
+                throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_ALREADY_REGISTERED,
+                        "This Google account is already registered; sign in instead");
+            }
             bound.setLastLoginAt(Instant.now());
             return tokens(users.save(bound));
         }
@@ -124,6 +129,10 @@ public class AuthService {
         //    风险已由负责人确认：任何能登录该 Gmail 的人都能进入该记账账号；原密码登录照旧可用。
         User byEmail = users.findByEmailIgnoreCase(identity.email()).orElse(null);
         if (byEmail != null) {
+            if (signupMode) {
+                throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_ALREADY_REGISTERED,
+                        "This email is already registered; sign in instead");
+            }
             if (byEmail.getGoogleSub() != null) {
                 // 邮箱相同但已绑定到另一个 Google 身份：不能覆盖，明确拒绝
                 throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_SUB_TAKEN,

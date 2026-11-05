@@ -620,10 +620,10 @@ export const authApi = {
     }).then(adoptTokens),
 
   /** Google 登录：把 SDK 的 ID Token 交给服务端验签，成功后同样是本系统令牌 */
-  googleLogin: (idToken: string) =>
+  googleLogin: (idToken: string, mode: 'login' | 'signup' = 'login') =>
     authorizedRequest<AuthTokenResponse>('POST', '/api/auth/google', {
       auth: false,
-      body: { idToken },
+      body: { idToken, mode },
     }).then(adoptTokens),
 
   /** 同邮箱老账号绑定 Google：需要当前登录态 + 本 App 密码 */

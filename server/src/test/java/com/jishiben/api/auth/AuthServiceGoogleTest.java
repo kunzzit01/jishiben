@@ -90,6 +90,17 @@ class AuthServiceGoogleTest {
         verify(existing).setGoogleSub("sub-9");
     }
     @Test
+    void signupWithExistingAccountIsRejected() {
+        when(verifier.verify("t")).thenReturn(identity("sub-11", "taken@x.com"));
+        User bound = mock(User.class);
+        when(users.findByGoogleSub("sub-11")).thenReturn(Optional.of(bound));
+
+        assertThatThrownBy(() -> service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t", "signup")))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).code())
+                        .isEqualTo(ErrorCode.GOOGLE_ALREADY_REGISTERED));
+    }
+    @Test
     void unverifiedEmailIsRejected() {
         when(verifier.verify("t"))
                 .thenReturn(new GoogleTokenVerifier.GoogleIdentity("sub-3", "x@x.com", false, null));

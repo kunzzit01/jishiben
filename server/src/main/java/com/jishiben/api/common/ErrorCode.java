@@ -21,6 +21,8 @@ public enum ErrorCode {
     GOOGLE_NOT_CONFIGURED,
     GOOGLE_TOKEN_INVALID,
     GOOGLE_LINK_REQUIRED,
+    /** 注册页用 Google：这个 Google 身份/邮箱已经有账号了，应引导去登录 */
+    GOOGLE_ALREADY_REGISTERED,
     GOOGLE_ALREADY_LINKED,
     GOOGLE_SUB_TAKEN,
     NOT_IMPLEMENTED,

@@ -922,6 +922,7 @@ export const en = {
     googleLinkRequired: 'This email already has an account. Sign in with your password first, then link Google in settings — your data stays in the same account.',
     googleUnavailable: 'Google sign-in is unavailable right now. Please use email.',
     googleNotConfigured: 'Google sign-in is not configured on the server. Please use email.',
+    googleAlreadyRegistered: 'This Google account is already registered — please sign in.',
     googleWebPreview: 'Google sign-in is not available on web yet — this button is a design preview.',
     modeSignUp: 'Sign up',
     welcomeBack: 'Welcome back',
