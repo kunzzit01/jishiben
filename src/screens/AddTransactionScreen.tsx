@@ -52,10 +52,12 @@ import { formatRateEquation } from '../utils/formatRate';
 import { formatDate as formatDateLabel } from '../utils/formatDate';
 import { getRecentAssetsSnapshot, rememberRecentAsset, useRecentAssets } from '../utils/recentAssets';
 import {
+  getAmountCategoryVersion,
   hydrateAmountCategory,
   lookupCategoryForAmount,
   rebuildAmountCategory,
   rememberAmountCategory,
+  subscribeAmountCategory,
 } from '../utils/amountCategory';
 import { AmountCalculatorKeypad, keypadPanelHeight } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
@@ -879,6 +881,10 @@ function fxAmountText(raw: string, live: string | null): string {
 
   // 记忆 = 现存账目历史的统计。每次历史变化都整体重建：
   // 删账 → 票自然消失；改账 → 旧票换新票；不会再出现「删掉又被播种回来」。
+  // 记忆版本：读盘完成 / 历史重建 / 记账 / 删账都会变 → 触发重算，避免「先输金额后重建」时无反应
+  const [amountMemoryVersion, setAmountMemoryVersion] = useState(getAmountCategoryVersion);
+  useEffect(() => subscribeAmountCategory(() => setAmountMemoryVersion(getAmountCategoryVersion())), []);
+
   const lastHistorySignatureRef = useRef('');
   useEffect(() => {
     if (!amountMemoryReady || dataLoading) return; // 数据未就绪时别拿空列表清空记忆
@@ -927,7 +933,7 @@ function fxAmountText(raw: string, live: string | null): string {
     // 类别可能已被删除：只认当前类型下仍然存在的
     if (!categories.some((c) => c.id === remembered && c.type === uiType)) return;
     setCategoryId(remembered);
-  }, [liveAmountValue, uiType, isEditing, categoryId, categories, amountMemoryReady]);
+  }, [liveAmountValue, uiType, isEditing, categoryId, categories, amountMemoryReady, amountMemoryVersion]);
 
   // 金额字号档位（V2 稿基准 64；矮屏按 T15 惯例再收一档 44，给类别网格腾「至少 2 行」）
   const heroAmountFontSize = amountFontTier(heroAmountDisplay, isShort ? 44 : 64);

@@ -45,6 +45,23 @@ const EMPTY: StoreShape = { expense: {}, income: {} };
 
 let snapshot: StoreShape = EMPTY;
 let hydrated = false;
+// 快照版本号 + 订阅：记忆一变（读盘完成 / 历史重建 / 记账记忆 / 删账撤销）就通知页面重算，
+// 否则「先输金额、后重建完成」时不会二次触发联想 —— 用户看到的就是「要杀进程再开才生效」。
+let amountCategoryVersion = 0;
+const categoryListeners = new Set<() => void>();
+function bumpVersion(): void {
+  amountCategoryVersion += 1;
+  categoryListeners.forEach((fn) => fn());
+}
+export function getAmountCategoryVersion(): number {
+  return amountCategoryVersion;
+}
+export function subscribeAmountCategory(fn: () => void): () => void {
+  categoryListeners.add(fn);
+  return () => {
+    categoryListeners.delete(fn);
+  };
+}
 let hydration: Promise<void> | null = null;
 
 function scopeKey(scope?: AmountScope): string {
@@ -134,6 +151,7 @@ export function hydrateAmountCategory(): Promise<void> {
       snapshot = EMPTY;
     } finally {
       hydrated = true;
+      bumpVersion();
     }
   })();
   return hydration;
@@ -170,6 +188,7 @@ export function rememberAmountCategory(
   snapshot = { ...snapshot, [type]: { ...snapshot[type], [sk]: prune(bucket) } };
   hydrated = true;
   persist();
+  bumpVersion();
 }
 
 /**
@@ -262,6 +281,7 @@ export function seedAmountCategory(
   snapshot = next;
   hydrated = true;
   persist();
+  bumpVersion();
 }
 
 /**
@@ -297,6 +317,7 @@ export function forgetAmountCategory(
 
   snapshot = { ...snapshot, [type]: { ...snapshot[type], [sk]: nextBucket } };
   persist();
+  bumpVersion();
 }
 
 /**
