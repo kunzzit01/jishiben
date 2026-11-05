@@ -253,14 +253,23 @@ export default function ProfileScreen({ navigation }: any) {
             <RowIcon size={48} icon="person" tone="accent" />
             <View style={styles.accountTextBlock}>
               <AppText variant="headline" numberOfLines={2}>
-                {authInitializing ? tr('auth.busy') : user ? user.email : tr('auth.signInOrUp')}
+                {authInitializing
+                  ? tr('auth.busy')
+                  : user
+                    ? user.displayName?.trim() || user.email.split('@')[0]
+                    : tr('auth.signInOrUp')}
               </AppText>
               {/* 副行：登录后是同步状态一句话；未登录是登录说明。说明文字随内容换行（不截断） */}
-              {!authInitializing && (
+              {!authInitializing && (<>
                 <AppText variant="footnote" color={semantic.textSecondary} style={styles.accountSub}>
-                  {user ? syncText : tr('auth.subtitle')}
+                  {user ? user.email : tr('auth.subtitle')}
                 </AppText>
-              )}
+                {user ? (
+                  <AppText variant="footnote" color={semantic.textSecondary} style={styles.accountSub}>
+                    {syncText}
+                  </AppText>
+                ) : null}
+              </>)}
             </View>
             <Ionicons name="chevron-forward" size={16} color={semantic.textTertiary} />
           </View>
