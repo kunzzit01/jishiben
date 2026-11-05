@@ -285,23 +285,11 @@ export default function AddAssetScreen({ route }: any) {
   // 与两格显示同一口径：编辑中的格子取算式实时值（＝屏幕上显示的那个数），其余沿用已落库值。
   const liveBalance = balanceEditing ? balanceExpr.total : balanceValue;
   const liveAvailable = availableEditing ? availableExpr.total : availableValue;
-  const liveUsed = liveBalance - liveAvailable;
-  // 额度 ↔ 可用额度联动（用户 2026-11-05 定策）：
-  //   已用额度 = 0  →  可用额度 = 总信用额度（新建卡的常态）
-  //   已用额度 > 0  →  改总额度时**保持已用不变**，可用 = 新额度 − 已用（按差额调整）
-  // 只在「总信用额度」变化时触发；正在输入「可用额度」那一格时一律不动它。
-  const prevBalanceRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (selectedType !== 'credit') return;
-    if (amountField === 'available') return;
-    const prev = prevBalanceRef.current;
-    prevBalanceRef.current = liveBalance;
-    if (prev == null || !Number.isFinite(prev)) return; // 首次只记基线，不动用户已填的可用
-    if (Math.abs(prev - liveBalance) < 0.005) return;    // 额度没变
-    const used = prev - liveAvailable;
-    const nextAvailable = used > 0.005 ? Math.max(0, liveBalance - used) : liveBalance;
-    if (Math.abs(nextAvailable - liveAvailable) >= 0.005) setAvailableValue(nextAvailable);
-  }, [liveBalance, selectedType, amountField, liveAvailable]);
+
+  // 用户定策（2026-11-05）：可用额度**不再实时联动**。只填总信用额度、不填可用额度时，
+  // 保存按「已用 = 0」处理（即可用 = 总额度）；展示「已用额度」也用这个口径。
+  const effectiveAvailable = availableTouchedRef.current ? liveAvailable : liveBalance;
+  const liveUsed = liveBalance - effectiveAvailable;
 
   // 键盘当前作用在哪个金额字段上
   const activeExpr = amountField === 'available' ? availableExpr : balanceExpr;
@@ -394,7 +382,8 @@ export default function AddAssetScreen({ route }: any) {
     // 可用额度 → 既有模型：creditLimit = 总信用额度，initialBalance = 可用 − 额度（负数 = 已用掉多少）。
     // 这样 utils/creditCard 的 可用额度 = creditLimit + balance 仍然成立，历史数据不用迁移。
     // 可用为负按 0 处理（金额字段的既有约定）；可用 > 额度**不拦**：换算照实给出（差额为负 = 已用为负）。
-    const available = Math.max(liveAvail, 0);
+    // 没填过「可用额度」→ 视为等于总额度（已用 0）；填过就按填的算
+    const available = Math.max(availableTouchedRef.current ? liveAvail : bal, 0);
     const creditInitial = isCredit ? Number((available - bal).toFixed(2)) : 0;
 
     if (isEdit && editAsset) {
