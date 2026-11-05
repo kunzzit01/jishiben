@@ -33,7 +33,7 @@ import PressableScale from '../components/PressableScale';
 
 import BackButton from '../components/ui/BackButton';
 import GoogleLogo from '../components/GoogleLogo';
-import NameEditModal from '../components/NameEditModal';
+import { useCustomAvatar, setCustomAvatar, clearCustomAvatar } from '../utils/avatarStore';
 
 import { AppText, GlassView, HeroGradient, withAlpha } from '../components/ui';
 
@@ -147,15 +147,15 @@ export default function AuthScreen({ navigation }: any) {
   // ---------------------------------------------------------
 
 
-  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  // 头像：统一由 avatarStore 提供（个人中心与设置页共用同一份，改一处两处同步）
+  const { uri: avatarUri, custom: avatarCustom } = useCustomAvatar();
   // 展示名优先级由后端解析好（自定义昵称 → Google 名称 → 邮箱前缀），这里只兜底邮箱前缀
   const displayTitle =
     (user?.displayName && user.displayName.trim()) || (user?.email ?? '').split('@')[0] || '';
   const [avatarFailed, setAvatarFailed] = useState(false);
-  // 用户是否自定义过头像（本地照片优先于 Google 头像）
-  const [avatarCustom, setAvatarCustom] = useState(false);
   const [nameEditOpen, setNameEditOpen] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   // 头像优先级：Google picture → 本地自选头像 → 默认图标（失败也回退）
   // 头像优先级：自己选过的照片 → Google picture → 本地/默认（加载失败也回退）
   const effectiveAvatarUri = avatarCustom
@@ -171,11 +171,10 @@ export default function AuthScreen({ navigation }: any) {
     let mounted = true;
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(AVATAR_STORAGE_KEY);
-        const custom = await AsyncStorage.getItem(AVATAR_CUSTOM_KEY);
-        if (mounted) setAvatarCustom(custom === '1');
+
+
         if (!mounted) return;
-        if (saved) setAvatarUri(saved);
+
         let firstUse = await AsyncStorage.getItem(FIRST_USE_STORAGE_KEY);
         if (!firstUse) {
           firstUse = new Date().toISOString().slice(0, 10);
@@ -212,26 +211,31 @@ export default function AuthScreen({ navigation }: any) {
       });
       if (result.canceled || !result.assets[0]?.base64) return;
       const uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
-      await AsyncStorage.setItem(AVATAR_STORAGE_KEY, uri);
-      // 用户自己选的照片：以后优先于 Google 头像
-      await AsyncStorage.setItem(AVATAR_CUSTOM_KEY, '1');
-      setAvatarCustom(true);
-      setAvatarUri(uri);
+      // 写入共享 store：两处界面同时更新，且优先于 Google 头像
+      await setCustomAvatar(uri);
     } catch (e) {
       dialog.alert({ title: tr('addTx.pickPhotoFailed'), message: tr('addTx.pickPhotoMsg') });
     }
   };
 
+  /** 保存昵称：写服务端（打上自定义标记），成功后收起输入框 */
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (!next) return;
+    setNameSaving(true);
+    const r = await updateDisplayName(next);
+    setNameSaving(false);
+    if (r.ok) setNameEditOpen(false);
+    else dialog.alert({ title: tr('auth.googleUnavailable'), message: r.detail });
+  };
+
   /** 清掉 App 内自选头像，回到 Google 账号照片 */
   const revertToGooglePhoto = async () => {
     try {
-      await AsyncStorage.removeItem(AVATAR_STORAGE_KEY);
-      await AsyncStorage.removeItem(AVATAR_CUSTOM_KEY);
+      await clearCustomAvatar();
     } catch {
       /* 忽略存储错误：内存状态照样恢复 */
     }
-    setAvatarUri(null);
-    setAvatarCustom(false);
     setAvatarFailed(false);
   };
 
@@ -365,7 +369,10 @@ export default function AuthScreen({ navigation }: any) {
           <PressableScale
             style={styles.nameRow}
             activeScale={0.97}
-            onPress={() => setNameEditOpen(true)}
+            onPress={() => {
+              setNameDraft(displayTitle);
+              setNameEditOpen(true);
+            }}
             accessibilityRole="button"
             accessibilityLabel={tr('auth.editNameTitle')}
             testID="profile-name-row"
@@ -378,6 +385,45 @@ export default function AuthScreen({ navigation }: any) {
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sub}>
             {user.email}
           </AppText>
+
+          {nameEditOpen ? (
+            <View style={styles.nameEditor}>
+              <TextInput
+                style={[styles.nameInput, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+                value={nameDraft}
+                onChangeText={setNameDraft}
+                placeholder={tr('auth.editNamePlaceholder')}
+                placeholderTextColor={semantic.textSecondary}
+                maxLength={40}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => void saveName()}
+                testID="name-edit-input"
+              />
+              <View style={styles.nameEditorRow}>
+                <PressableScale
+                  style={styles.nameEditorBtn}
+                  activeScale={0.95}
+                  onPress={() => setNameEditOpen(false)}
+                  accessibilityRole="button"
+                >
+                  <AppText variant="subhead" color={semantic.textSecondary}>{tr('common.cancel')}</AppText>
+                </PressableScale>
+                <PressableScale
+                  style={[styles.nameEditorBtn, styles.nameEditorSave, { backgroundColor: semantic.accent }]}
+                  activeScale={0.95}
+                  disabled={nameSaving}
+                  onPress={() => void saveName()}
+                  accessibilityRole="button"
+                  testID="name-edit-save"
+                >
+                  <AppText variant="subhead" weight="600" color={semantic.onAccent}>
+                    {nameSaving ? tr('auth.busy') : tr('common.save')}
+                  </AppText>
+                </PressableScale>
+              </View>
+            </View>
+          ) : null}
           {avatarCustom ? (
             <PressableScale
               style={styles.revertPhotoBtn}
@@ -582,20 +628,6 @@ export default function AuthScreen({ navigation }: any) {
 
           </ScrollView>
 
-        <NameEditModal
-          visible={nameEditOpen}
-          initial={displayTitle}
-          busy={nameSaving}
-          onCancel={() => setNameEditOpen(false)}
-          onSave={async (next) => {
-            setNameSaving(true);
-            const r = await updateDisplayName(next);
-            setNameSaving(false);
-            setNameEditOpen(false);
-            if (r.ok) dialog.alert({ title: tr('auth.editNameSaved') });
-            else dialog.alert({ title: tr('auth.googleUnavailable'), message: r.detail });
-          }}
-        />
         </KeyboardAvoidingView>
       )}
     </SafeAreaView>
@@ -634,7 +666,7 @@ const styles = StyleSheet.create({
   // 密码框右侧的眼睛（44 命中高度）
   authInputWithIcon: { paddingRight: 44 },
   eyeBtn: { position: 'absolute', right: 6, top: 0, bottom: 0, width: 40, alignItems: 'center', justifyContent: 'center' },
-  passwordHint: { marginTop: 6 },
+  passwordHint: { marginTop: 6 },
   container: { flex: 1 },
   flex: { flex: 1 },
 
@@ -658,6 +690,11 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 12,
   },
+  nameEditor: { width: '100%', maxWidth: 320, marginTop: 10, gap: 8 },
+  nameInput: { height: 46, borderRadius: 12, paddingHorizontal: 14, fontSize: 16 },
+  nameEditorRow: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  nameEditorBtn: { minWidth: 92, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  nameEditorSave: { paddingHorizontal: 16 },
   namePencil: { opacity: 0.55, marginTop: 3 },
   revertPhotoBtn: { flexDirection: 'row', alignItems: 'center', columnGap: 4, marginTop: 6, paddingVertical: 4 },
   avatarWrap: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center' },
