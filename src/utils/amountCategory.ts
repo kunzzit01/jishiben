@@ -174,10 +174,8 @@ export function rememberAmountCategory(
 
 /**
  * 查这个金额最可能属于哪个类别。
- * 返回 null 的情形（宁可让用户自己选，也不填错）：
- *   · 没记录过；
- *   · 存在多个候选且最高票只有 1 次（一次性的巧合不足为凭）；
- *   · 最高票与第二名打平。
+ * 返回 null 仅代表「这个金额没记录过」。有记录时总给出最可能的类别（票数 → 最近使用），
+ * 避免出现「输入了以前的金额却毫无反应」。
  */
 export function lookupCategoryForAmount(
   type: AmountCategoryType,
@@ -191,16 +189,10 @@ export function lookupCategoryForAmount(
   const candidates = scoped ?? snapshot[type]['Lall|Call']?.[ak];
   if (!candidates) return null;
 
+  // 排序：票数优先，其次最近使用时间。始终返回最可能的那一个 ——
+  // 用户反馈「输了金额没反应」比「偶尔带错」更不可接受，因此不做「歧义就不填」的静默。
   const ranked = Object.entries(candidates).sort((a, b) => b[1].n - a[1].n || b[1].at - a[1].at);
-  const [topId, top] = ranked[0];
-  const second = ranked[1];
-  // 唯一候选：直接带出（保留原有「输入过的金额会自动选类别」的体验）
-  if (!second) return top.n >= 1 ? topId : null;
-  // 有竞争：打平 → 歧义，不自动选
-  if (second[1].n === top.n) return null;
-  // 有竞争但最高票只有 1 次：证据不足，宁可不填也不填错
-  if (top.n < 2) return null;
-  return topId;
+  return ranked[0]?.[0] ?? null;
 }
 
 /** 统计用：当前金额有哪些候选（调试/后续可做「常选」提示） */
@@ -215,4 +207,59 @@ export function listCategoryHints(
   return Object.entries(candidates)
     .map(([categoryId, c]) => ({ categoryId, n: c.n }))
     .sort((a, b) => b.n - a.n);
+}
+
+/** 历史账目播种：把已有记录按出现次数折算成票数写进记忆。
+ * 幂等 —— 该 (作用域, 金额) 已有任何候选时跳过，所以每次启动调用也不会重复计数。
+ * 目的：老用户/换机用户不必把每个金额重新记一遍，就能享受「输入过的金额自动带类别」。
+ */
+export function seedAmountCategory(
+  entries: Array<{
+    type: AmountCategoryType;
+    amount: number;
+    categoryId?: string | null;
+    scope?: AmountScope;
+    at?: number;
+  }>
+): void {
+  if (entries.length === 0) return;
+  // 先按 (类型, 作用域, 金额, 类别) 聚合次数
+  const grouped = new Map<string, { type: AmountCategoryType; scope: AmountScope; amount: number; catId: string; n: number; at: number }>();
+  for (const e of entries) {
+    if (!e.categoryId) continue;
+    if (!Number.isFinite(e.amount) || e.amount <= 0) continue;
+    const key = `${e.type}|${scopeKey(e.scope)}|${amountKey(e.amount)}|${e.categoryId}`;
+    const prev = grouped.get(key);
+    if (prev) {
+      prev.n += 1;
+      prev.at = Math.max(prev.at, e.at ?? 0);
+    } else {
+      grouped.set(key, {
+        type: e.type,
+        scope: e.scope ?? {},
+        amount: e.amount,
+        catId: e.categoryId,
+        n: 1,
+        at: e.at ?? 0,
+      });
+    }
+  }
+
+  let changed = false;
+  const next: StoreShape = { expense: { ...snapshot.expense }, income: { ...snapshot.income } };
+  for (const item of grouped.values()) {
+    const sk = scopeKey(item.scope);
+    const ak = amountKey(item.amount);
+    const bucket = { ...(next[item.type][sk] ?? {}) };
+    // 已有记录（用户后来的真实使用）优先，播种不覆盖
+    if (bucket[ak] && Object.keys(bucket[ak]).length > 0) continue;
+    bucket[ak] = { [item.catId]: { n: item.n, at: item.at } };
+    next[item.type] = { ...next[item.type], [sk]: prune(bucket) };
+    changed = true;
+  }
+
+  if (!changed) return;
+  snapshot = next;
+  hydrated = true;
+  persist();
 }

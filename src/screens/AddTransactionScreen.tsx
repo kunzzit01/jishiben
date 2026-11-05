@@ -51,7 +51,12 @@ import { formatMoney } from '../utils/formatMoney';
 import { formatRateEquation } from '../utils/formatRate';
 import { formatDate as formatDateLabel } from '../utils/formatDate';
 import { getRecentAssetsSnapshot, rememberRecentAsset, useRecentAssets } from '../utils/recentAssets';
-import { hydrateAmountCategory, lookupCategoryForAmount, rememberAmountCategory } from '../utils/amountCategory';
+import {
+  hydrateAmountCategory,
+  lookupCategoryForAmount,
+  rememberAmountCategory,
+  seedAmountCategory,
+} from '../utils/amountCategory';
 import { AmountCalculatorKeypad, keypadPanelHeight } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
 import { ReceiptCameraModal } from '../components/ReceiptCameraModal';
@@ -354,7 +359,7 @@ const CATEGORY_ORDER_KEY = '@jizhang/categoryOrder';
 const RECENT_CATEGORY_HISTORY_LIMIT = Infinity;
 
 export default function AddTransactionScreen({ navigation, route }: any) {
-  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan } =
+  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan, transactions: allTransactions } =
     useApp();
   const insets = useSafeAreaInsets();
   const { colors, isDark, semantic, spacing, layout, radius, elevation } = useTheme();
@@ -742,9 +747,19 @@ function fxAmountText(raw: string, live: string | null): string {
     // 仅挂载/类型确定时恢复一次：依赖空数组会拿不到 route 参数，这里跟着 uiType/isEditing 走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiType, isEditing]);
-  // 记一笔页挂载时把「金额 → 类别」记忆读一次（之后都是同步快照查询）
+  // 记一笔页挂载时把「金额 → 类别」记忆读一次；读盘完成前不能参与联想，
+  // 否则慢设备上「用户先输金额、记忆后到」就会表现为「没反应」。
+  const [amountMemoryReady, setAmountMemoryReady] = useState(false);
+  const seededRef = useRef(false);
   useEffect(() => {
-    void hydrateAmountCategory();
+    let alive = true;
+    void hydrateAmountCategory().then(() => {
+      if (!alive) return;
+      setAmountMemoryReady(true);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
 
@@ -862,9 +877,38 @@ function fxAmountText(raw: string, live: string | null): string {
       : parseFloat(amountExpr.displayValue)
     : parseFloat(amount);
 
+  // 用本地历史账目播种「金额 → 类别」记忆：老用户/换机用户不用重记一遍才生效（幂等，只跑一次）
+  useEffect(() => {
+    if (!amountMemoryReady || seededRef.current) return;
+    const history = (allTransactions ?? []) as Array<{
+      type: string;
+      amount: number;
+      categoryId?: string;
+      ledgerId?: string;
+      assetId?: string;
+      createdAt?: number;
+    }>;
+    if (history.length === 0) return; // 历史还没加载出来，等下次依赖变化
+    seededRef.current = true;
+    const assetCurrency = (id?: string) => assets.find((a) => a.id === id)?.currency ?? null;
+    seedAmountCategory(
+      history
+        .filter((tx) => tx.type === 'expense' || tx.type === 'income')
+        .slice(0, 500)
+        .map((tx) => ({
+          type: tx.type as 'expense' | 'income',
+          amount: tx.amount,
+          categoryId: tx.categoryId,
+          scope: { ledgerId: tx.ledgerId, currency: assetCurrency(tx.assetId) },
+          at: tx.createdAt,
+        }))
+    );
+  }, [amountMemoryReady, allTransactions, assets]);
+
   // 金额变化时按「输入过的金额」带出类别：手选过 / 编辑态 / 转账兑换 一律不参与
   useEffect(() => {
     if (isEditing) return;
+    if (!amountMemoryReady) return; // 记忆还没读出来：等它好了会因依赖变化重新跑
     if (userPickedCategoryRef.current) return;
     if (uiType !== 'expense' && uiType !== 'income') return;
     if (!liveAmountValue || liveAmountValue <= 0) return;
@@ -873,7 +917,7 @@ function fxAmountText(raw: string, live: string | null): string {
     // 类别可能已被删除：只认当前类型下仍然存在的
     if (!categories.some((c) => c.id === remembered && c.type === uiType)) return;
     setCategoryId(remembered);
-  }, [liveAmountValue, uiType, isEditing, categoryId, categories]);
+  }, [liveAmountValue, uiType, isEditing, categoryId, categories, amountMemoryReady]);
 
   // 金额字号档位（V2 稿基准 64；矮屏按 T15 惯例再收一档 44，给类别网格腾「至少 2 行」）
   const heroAmountFontSize = amountFontTier(heroAmountDisplay, isShort ? 44 : 64);
