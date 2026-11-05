@@ -917,6 +917,7 @@ export const en = {
     subtitleSignIn: 'Keep tracking your every day',
     subtitleSignUp: 'Create an account so every entry is traceable',
     orUseEmail: 'or use email',
+    orOtherWays: 'or use another way',
     createAccount: 'Create account',
     passwordPlaceholderSignUp: 'Set a password (8+ characters)',
     passwordHintShort: 'At least 8 characters',

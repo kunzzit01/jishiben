@@ -930,6 +930,7 @@ export const zh = {
     subtitleSignIn: '继续记录你的每一天',
     subtitleSignUp: '创建账号，让每一笔都有迹可循',
     orUseEmail: '或使用邮箱',
+    orOtherWays: '或使用其他方式',
     createAccount: '创建账号',
     passwordPlaceholderSignUp: '设置至少 8 位密码',
     passwordHintShort: '密码至少 8 位',

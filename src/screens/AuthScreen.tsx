@@ -541,31 +541,8 @@ export default function AuthScreen({ navigation }: any) {
                 </AppText>
               </View>
             </View>
-            {/* 表单卡：Google 按钮 → 或使用邮箱 → 邮箱/密码 → 主按钮 → 切换模式 */}
+            {/* 表单卡（方案 B）：邮箱/密码 → 主按钮 → 或使用其他方式 → Google 按钮 → 切换模式 */}
             <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.authCard}>
-              {GOOGLE_ENABLED ? (
-                <>
-                  <PressableScale
-                    style={styles.googleBtn}
-                    activeScale={0.98}
-                    disabled={busy}
-                    onPress={() => void handleGoogle()}
-                    accessibilityRole="button"
-                    accessibilityLabel={tr('auth.googleContinue')}
-                    testID="auth-google"
-                  >
-                    <GoogleLogo size={18} />
-                    <AppText variant="subhead" weight="600" color={GOOGLE_BTN_TEXT}>
-                      {tr('auth.googleContinue')}
-                    </AppText>
-                  </PressableScale>
-                  <View style={styles.orRow}>
-                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
-                    <AppText variant="caption" color={semantic.textSecondary}>{tr('auth.orUseEmail')}</AppText>
-                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
-                  </View>
-                </>
-              ) : null}
 
               <View>
                 <AppText variant="caption" color={semantic.textSecondary} style={styles.fieldLabel}>
@@ -609,9 +586,6 @@ export default function AuthScreen({ navigation }: any) {
                     <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={18} color={semantic.textSecondary} />
                   </PressableScale>
                 </View>
-                <AppText variant="caption" color={semantic.textSecondary} style={styles.passwordHint}>
-                  {tr('auth.passwordHintShort')}
-                </AppText>
               </View>
 
               <PressableScale
@@ -634,6 +608,31 @@ export default function AuthScreen({ navigation }: any) {
                   </AppText>
                 </LinearGradient>
               </PressableScale>
+
+              {GOOGLE_ENABLED ? (
+                <>
+                  {/* 方案 B：主按钮之后才是「或使用其他方式」+ Google 按钮 */}
+                  <View style={styles.orRow}>
+                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                    <AppText variant="caption" color={semantic.textSecondary}>{tr('auth.orOtherWays')}</AppText>
+                    <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                  </View>
+                  <PressableScale
+                    style={styles.googleBtn}
+                    activeScale={0.98}
+                    disabled={busy}
+                    onPress={() => void handleGoogle()}
+                    accessibilityRole="button"
+                    accessibilityLabel={tr('auth.googleContinue')}
+                    testID="auth-google"
+                  >
+                    <GoogleLogo size={18} />
+                    <AppText variant="subhead" weight="600" color={GOOGLE_BTN_TEXT}>
+                      {tr('auth.googleContinue')}
+                    </AppText>
+                  </PressableScale>
+                </>
+              ) : null}
 
               <PressableScale
                 style={styles.switchModeBtn}
