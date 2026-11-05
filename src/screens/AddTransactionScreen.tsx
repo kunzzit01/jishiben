@@ -55,7 +55,6 @@ import {
   getAmountCategoryVersion,
   hydrateAmountCategory,
   lookupCategoryForAmount,
-  listCategoryHints,
   rebuildAmountCategory,
   rememberAmountCategory,
   subscribeAmountCategory,
@@ -935,26 +934,6 @@ function fxAmountText(raw: string, live: string | null): string {
     if (!categories.some((c) => c.id === remembered && c.type === uiType)) return;
     setCategoryId(remembered);
   }, [liveAmountValue, uiType, isEditing, categoryId, categories, amountMemoryReady, amountMemoryVersion]);
-
-  // ⚠ 临时调试（排查「不自动带类别」，定稿后删除）
-  const memoryDebugLine = (() => {
-    const amt = liveAmountValue;
-    const hints = Number.isFinite(amt) && amt > 0
-      ? listCategoryHints(uiType === 'income' ? 'income' : 'expense', amt, amountScope)
-      : [];
-    return [
-      `ready=${amountMemoryReady ? 1 : 0}`,
-      `v=${amountMemoryVersion}`,
-      `load=${dataLoading ? 1 : 0}`,
-      `amt=${Number.isFinite(amt) ? amt : '-'}`,
-      `scope=${amountScope.ledgerId ?? 'all'}/${amountScope.currency ?? 'all'}`,
-      `hints=${hints.length}${hints[0] ? ':' + hints[0].categoryId : ''}`,
-      `picked=${userPickedCategoryRef.current ? 1 : 0}`,
-      `edit=${isEditing ? 1 : 0}`,
-      `cats=${categories.length}`,
-      `cur=${categoryId ?? '-'}`,
-    ].join(' ');
-  })();
 
   // 金额字号档位（V2 稿基准 64；矮屏按 T15 惯例再收一档 44，给类别网格腾「至少 2 行」）
   const heroAmountFontSize = amountFontTier(heroAmountDisplay, isShort ? 44 : 64);
@@ -2005,10 +1984,6 @@ function fxAmountText(raw: string, live: string | null): string {
                 </View>
               ) : null}
             </PressableScale>
-            {/* ⚠ 临时调试行：定位「不自动带类别」，排查完删除 */}
-            <AppText variant="caption" numberOfLines={3} style={{ fontSize: 9, opacity: 0.7, color: '#8a8a8a' }}>
-              {memoryDebugLine}
-            </AppText>
           </View>
 
           {/* 接缝：间距 24、按钮 44（上下各压 10）；凹口靠卡片 SVG 轮廓 evenodd 挖出，这里不放任何圆盘 */}
@@ -2204,10 +2179,6 @@ function fxAmountText(raw: string, live: string | null): string {
                     onCursorChange={setAmountCursor}
                   />
                 </PressableScale>
-            {/* ⚠ 临时调试行：定位「不自动带类别」，排查完删除 */}
-            <AppText variant="caption" numberOfLines={3} style={{ fontSize: 9, opacity: 0.75, color: '#c0392b' }}>
-              {memoryDebugLine}
-            </AppText>
                 <PressableScale
                   style={styles.fxClearBtn}
                   activeScale={0.9}
@@ -2554,10 +2525,6 @@ function fxAmountText(raw: string, live: string | null): string {
                 onCursorChange={setAmountCursor}
               />
             </PressableScale>
-            {/* ⚠ 临时调试行：定位「不自动带类别」，排查完删除 */}
-            <AppText variant="caption" numberOfLines={3} style={{ fontSize: 9, opacity: 0.75, color: '#c0392b' }}>
-              {memoryDebugLine}
-            </AppText>
           </View>
         </View>
 
