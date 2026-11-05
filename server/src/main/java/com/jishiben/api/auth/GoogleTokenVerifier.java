@@ -27,7 +27,7 @@ public class GoogleTokenVerifier {
     private static final Logger log = LoggerFactory.getLogger(GoogleTokenVerifier.class);
 
     /** 校验通过的身份：只保留服务端需要的字段。 */
-    public record GoogleIdentity(String sub, String email, boolean emailVerified, String name) {
+    public record GoogleIdentity(String sub, String email, boolean emailVerified, String name, String picture) {
     }
 
     private final GoogleIdTokenVerifier verifier;
@@ -75,6 +75,8 @@ public class GoogleTokenVerifier {
                     "Google ID token has no subject");
         }
         String name = (String) payload.get("name");
-        return new GoogleIdentity(sub, email == null ? "" : email.trim(), emailVerified, name);
+        // 头像 URL：仅用于展示，Google 可能不返回（缺失时前端回退默认头像）
+        String picture = (String) payload.get("picture");
+        return new GoogleIdentity(sub, email == null ? "" : email.trim(), emailVerified, name, picture);
     }
 }

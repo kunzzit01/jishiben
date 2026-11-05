@@ -45,7 +45,7 @@ class AuthServiceGoogleTest {
     }
 
     private GoogleTokenVerifier.GoogleIdentity identity(String sub, String email) {
-        return new GoogleTokenVerifier.GoogleIdentity(sub, email, true, "Tester");
+        return new GoogleTokenVerifier.GoogleIdentity(sub, email, true, "顺 铭", "https://example.test/a.png");
     }
 
     @Test
@@ -103,7 +103,7 @@ class AuthServiceGoogleTest {
     @Test
     void unverifiedEmailIsRejected() {
         when(verifier.verify("t"))
-                .thenReturn(new GoogleTokenVerifier.GoogleIdentity("sub-3", "x@x.com", false, null));
+                .thenReturn(new GoogleTokenVerifier.GoogleIdentity("sub-3", "x@x.com", false, null, null));
 
         assertThatThrownBy(() -> service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t")))
                 .isInstanceOf(ApiException.class);

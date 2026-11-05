@@ -34,6 +34,18 @@ public class User {
     private String displayName;
 
     @Column(name = "user_role", nullable = false, length = 20)
+    /** Google 返回的完整姓名（展示用；不用它判断账号身份） */
+    @Column(name = "google_name", length = 120)
+    private String googleName;
+
+    /** Google 头像 URL；缺失时前端用默认头像 */
+    @Column(name = "avatar_url", length = 512)
+    private String avatarUrl;
+
+    /** 用户是否在 App 内自己改过昵称（改过就不再被 Google 名称覆盖） */
+    @Column(name = "display_name_custom", nullable = false)
+    private boolean displayNameCustom = false;
+
     private String userRole = "USER";
 
     @Column(name = "email_verified_at", columnDefinition = "datetime")
@@ -144,5 +156,29 @@ public class User {
 
     public void setGoogleSub(String googleSub) {
         this.googleSub = googleSub;
+    }
+
+    public String getGoogleName() {
+        return googleName;
+    }
+
+    public void setGoogleName(String googleName) {
+        this.googleName = googleName;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public void setAvatarUrl(String avatarUrl) {
+        this.avatarUrl = avatarUrl;
+    }
+
+    public boolean isDisplayNameCustom() {
+        return displayNameCustom;
+    }
+
+    public void setDisplayNameCustom(boolean displayNameCustom) {
+        this.displayNameCustom = displayNameCustom;
     }
 }

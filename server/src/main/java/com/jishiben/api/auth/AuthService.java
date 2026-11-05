@@ -121,6 +121,7 @@ public class AuthService {
                         "This Google account is already registered; sign in instead");
             }
             bound.setLastLoginAt(Instant.now());
+            applyGoogleProfile(bound, identity);
             return tokens(users.save(bound));
         }
 
@@ -143,6 +144,7 @@ public class AuthService {
             if (byEmail.getEmailVerifiedAt() == null) {
                 byEmail.setEmailVerifiedAt(Instant.now());
             }
+            applyGoogleProfile(byEmail, identity);
             return tokens(users.save(byEmail));
         }
 
@@ -150,7 +152,12 @@ public class AuthService {
         User user = new User();
         user.setEmail(normaliseEmail(identity.email()));
         user.setPasswordHash(null);
-        user.setDisplayName(Texts.trimToNull(identity.name()));
+        // 新账号：displayName 先用 Google 完整姓名（保留中文/空格/顺序），缺失退化为邮箱 @ 前段
+        user.setGoogleName(Texts.trimToNull(identity.name()));
+        user.setAvatarUrl(Texts.trimToNull(identity.picture()));
+        user.setDisplayName(Texts.trimToNull(identity.name()) != null
+                ? Texts.trimToNull(identity.name())
+                : emailLocalPart(identity.email()));
         user.setUserRole("USER");
         user.setGoogleSub(identity.sub());
         user.setEmailVerifiedAt(Instant.now());
@@ -205,6 +212,8 @@ public class AuthService {
         User user = requireUser(ownerId);
         if (request.displayName() != null) {
             user.setDisplayName(Texts.trimToNull(request.displayName()));
+            // 用户明确改过昵称：以后 Google 登录不再覆盖它
+            user.setDisplayNameCustom(true);
             user = users.save(user);
         }
         return toResponse(user);
@@ -247,9 +256,9 @@ public class AuthService {
     }
 
     private AuthDtos.UserResponse toResponse(User user) {
-        return new AuthDtos.UserResponse(user.getId(), user.getEmail(), user.getDisplayName(),
+        return new AuthDtos.UserResponse(user.getId(), user.getEmail(), resolveDisplayName(user),
                 user.getUserRole(), user.getEmailVerifiedAt() != null, user.getCreatedAt(),
-                user.getGoogleSub() != null);
+                user.getGoogleSub() != null, user.getAvatarUrl());
     }
 
     private static String normaliseEmail(String email) {
