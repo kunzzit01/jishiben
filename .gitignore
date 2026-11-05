@@ -69,3 +69,7 @@ import*.sql
 # 账号导入产物（含 bcrypt 哈希）不进仓库
 users*.sql
 auth-users.*
+
+# FCM 客户端配置（本地放置，不进公开仓库）
+google-services.json
+android/app/google-services.json

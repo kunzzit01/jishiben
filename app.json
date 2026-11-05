@@ -43,13 +43,14 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-      "android.permission.SCHEDULE_EXACT_ALARM",
-      "android.permission.USE_EXACT_ALARM",
-      "android.permission.POST_NOTIFICATIONS"
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "package": "com.kylim0103.jizhangapp",
       "versionCode": 3,
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
