@@ -304,25 +304,33 @@ export default function AuthScreen({ navigation }: any) {
           contentContainerStyle={[styles.profileWrap, { paddingHorizontal: pagePadding }]}
           showsVerticalScrollIndicator={false}
         >
-          {/* 头像：点击换自己的照片 */}
+          {/* 头像：点击换自己的照片。相机徽章画在圆**外面**（父容器不裁剪），
+              再用与页面同色的描边做出「挖孔」效果，避免被圆形裁成半月形 */}
           <PressableScale
-            style={[styles.avatar, { backgroundColor: semantic.accentSoft }]}
+            style={styles.avatarWrap}
             activeScale={0.95}
             onPress={pickAvatar}
             accessibilityRole="button"
             accessibilityLabel={tr('addTx.pcPhotoTitle')}
           >
-            {effectiveAvatarUri ? (
-              <Image
-                source={{ uri: effectiveAvatarUri }}
-                style={styles.avatarImage}
-                onError={() => setAvatarFailed(true)}
-              />
-            ) : (
-              <Ionicons name="person-outline" size={42} color={semantic.textPrimary} />
-            )}
-            <View style={[styles.avatarEditBadge, { backgroundColor: semantic.accent }]}>
-              <Ionicons name="camera-outline" size={13} color={semantic.onAccent} />
+            <View style={[styles.avatar, { backgroundColor: semantic.accentSoft }]}>
+              {effectiveAvatarUri ? (
+                <Image
+                  source={{ uri: effectiveAvatarUri }}
+                  style={styles.avatarImage}
+                  onError={() => setAvatarFailed(true)}
+                />
+              ) : (
+                <Ionicons name="person-outline" size={42} color={semantic.textPrimary} />
+              )}
+            </View>
+            <View
+              style={[
+                styles.avatarEditBadge,
+                { backgroundColor: semantic.accent, borderColor: semantic.bg },
+              ]}
+            >
+              <Ionicons name="camera" size={15} color={semantic.onAccent} />
             </View>
           </PressableScale>
           <AppText variant="title3" numberOfLines={1} style={styles.name}>
@@ -571,6 +579,8 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
+  // 外层容器：只负责定位，不裁剪（否则徽章会被圆的 overflow:hidden 切掉）
+  avatarWrap: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center' },
   avatar: {
     width: 88,
     height: 88,
