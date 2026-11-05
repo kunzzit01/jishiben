@@ -77,9 +77,9 @@ class AuthServiceGoogleTest {
         User me = mock(User.class);
         when(me.getId()).thenReturn(41L);
         when(me.getEmail()).thenReturn("me@x.com");
-        when(me.getPasswordHash()).thenReturn("hashed");
+        // encoder 是真实的 BCrypt：给一个「正确密码」的哈希，再用错误密码去删，必然匹配失败
+        when(me.getPasswordHash()).thenReturn(new BCryptPasswordEncoder().encode("correct-pass"));
         when(users.findById(41L)).thenReturn(Optional.of(me));
-        when(encoder.matches("wrong", "hashed")).thenReturn(false);
 
         assertThatThrownBy(() -> service.deleteAccount(41L, new AuthDtos.DeleteAccountRequest("wrong", null)))
                 .isInstanceOf(ApiException.class);
