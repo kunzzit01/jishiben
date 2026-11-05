@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   View,
   StyleSheet,
   TextInput,
@@ -111,6 +112,9 @@ function syncErrorText(code: string | undefined, tr: (k: string) => string): str
 export default function AuthScreen({ navigation }: any) {
   const { semantic, gradients, isDark } = useTheme();
   const { pagePadding } = useLayout();
+  // 矮屏档：按窗口高度给插画降高（普通 124 / 矮屏 96，均在要求的区间内）
+  const windowHeight = Dimensions.get('window').height;
+  const isShort = windowHeight < 700;
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const { signIn, signUp, signInWithGoogle, updateDisplayName, signOut, sessionExpired, user, syncStatus, lastSyncAt, syncNow } = useAuth();
@@ -508,10 +512,13 @@ export default function AuthScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* 品牌方块 */}
-            <View style={[styles.brandChip, { backgroundColor: semantic.accentSoft }]}>
-              <Ionicons name="wallet-outline" size={30} color={semantic.textPrimary} />
-            </View>
+            {/* 顶部插画：透明底 WebP，contain 不拉伸，主体偏右（左侧留呼吸空间） */}
+            <Image
+              source={require('../../assets/auth_header.webp')}
+              style={[styles.authHero, { height: isShort ? 96 : 124 }]}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
             <AppText variant="title1" weight="600" style={styles.welcome}>
               {mode === 'signin' ? tr('auth.welcomeBack') : tr('auth.signUpTitle')}
             </AppText>
@@ -571,7 +578,7 @@ export default function AuthScreen({ navigation }: any) {
                     style={[styles.authInput, styles.authInputWithIcon, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
                     value={password}
                     onChangeText={setPassword}
-                    placeholder={mode === 'signin' ? tr('auth.passwordPlaceholder') : tr('auth.passwordPlaceholderSignUp')}
+                    placeholder={tr('auth.passwordPlaceholderSignUp')}
                     placeholderTextColor={semantic.textSecondary}
                     secureTextEntry={!passwordVisible}
                     autoCapitalize="none"
@@ -747,14 +754,8 @@ const styles = StyleSheet.create({
   },
 
   // ============ 未登录:登录/注册表单 ============
-  brandChip: {
-    width: 64,
-    height: 64,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 34,
-  },
+    // 顶部插画：透明 WebP，宽度撑满内容区，高度由 JSX 按矮屏分级；无背景/边框/圆角
+  authHero: { width: '100%', marginTop: 16, alignSelf: 'stretch' },
   welcome: { marginTop: 18 },
   subtitle: { marginTop: 6 },
   modeSwitchWrap: { marginTop: 22 },
