@@ -12,7 +12,7 @@ import {
 import { INACTIVITY_LIMIT_MS } from '../config/apiConfig';
 import { fullSync, getSyncState, subscribeSyncState, SyncStatus } from '../services/syncService';
 import { cancelRemindersForUser } from '../hooks/useReminders';
-import { getGoogleIdToken } from '../services/googleAuth';
+import { getGoogleIdToken, signOutGoogle } from '../services/googleAuth';
 
 // 距上次"上线"（打开 App）超过该时长 → 会话作废，要求重新登录
 const LAST_ACTIVE_KEY = '@jizhang/lastActiveAt';
@@ -186,6 +186,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
   const signOut: AuthContextValue['signOut'] = async () => {
+    // 退出登录同时清掉 Google SDK 的会话，避免下次点登录直接复用上一个 Google 账号
+    void signOutGoogle();
     // 只退出登录，本机数据保留（离线照常用）；下次登录同账号会自动合并。
     // 后端没有"吊销本会话"的端点（只有 logout-all 会踢掉所有设备），所以这里只清本地令牌，
     // 与旧版语义一致；需要踢掉全部设备时用 authApi.logoutAll()。

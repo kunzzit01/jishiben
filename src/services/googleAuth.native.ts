@@ -24,6 +24,7 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
   if (!webClientId) return { kind: 'error', reason: 'missing-web-client-id' };
   try {
     configure();
+    await GoogleSignin.signOut().catch(() => undefined);
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const result = await GoogleSignin.signIn();
     // v13+ 返回 { type: 'success'|'cancelled', data }；老版本直接返回 user 字段
@@ -44,3 +45,11 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
 }
 
 export const GOOGLE_SIGN_IN_SUPPORTED = true;
+
+export async function signOutGoogle(): Promise<void> {
+  try {
+    await GoogleSignin.signOut();
+  } catch {
+    /* ignore */
+  }
+}

@@ -24,6 +24,8 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
   if (!webClientId) return { kind: 'error', reason: 'missing-web-client-id' };
   try {
     configure();
+    // 先清掉 SDK 缓存的账号，保证每次都会弹出账号选择器（可以换账号 / 用其他账号）
+    await GoogleSignin.signOut().catch(() => undefined);
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const result = await GoogleSignin.signIn();
     // v13+ 返回 { type: 'success'|'cancelled', data }；老版本直接返回 user 字段
@@ -46,3 +48,12 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
 }
 
 export const GOOGLE_SIGN_IN_SUPPORTED = true;
+
+/** 退出登录时也要清掉 Google SDK 的会话，否则下次点登录可能直接复用上一个账号 */
+export async function signOutGoogle(): Promise<void> {
+  try {
+    await GoogleSignin.signOut();
+  } catch {
+    /* 没登录过就忽略 */
+  }
+}

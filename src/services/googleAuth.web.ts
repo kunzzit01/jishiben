@@ -10,3 +10,8 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
 }
 
 export const GOOGLE_SIGN_IN_SUPPORTED = false;
+
+/** Web 第一版没有 Google 会话需要清理 */
+export async function signOutGoogle(): Promise<void> {
+  /* no-op */
+}
