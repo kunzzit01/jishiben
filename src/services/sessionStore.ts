@@ -21,6 +21,8 @@ export interface SessionUser {
   googleLinked?: boolean;
   /** Google 头像 URL（缺失或加载失败时用默认头像） */
   avatarUrl?: string | null;
+  /** 是否设置过密码（决定删除账号时要密码还是邮箱确认） */
+  hasPassword?: boolean;
 }
 
 export interface TokenPair {

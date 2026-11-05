@@ -37,6 +37,8 @@ interface AuthContextValue {
   signUp: (email: string, password: string) => Promise<AuthActionResult>;
   /** Google 登录（Android 原生）：成功后写入本系统会话，失败返回稳定错误码 */
   signInWithGoogle: (intent?: 'login' | 'signup') => Promise<AuthActionResult>;
+  /** 删除账号：成功后清本地会话 */
+  deleteAccount: (payload: { password?: string; confirmEmail?: string }) => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
   /** 修改昵称：服务端会打上「用户自定义」标记，之后 Google 登录不再覆盖 */
   updateDisplayName: (name: string) => Promise<AuthActionResult>;
@@ -198,6 +200,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
     }
   };
+  const deleteAccount: AuthContextValue['deleteAccount'] = async (payload) => {
+    try {
+      await authApi.deleteAccount(payload);
+      await clearSession();
+      setSessionExpired(false);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
   const signOut: AuthContextValue['signOut'] = async () => {
     // 退出登录同时清掉 Google SDK 的会话，避免下次点登录直接复用上一个 Google 账号
     void signOutGoogle();
@@ -228,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithGoogle,
     updateDisplayName,
         signOut,
+    deleteAccount,
         syncStatus: syncState.status,
         lastSyncAt: syncState.lastSyncAt,
         syncNow,

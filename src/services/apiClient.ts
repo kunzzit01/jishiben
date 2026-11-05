@@ -632,6 +632,10 @@ export const authApi = {
       body: { idToken, password },
     }).then(adoptTokens),
 
+  /** 删除账号：立即硬删除，不可恢复。有密码的传 password，Google-only 传 confirmEmail */
+  deleteAccount: (payload: { password?: string; confirmEmail?: string }) =>
+    authorizedRequest<void>('DELETE', '/api/auth/me', { body: payload }),
+
   me: () => authorizedRequest<SessionUser>('GET', '/api/auth/me'),
 
   updateMe: (displayName: string) =>

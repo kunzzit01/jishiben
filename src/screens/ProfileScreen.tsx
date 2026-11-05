@@ -15,7 +15,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Constants from 'expo-constants';
-import { Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, TouchableOpacity, View, TextInput } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -52,6 +52,7 @@ import {
   StatusBarGlass,
   Switch,
 } from '../components/ui';
+import PressableScale from '../components/PressableScale';
 import AccountAvatar from '../components/AccountAvatar';
 
 /**
@@ -73,7 +74,11 @@ export default function ProfileScreen({ navigation }: any) {
   const tr = useT();
   const styles = useMemo(() => makeStyles(semantic, spacing, layout), [semantic, spacing, layout]);
   // ── 账号与同步 ──
-  const { user, authInitializing, syncStatus, lastSyncAt } = useAuth();
+  const { user, authInitializing, syncStatus, lastSyncAt, deleteAccount } = useAuth();
+  // 删除账号：内联确认区（输入密码 / 邮箱）
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteSecret, setDeleteSecret] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
   // ── 数据分组：清空所有数据。数量文案与清空动作都走 AppContext（不在这里自己拼 state）──
   const { ledgers, assets, transactions, budgets, paymentPlans, clearAllData } = useApp();
 
@@ -272,7 +277,7 @@ export default function ProfileScreen({ navigation }: any) {
         </Card>
 
         {/* P2 安全分组（登录后可见）：生物识别锁改 Switch；二级密码保留「当前值 + chevron」 */}
-        {!authInitializing && user && (
+        {!authInitializing && user && (<>
           <ListSection title={tr('profile.security')} style={styles.section} testID="profile-security">
             <SwitchRow
               icon="finger-print-outline"
@@ -292,8 +297,78 @@ export default function ProfileScreen({ navigation }: any) {
               onPress={handlePinRowPress}
               testID="profile-pin-row"
             />
+                      {/* 删除账号：danger 行；展开后需要输入密码（有密码）或邮箱（Google-only） */}
+            <ListRow
+              leading={<RowIcon icon="trash-outline" tone="accent" />}
+              title={tr('profile.deleteAccount')}
+              subtitle={tr('profile.deleteAccountHint')}
+              chevron
+              onPress={() => setDeleteConfirmOpen((v) => !v)}
+              testID="profile-delete-row"
+            />
           </ListSection>
-        )}
+        </>)}
+        {deleteConfirmOpen && user ? (
+          <View style={[styles.deleteBox, { borderColor: semantic.danger }]} testID="delete-account-confirm">
+            <AppText variant="subhead" weight="600" color={semantic.danger}>
+              {tr('profile.deleteAccountWarn')}
+            </AppText>
+            <AppText variant="caption" color={semantic.textSecondary}>
+              {user.hasPassword ? tr('profile.deleteAskPassword') : tr('profile.deleteAskEmail')}
+            </AppText>
+            <TextInput
+              style={[styles.deleteInput, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+              value={deleteSecret}
+              onChangeText={setDeleteSecret}
+              placeholder={user.hasPassword ? tr('profile.deleteAskPassword') : user.email}
+              placeholderTextColor={semantic.textSecondary}
+              secureTextEntry={!!user.hasPassword}
+              autoCapitalize="none"
+              testID="delete-account-input"
+            />
+            <View style={styles.deleteRow}>
+              <PressableScale
+                style={styles.deleteCancel}
+                activeScale={0.95}
+                onPress={() => {
+                  setDeleteConfirmOpen(false);
+                  setDeleteSecret('');
+                }}
+                accessibilityRole="button"
+              >
+                <AppText variant="subhead" color={semantic.textSecondary}>{tr('common.cancel')}</AppText>
+              </PressableScale>
+              <PressableScale
+                style={[styles.deleteConfirm, { backgroundColor: semantic.danger }]}
+                activeScale={0.95}
+                disabled={deleteBusy || deleteSecret.trim().length === 0}
+                onPress={() => {
+                  void (async () => {
+                    setDeleteBusy(true);
+                    const payload = user.hasPassword
+                      ? { password: deleteSecret }
+                      : { confirmEmail: deleteSecret.trim() };
+                    const r = await deleteAccount(payload);
+                    setDeleteBusy(false);
+                    if (r.ok) {
+                      setDeleteConfirmOpen(false);
+                      setDeleteSecret('');
+                      dialog.alert({ title: tr('profile.deleteDone') });
+                    } else {
+                      dialog.alert({ title: tr('profile.deleteFailed'), message: r.detail });
+                    }
+                  })();
+                }}
+                accessibilityRole="button"
+                testID="delete-account-confirm-btn"
+              >
+                <AppText variant="subhead" weight="600" color={semantic.onAccent}>
+                  {deleteBusy ? tr('auth.busy') : tr('profile.deleteConfirm')}
+                </AppText>
+              </PressableScale>
+            </View>
+          </View>
+        ) : null}
 
         {/* 外观分组：只放深色模式（语言不属于外观，见下「通用」分组） */}
         <ListSection title={tr('profile.appearance')} style={styles.section} testID="profile-appearance">
@@ -929,5 +1004,11 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout) 
 
     // 页脚版本号：caption 档、居中
     footer: { marginTop: spacing.xxl },
+  // 删除账号确认区
+  deleteBox: { marginTop: 10, borderWidth: 1, borderRadius: 16, padding: 14, gap: 8 },
+  deleteInput: { height: 46, borderRadius: 12, paddingHorizontal: 14, fontSize: 16 },
+  deleteRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+  deleteCancel: { minWidth: 84, height: 42, alignItems: 'center', justifyContent: 'center' },
+  deleteConfirm: { paddingHorizontal: 16, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   });
 }
