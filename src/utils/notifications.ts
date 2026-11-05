@@ -46,15 +46,18 @@ export function getLastPushError(): string {
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (isExpoGo) {
     console.warn('当前是Expo Go环境，推送token功能不可用，需要development build才能测试');
+    lastPushError = "expo-go：Expo Go 拿不到 token，需要正式包";
     return null;
   }
   if (!NotificationsModule) {
     console.warn('通知模块未加载');
+    lastPushError = "通知模块未加载";
     return null;
   }
 
   if (!Device.isDevice) {
     console.warn('推送通知必须在真机上测试');
+    lastPushError = "模拟器：推送 token 只能在真机拿";
     return null;
   }
 
@@ -68,6 +71,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
   if (finalStatus !== 'granted') {
     console.warn('用户拒绝了推送通知权限');
+    lastPushError = "权限未授予";
     return null;
   }
 
@@ -75,11 +79,23 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   const projectId = Constants?.expoConfig?.extra?.eas?.projectId;
   if (!projectId) {
     console.warn('找不到 EAS projectId,请确认已经跑过 eas build:configure');
+    lastPushError = "app.json 缺 extra.eas.projectId";
     return null;
   }
 
-  const tokenData = await NotificationsModule.getExpoPushTokenAsync({ projectId });
-  const token = tokenData.data;
+  let token = '';
+  try {
+    token = (await NotificationsModule.getExpoPushTokenAsync({ projectId })).data;
+  } catch (e) {
+    // 最常见：安装包里没有 FCM 配置（google-services.json / EAS FCM key）
+    lastPushError = 'getExpoPushTokenAsync 失败：' + String((e as Error)?.message ?? e);
+    return null;
+  }
+  if (!token) {
+    lastPushError = '拿到空 token（推送服务未就绪）';
+    return null;
+  }
+  lastPushError = '';
 
   if (Platform.OS === 'android') {
     await NotificationsModule.setNotificationChannelAsync('default', {
