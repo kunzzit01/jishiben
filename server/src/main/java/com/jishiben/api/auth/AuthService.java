@@ -119,10 +119,22 @@ public class AuthService {
             return tokens(users.save(bound));
         }
 
-        // 2) 同邮箱已有账号：必须先证明原账号所有权再绑定，绝不直接发这个账号的 token
-        if (users.existsByEmailIgnoreCase(identity.email())) {
-            throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_LINK_REQUIRED,
-                    "An account with this email already exists; sign in with your password to link Google");
+        // 2) 同邮箱已有账号：产品决定（2026-11-05）—— Google 已验证该邮箱即视为账号所有权，
+        //    自动把 google_sub 绑到这个账号并直接登录（原来是返回 GOOGLE_LINK_REQUIRED 让用户先验密码）。
+        //    风险已由负责人确认：任何能登录该 Gmail 的人都能进入该记账账号；原密码登录照旧可用。
+        User byEmail = users.findByEmailIgnoreCase(identity.email()).orElse(null);
+        if (byEmail != null) {
+            if (byEmail.getGoogleSub() != null) {
+                // 邮箱相同但已绑定到另一个 Google 身份：不能覆盖，明确拒绝
+                throw new ApiException(HttpStatus.CONFLICT, ErrorCode.GOOGLE_SUB_TAKEN,
+                        "This account is already linked to a different Google identity");
+            }
+            byEmail.setGoogleSub(identity.sub());
+            byEmail.setLastLoginAt(Instant.now());
+            if (byEmail.getEmailVerifiedAt() == null) {
+                byEmail.setEmailVerifiedAt(Instant.now());
+            }
+            return tokens(users.save(byEmail));
         }
 
         // 3) 新账号：password_hash 保持 NULL（不造假密码），同一个事务里建 profile

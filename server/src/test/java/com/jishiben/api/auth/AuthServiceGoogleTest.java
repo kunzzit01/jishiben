@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.jishiben.api.common.ApiException;
@@ -68,16 +69,26 @@ class AuthServiceGoogleTest {
     }
 
     @Test
-    void existingEmailRequiresLinking() {
-        when(verifier.verify("t")).thenReturn(identity("sub-2", "old@x.com"));
-        when(users.findByGoogleSub("sub-2")).thenReturn(Optional.empty());
-        when(users.existsByEmailIgnoreCase("old@x.com")).thenReturn(true);
+    void existingEmailIsAutoLinkedAndLoggedIn() {
+        when(verifier.verify("t")).thenReturn(identity("sub-9", "old@x.com"));
+        when(users.findByGoogleSub("sub-9")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t")))
-                .isInstanceOf(ApiException.class)
-                .satisfies(e -> assertThat(((ApiException) e).code()).isEqualTo(ErrorCode.GOOGLE_LINK_REQUIRED));
+        User existing = mock(User.class);
+        when(existing.getId()).thenReturn(7L);
+        when(existing.getEmail()).thenReturn("old@x.com");
+        when(existing.getUserRole()).thenReturn("USER");
+        when(existing.getTokenVersion()).thenReturn(0);
+        when(existing.getGoogleSub()).thenReturn(null);
+        when(users.findByEmailIgnoreCase("old@x.com")).thenReturn(Optional.of(existing));
+        when(users.save(any(User.class))).thenReturn(existing);
+        when(jwt.issue(any())).thenReturn(new JwtService.TokenPair("access", "refresh", 86400L));
+
+        AuthDtos.TokenResponse res = service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t"));
+
+        assertThat(res).isNotNull();
+        // 产品决定：把 google_sub 绑到已有账号上，而不是发一个 GOOGLE_LINK_REQUIRED
+        verify(existing).setGoogleSub("sub-9");
     }
-
     @Test
     void unverifiedEmailIsRejected() {
         when(verifier.verify("t"))
