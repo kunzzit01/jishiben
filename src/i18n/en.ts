@@ -908,6 +908,7 @@ export const en = {
     modeSignIn: 'Sign in',
     googleContinue: 'Continue with Google',
     editNameTitle: 'Edit nickname',
+    revertGooglePhoto: 'Use Google photo again',
     editNameHint: 'Once changed, Google sign-in will no longer overwrite it.',
     editNamePlaceholder: 'Enter a new nickname',
     editNameSaved: 'Nickname updated',

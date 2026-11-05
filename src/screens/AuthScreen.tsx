@@ -222,6 +222,19 @@ export default function AuthScreen({ navigation }: any) {
     }
   };
 
+  /** 清掉 App 内自选头像，回到 Google 账号照片 */
+  const revertToGooglePhoto = async () => {
+    try {
+      await AsyncStorage.removeItem(AVATAR_STORAGE_KEY);
+      await AsyncStorage.removeItem(AVATAR_CUSTOM_KEY);
+    } catch {
+      /* 忽略存储错误：内存状态照样恢复 */
+    }
+    setAvatarUri(null);
+    setAvatarCustom(false);
+    setAvatarFailed(false);
+  };
+
   // 记账天数：当前账本里出现过交易记录的去重日期数
   const bookkeepingDays = useMemo(() => {
     const days = new Set(
@@ -350,10 +363,7 @@ export default function AuthScreen({ navigation }: any) {
             </View>
           </PressableScale>
           <PressableScale
-            style={[
-              styles.nameChip,
-              { borderColor: semantic.hairline, backgroundColor: semantic.surface },
-            ]}
+            style={styles.nameRow}
             activeScale={0.97}
             onPress={() => setNameEditOpen(true)}
             accessibilityRole="button"
@@ -363,11 +373,25 @@ export default function AuthScreen({ navigation }: any) {
             <AppText variant="title3" numberOfLines={1} style={styles.name}>
               {displayTitle}
             </AppText>
-            <Ionicons name="pencil" size={14} color={semantic.accentText} />
+            <Ionicons name="pencil" size={16} color={semantic.accentText} style={styles.namePencil} />
           </PressableScale>
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sub}>
             {user.email}
           </AppText>
+          {avatarCustom ? (
+            <PressableScale
+              style={styles.revertPhotoBtn}
+              activeScale={0.96}
+              onPress={() => void revertToGooglePhoto()}
+              accessibilityRole="button"
+              testID="revert-google-photo"
+            >
+              <Ionicons name="refresh" size={13} color={semantic.textSecondary} />
+              <AppText variant="caption" color={semantic.textSecondary}>
+                {tr('auth.revertGooglePhoto')}
+              </AppText>
+            </PressableScale>
+          ) : null}
 
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.section}>
             {tr('addTx.usage')}
@@ -625,17 +649,17 @@ const styles = StyleSheet.create({
   },
   // 外层容器：只负责定位，不裁剪（否则徽章会被圆的 overflow:hidden 切掉）
   // 昵称行：文字 + 铅笔，整体可点改名
-  // 昵称胶囊：描边 + 44 高命中区，明确传达「可点改名」
-  nameChip: {
+  // 昵称行：文字 + 铅笔，整体水平居中（44 高命中区，不加边框）
+  nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 6,
+    justifyContent: 'center',
+    columnGap: 7,
     minHeight: 44,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    maxWidth: '88%',
+    paddingHorizontal: 12,
   },
+  namePencil: { opacity: 0.55, marginTop: 3 },
+  revertPhotoBtn: { flexDirection: 'row', alignItems: 'center', columnGap: 4, marginTop: 6, paddingVertical: 4 },
   avatarWrap: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center' },
   avatar: {
     width: 88,

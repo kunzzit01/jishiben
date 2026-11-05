@@ -921,6 +921,7 @@ export const zh = {
     modeSignIn: '登录',
     googleContinue: '使用 Google 继续',
     editNameTitle: '修改昵称',
+    revertGooglePhoto: '恢复使用 Google 照片',
     editNameHint: '改过之后，Google 登录不会再用 Google 名称覆盖它。',
     editNamePlaceholder: '输入新的昵称',
     editNameSaved: '昵称已更新',
