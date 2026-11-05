@@ -1,32 +1,44 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * 「输入过的金额 → 类别」记忆：记一笔时按金额自动带出类别。
+ * 「输入过的金额 → 类别」记忆（v2）。
  *
- * 只记精确金额（`toFixed(2)` 归一，12.5 与 12.50 同一格），同一金额写一次覆盖一次，
- * 所以天然就是「最近一次用过的那个类别」。
+ * v1 的问题（用户反馈「输对金额却没带出正确分类」）：
+ *   1) 只按精确金额一个全局键 —— 同一金额在不同账本、不同币种下会互相覆盖；
+ *   2) 后写覆盖前写 —— 同一金额先后记过 3 次水果、1 次餐饮，反而带出餐饮；
+ *   3) 永远自动套用 —— 金额本身歧义时（两个类别都用过）会套错。
  *
- * 存储单独一个键：本机使用习惯，不跟账本数据一起同步或清空。
+ * v2 规则：
+ *   · 记忆按 (类型, 账本, 币种, 金额) 分组，互不串味；
+ *   · 同一金额下按类别累计次数与最近时间；
+ *   · 只有「最高票 >= 2 且严格多于第二名」才自动带出 —— 否则留给用户自己选，
+ *     宁可不自动填，也不填错。
  */
-const STORAGE_KEY = '@jizhang/amountCategory.v1';
-
-/** 每种类型最多记多少个金额键，超出按最近使用淘汰 */
-const MAX_KEYS_PER_TYPE = 300;
+const STORAGE_KEY = '@jizhang/amountCategory.v2';
+const LEGACY_KEY = '@jizhang/amountCategory.v1';
+/** 每个 scope 最多保留多少金额键，超出按最近使用淘汰 */
+const MAX_KEYS_PER_SCOPE = 400;
 
 export type AmountCategoryType = 'expense' | 'income';
 
-interface Sample {
-  categoryId: string;
-  /** 最后一次使用的时间戳（用于淘汰） */
-  at: number;
-  /** 用过几次（当前只做记录，不参与选择） */
-  n: number;
+export interface AmountScope {
+  /** 账本 id：不同账本的金额习惯互不干扰 */
+  ledgerId?: number | string | null;
+  /** 币种代码（MYR/SGD…）：100 MYR 与 100 SGD 不该共用一条记忆 */
+  currency?: string | null;
 }
 
-type TypeMap = Record<string, Sample>;
+interface Candidate {
+  n: number;
+  at: number;
+}
+
+// scope -> amountKey -> categoryId -> 统计
+interface AmountMap { [scope: string]: { [amountKey: string]: { [categoryId: string]: Candidate } } }
+
 interface StoreShape {
-  expense: TypeMap;
-  income: TypeMap;
+  expense: AmountMap;
+  income: AmountMap;
 }
 
 const EMPTY: StoreShape = { expense: {}, income: {} };
@@ -35,18 +47,37 @@ let snapshot: StoreShape = EMPTY;
 let hydrated = false;
 let hydration: Promise<void> | null = null;
 
-function sanitizeMap(raw: unknown): TypeMap {
+function scopeKey(scope?: AmountScope): string {
+  const ledger = scope?.ledgerId == null ? 'all' : String(scope.ledgerId);
+  const currency = (scope?.currency || 'all').toUpperCase();
+  return `L${ledger}|C${currency}`;
+}
+
+function amountKey(amount: number): string {
+  // 统一 %g 口径，避免 12.5 / 12.50 / 12.500000001 这类浮点噪声造成漏命中
+  return Number(amount.toFixed(2)).toString();
+}
+
+function sanitizeMap(raw: unknown): AmountMap {
   if (!raw || typeof raw !== 'object') return {};
-  const out: TypeMap = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!value || typeof value !== 'object') continue;
-    const v = value as Record<string, unknown>;
-    if (typeof v.categoryId !== 'string' || !v.categoryId) continue;
-    out[key] = {
-      categoryId: v.categoryId,
-      at: typeof v.at === 'number' ? v.at : 0,
-      n: typeof v.n === 'number' && v.n > 0 ? v.n : 1,
-    };
+  const out: AmountMap = {};
+  for (const [scope, amounts] of Object.entries(raw as Record<string, unknown>)) {
+    if (!amounts || typeof amounts !== 'object') continue;
+    const bucket: AmountMap[string] = {};
+    for (const [amt, cats] of Object.entries(amounts as Record<string, unknown>)) {
+      if (!cats || typeof cats !== 'object') continue;
+      const inner: Record<string, Candidate> = {};
+      for (const [catId, stats] of Object.entries(cats as Record<string, unknown>)) {
+        const v = stats as Record<string, unknown>;
+        if (!catId) continue;
+        inner[catId] = {
+          n: typeof v.n === 'number' && v.n > 0 ? v.n : 1,
+          at: typeof v.at === 'number' ? v.at : 0,
+        };
+      }
+      if (Object.keys(inner).length > 0) bucket[amt] = inner;
+    }
+    if (Object.keys(bucket).length > 0) out[scope] = bucket;
   }
   return out;
 }
@@ -57,6 +88,33 @@ function sanitize(raw: unknown): StoreShape {
   return { expense: sanitizeMap(obj.expense), income: sanitizeMap(obj.income) };
 }
 
+/** v1 → v2：老的「全局精确金额」记忆迁移到 all|all 作用域，保留用户既有习惯 */
+function migrateLegacy(raw: unknown): StoreShape {
+  if (!raw || typeof raw !== 'object') return EMPTY;
+  const obj = raw as Record<string, any>;
+  const toMap = (src: any): AmountMap => {
+    const out: AmountMap = {};
+    if (!src || typeof src !== 'object') return out;
+    const bucket: Record<string, Record<string, Candidate>> = {};
+    for (const [amount, sample] of Object.entries(src as Record<string, any>)) {
+      const catId = sample?.categoryId;
+      if (!catId) continue;
+      bucket[amountKey(Number(amount))] = {
+        [catId]: { n: typeof sample.n === 'number' && sample.n > 0 ? sample.n : 1, at: sample.at || 0 },
+      };
+    }
+    if (Object.keys(bucket).length > 0) out['Lall|Call'] = bucket;
+    return out;
+  };
+  return { expense: toMap(obj.expense), income: toMap(obj.income) };
+}
+
+function persist(): void {
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)).catch((e) =>
+    console.warn('保存金额-类别记忆失败', e)
+  );
+}
+
 /** 从磁盘恢复一次（幂等；多处同时触发也只读一次） */
 export function hydrateAmountCategory(): Promise<void> {
   if (hydrated) return Promise.resolve();
@@ -64,7 +122,13 @@ export function hydrateAmountCategory(): Promise<void> {
   hydration = (async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      snapshot = raw ? sanitize(JSON.parse(raw)) : EMPTY;
+      if (raw) {
+        snapshot = sanitize(JSON.parse(raw));
+      } else {
+        const legacy = await AsyncStorage.getItem(LEGACY_KEY);
+        snapshot = legacy ? migrateLegacy(JSON.parse(legacy)) : EMPTY;
+        if (legacy) persist();
+      }
     } catch (e) {
       console.warn('读取金额-类别记忆失败', e);
       snapshot = EMPTY;
@@ -75,43 +139,80 @@ export function hydrateAmountCategory(): Promise<void> {
   return hydration;
 }
 
-/** 超出上限时按 at 最旧淘汰 */
-function prune(map: TypeMap): TypeMap {
-  const keys = Object.keys(map);
-  if (keys.length <= MAX_KEYS_PER_TYPE) return map;
-  const keep = keys
-    .sort((a, b) => map[b].at - map[a].at)
-    .slice(0, MAX_KEYS_PER_TYPE);
-  const next: TypeMap = {};
+function prune(bucket: AmountMap[string]): AmountMap[string] {
+  const keys = Object.keys(bucket);
+  if (keys.length <= MAX_KEYS_PER_SCOPE) return bucket;
+  const latest = (amt: string) => Math.max(...Object.values(bucket[amt]).map((c) => c.at));
+  const keep = keys.sort((a, b) => latest(b) - latest(a)).slice(0, MAX_KEYS_PER_SCOPE);
+  const next: AmountMap[string] = {};
   keep.forEach((k) => {
-    next[k] = map[k];
+    next[k] = bucket[k];
   });
   return next;
 }
 
-/** 保存成功后记一笔：同一金额覆盖写入（= 最近一次） */
+/** 记账成功时调用：累计「这个金额用过哪个类别」 */
 export function rememberAmountCategory(
   type: AmountCategoryType,
   amount: number,
-  categoryId: string | null | undefined
+  categoryId: string | null | undefined,
+  scope?: AmountScope
 ): void {
   if (!categoryId) return;
   if (!Number.isFinite(amount) || amount <= 0) return;
-  const key = amount.toFixed(2);
-  const prev = snapshot[type][key];
-  const nextMap = prune({
-    ...snapshot[type],
-    [key]: { categoryId, at: Date.now(), n: (prev?.n ?? 0) + 1 },
-  });
-  snapshot = { ...snapshot, [type]: nextMap };
+  const sk = scopeKey(scope);
+  const ak = amountKey(amount);
+  const bucket: AmountMap[string] = { ...(snapshot[type][sk] ?? {}) };
+  const candidates: Record<string, Candidate> = { ...(bucket[ak] ?? {}) };
+  const prev = candidates[categoryId];
+  candidates[categoryId] = { n: (prev?.n ?? 0) + 1, at: Date.now() };
+  bucket[ak] = candidates;
+  snapshot = { ...snapshot, [type]: { ...snapshot[type], [sk]: prune(bucket) } };
   hydrated = true;
-  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)).catch((e) =>
-    console.warn('保存金额-类别记忆失败', e)
-  );
+  persist();
 }
 
-/** 精确金额查类别；没有记录返回 null */
-export function lookupCategoryForAmount(type: AmountCategoryType, amount: number): string | null {
+/**
+ * 查这个金额最可能属于哪个类别。
+ * 返回 null 的情形（宁可让用户自己选，也不填错）：
+ *   · 没记录过；
+ *   · 存在多个候选且最高票只有 1 次（一次性的巧合不足为凭）；
+ *   · 最高票与第二名打平。
+ */
+export function lookupCategoryForAmount(
+  type: AmountCategoryType,
+  amount: number,
+  scope?: AmountScope
+): string | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  return snapshot[type][amount.toFixed(2)]?.categoryId ?? null;
+  const ak = amountKey(amount);
+  const scoped = snapshot[type][scopeKey(scope)]?.[ak];
+  // 该账本/币种没有记录时，退回全局（迁移来的老数据或跨账本习惯）
+  const candidates = scoped ?? snapshot[type]['Lall|Call']?.[ak];
+  if (!candidates) return null;
+
+  const ranked = Object.entries(candidates).sort((a, b) => b[1].n - a[1].n || b[1].at - a[1].at);
+  const [topId, top] = ranked[0];
+  const second = ranked[1];
+  // 唯一候选：直接带出（保留原有「输入过的金额会自动选类别」的体验）
+  if (!second) return top.n >= 1 ? topId : null;
+  // 有竞争：打平 → 歧义，不自动选
+  if (second[1].n === top.n) return null;
+  // 有竞争但最高票只有 1 次：证据不足，宁可不填也不填错
+  if (top.n < 2) return null;
+  return topId;
+}
+
+/** 统计用：当前金额有哪些候选（调试/后续可做「常选」提示） */
+export function listCategoryHints(
+  type: AmountCategoryType,
+  amount: number,
+  scope?: AmountScope
+): Array<{ categoryId: string; n: number }> {
+  const ak = amountKey(amount);
+  const candidates = snapshot[type][scopeKey(scope)]?.[ak];
+  if (!candidates) return [];
+  return Object.entries(candidates)
+    .map(([categoryId, c]) => ({ categoryId, n: c.n }))
+    .sort((a, b) => b.n - a.n);
 }

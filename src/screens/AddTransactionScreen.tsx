@@ -850,6 +850,12 @@ function fxAmountText(raw: string, live: string | null): string {
     : amount || '0.00';
   // 金额 → 类别联想用的“当前金额”：键盘打开时 amount 还没落定（「完成」就是保存键），
   // 只能盯实时输入串；多项算式（拆金额中）不参与，避免算术中间态乱跳类别。
+  // 金额→类别记忆的作用域：当前账本 + 当前记账币种（不同币种的 100 不该共用同一条记忆）
+  const amountScope = {
+    ledgerId: activeLedgerId,
+    currency: assets.find((a) => a.id === assetId)?.currency ?? null,
+  };
+
   const liveAmountValue = amountKeypadOpen
     ? amountExpr.isMulti
       ? NaN
@@ -862,7 +868,7 @@ function fxAmountText(raw: string, live: string | null): string {
     if (userPickedCategoryRef.current) return;
     if (uiType !== 'expense' && uiType !== 'income') return;
     if (!liveAmountValue || liveAmountValue <= 0) return;
-    const remembered = lookupCategoryForAmount(uiType, liveAmountValue);
+    const remembered = lookupCategoryForAmount(uiType, liveAmountValue, amountScope);
     if (!remembered || remembered === categoryId) return;
     // 类别可能已被删除：只认当前类型下仍然存在的
     if (!categories.some((c) => c.id === remembered && c.type === uiType)) return;
@@ -1348,7 +1354,7 @@ function fxAmountText(raw: string, live: string | null): string {
     // 账户同理：真的记完账才算「上一次用的钱包」（只是选中没保存不记）
     rememberRecentAsset(type === 'income' ? 'income' : 'expense', assetId);
     // 同时学习「这个金额对应哪个类别」：下次输入同一金额直接带出（精确匹配，最近一次优先）
-    rememberAmountCategory(type === 'income' ? 'income' : 'expense', value, categoryId);
+    rememberAmountCategory(type === 'income' ? 'income' : 'expense', value, categoryId, amountScope);
 
     // 自动月结：开关打开（默认关，手动开）时，把这笔账同步建成一条「每月同日自动入账」的
     // 财务规划——之后每个月由补账引擎自动 ±账目。防重复：同名称+同金额+同周期+同账户的计划已存在则跳过
