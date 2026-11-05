@@ -8,6 +8,7 @@ import {
   Pressable,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   BackHandler,
   useWindowDimensions,
@@ -805,43 +806,48 @@ export default function AddAssetScreen({ route }: any) {
           系统键盘出现时自绘键盘收起让位，系统键盘收起后自动回到原位（金额模式还在的话） */}
       {/* 自绘计算器常驻规则：金额模式开着 && 没有任何上拉菜单（币种弹层）&& 系统键盘没弹——
           三个条件都满足才显示；菜单关闭后金额模式还在，键盘自动回位 */}
-      {amountField && sheetOpen !== 'currency' && !sysKeyboardVisible && (
-        <View
-          style={[
-            styles.keypadFooter,
-            // 底部留白与"记一笔"同公式（insets−40，edge-to-edge 下根视图已延伸到导航条后面），
-            // 不再垫满 insets——那会在键盘下方多出一条空位
-            { paddingBottom: Math.max(bottomInset - 40, 8), backgroundColor: colors.card, borderTopColor: colors.dividerHair },
-          ]}
-          // 实测高度回传给滚动容器，避免最后一行表单被键盘盖住
-          onLayout={(e) => setKeypadHeight(e.nativeEvent.layout.height)}
-        >
-          <AmountCalculatorKeypad
-            onPressKey={(key) => {
-              if (amountField === 'available') {
-                availableDirtyRef.current = true;
-                // 手动设过（输入 0 也算）：从此停用与「总信用额度」的联动
-                availableTouchedRef.current = true;
-              } else balanceDirtyRef.current = true;
-              setActiveCursor(activeExpr.pressKeyAt(key, activeCursor));
-            }}
-            onPressToday={() => {}}
-            hideDateKey
-            onClear={() => {
-              // 主动清成 0 也是用户意图：清「可用额度」时同样标记为手动设过，避免被联动改回额度值；
-              // 同时算一次输入（dirty），否则「按 C 清 0 → 直接切走」会不落库，切回来又是旧值
-              if (amountField === 'available') {
-                availableDirtyRef.current = true;
-                availableTouchedRef.current = true;
-              } else balanceDirtyRef.current = true;
-              activeExpr.reset(0);
-              setActiveCursor(0);
-            }}
-            onConfirm={handleKeypadConfirm}
-          />
+      <Modal
+        visible={!!amountField && sheetOpen !== 'currency' && !sysKeyboardVisible}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={handleKeypadConfirm}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          {/* 键盘上方空白：点一下等同「完成」 */}
+          <Pressable style={{ flex: 1 }} onPress={handleKeypadConfirm} accessibilityLabel={t('common.done')} />
+          <View
+            style={[
+              styles.keypadFooter,
+              { paddingBottom: Math.max(bottomInset, 8), backgroundColor: colors.card, borderTopColor: colors.dividerHair },
+            ]}
+          >
+            <AmountCalculatorKeypad
+              onPressKey={(key) => {
+                if (amountField === 'available') {
+                  availableDirtyRef.current = true;
+                  // 手动设过（输入 0 也算）：从此停用与「总信用额度」的联动
+                  availableTouchedRef.current = true;
+                } else balanceDirtyRef.current = true;
+                setActiveCursor(activeExpr.pressKeyAt(key, activeCursor));
+              }}
+              onPressToday={() => {}}
+              hideDateKey
+              onClear={() => {
+                // 主动清成 0 也是用户意图：清「可用额度」时同样标记为手动设过，避免被联动改回额度值；
+                // 同时算一次输入（dirty），否则「按 C 清 0 → 直接切走」会不落库，切回来又是旧值
+                if (amountField === 'available') {
+                  availableDirtyRef.current = true;
+                  availableTouchedRef.current = true;
+                } else balanceDirtyRef.current = true;
+                activeExpr.reset(0);
+                setActiveCursor(0);
+              }}
+              onConfirm={handleKeypadConfirm}
+            />
+          </View>
         </View>
-      )}
-
+      </Modal>
       {/* 币种抽屉：统一 BottomSheet（把手 + 遮罩 + 下拉收起 + 安全区都由组件负责）。
           ⚠ 挂在页面根（SafeAreaView）的最后一个子节点上，不能放进 ScrollView —— 组件按 absoluteFill
           铺满父容器，放进滚动容器里会跟着内容滚走 */}
@@ -1179,12 +1185,6 @@ function makeStyles(
     // 键盘底座：与"记一笔"的 stickyFooter 同规格（左右留白 + 顶部分隔线），
     // 底部安全区 padding 在 JSX 里用 insets 算
     keypadFooter: {
-    // 绝对贴底：表单再长也不会把键盘挤出屏幕（真机上曾出现底部被裁掉）
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 20,
       paddingHorizontal: 0,
       paddingTop: 6,
       borderTopWidth: 1,
