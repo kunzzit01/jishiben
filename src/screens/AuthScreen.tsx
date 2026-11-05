@@ -37,6 +37,7 @@ import GoogleLogo from '../components/GoogleLogo';
 import { useCustomAvatar, setCustomAvatar, clearCustomAvatar } from '../utils/avatarStore';
 
 import { AppText, GlassView, HeroGradient, withAlpha } from '../components/ui';
+import { useBottomSystemInset } from '../hooks/useBottomSystemInset';
 
 type Mode = 'signin' | 'signup';
 
@@ -114,7 +115,13 @@ export default function AuthScreen({ navigation }: any) {
   const { pagePadding } = useLayout();
   // 矮屏档：按窗口高度给插画降高（普通 124 / 矮屏 96，均在要求的区间内）
   const windowHeight = Dimensions.get('window').height;
+  // 底部系统栏高度：给「立即注册」和 Tab 栏让位，避免被遮住
+  const bottomInset = useBottomSystemInset();
   const isShort = windowHeight < 700;
+  // 插画高度随屏高自适应：矮屏 90–110、常规 112–140（不写死一个值）
+  const heroHeight = isShort
+    ? Math.round(Math.min(110, Math.max(90, windowHeight * 0.15)))
+    : Math.round(Math.min(140, Math.max(112, windowHeight * 0.1)));
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
   const { signIn, signUp, signInWithGoogle, updateDisplayName, signOut, sessionExpired, user, syncStatus, lastSyncAt, syncNow } = useAuth();
@@ -498,7 +505,7 @@ export default function AuthScreen({ navigation }: any) {
         // ============ 未登录:登录/注册表单（稿 P_Auth：品牌方块 + 大标题 + 分段 + 玻璃表单卡 + 渐变主按钮）============
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
-            contentContainerStyle={{ paddingHorizontal: pagePadding, paddingBottom: 40 }}
+            contentContainerStyle={{ paddingHorizontal: pagePadding, paddingBottom: 40 + bottomInset + 72 }}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -515,7 +522,7 @@ export default function AuthScreen({ navigation }: any) {
             {/* 顶部插画：透明底 WebP，contain 不拉伸，主体偏右（左侧留呼吸空间） */}
             <Image
               source={require('../../assets/auth_header.webp')}
-              style={[styles.authHero, { height: isShort ? 96 : 124 }]}
+              style={[styles.authHero, { height: heroHeight }]}
               resizeMode="contain"
               accessibilityIgnoresInvertColors
             />
@@ -755,7 +762,7 @@ const styles = StyleSheet.create({
 
   // ============ 未登录:登录/注册表单 ============
     // 顶部插画：透明 WebP，宽度撑满内容区，高度由 JSX 按矮屏分级；无背景/边框/圆角
-  authHero: { width: '100%', marginTop: 16, alignSelf: 'stretch' },
+  authHero: { width: '88%', marginTop: 6, alignSelf: 'flex-end' },
   welcome: { marginTop: 18 },
   subtitle: { marginTop: 6 },
   modeSwitchWrap: { marginTop: 22 },
