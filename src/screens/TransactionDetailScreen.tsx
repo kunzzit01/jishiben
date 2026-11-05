@@ -14,15 +14,11 @@ import { useLayout } from '../theme/useLayout';
 import { useT } from '../i18n/LanguageContext';
 import { getCategoryLabel } from '../i18n/categories';
 import { formatMoney } from '../utils/formatMoney';
+import { formatRateEquation } from '../utils/formatRate';
 import { useTabClearance } from '../hooks/useTabClearance';
 import { useDialog } from '../components/AppDialog';
 import { AppText, Button, Card, HeroGradient, IconButton, ListRow, ListSection, MoneyText, ScreenHeader } from '../components/ui';
 import { ROUTES } from '../navigation/routes';
-
-/** 汇率反向写法用：1.6000 → 1.6（最多 4 位小数，去掉尾零） */
-function trimZeros(n: number): string {
-  return String(Number(n.toFixed(4)));
-}
 
 const CATEGORY_ICON_SIZE = 56;
 const CATEGORY_GLYPH_SIZE = 26;
@@ -178,13 +174,12 @@ export default function TransactionDetailScreen({ navigation, route }: any) {
                 <ListRow
                   icon="swap-horizontal-outline"
                   title={t('txDetail.rate')}
-                  value={`1 ${fromAsset ? String(fromAsset.currency) : ''} = ${tx.exchangeRate} ${toAsset ? String(toAsset.currency) : ''}`}
-                  // 反向写法一起给：用户心里的报价常常是「1 MYR = 1.60 CNY」那种
-                  subtitle={
-                    tx.exchangeRate && tx.exchangeRate > 0
-                      ? `1 ${toAsset ? String(toAsset.currency) : ''} = ${trimZeros(1 / tx.exchangeRate)} ${fromAsset ? String(fromAsset.currency) : ''}`
-                      : undefined
-                  }
+                  // 与兑换页同一口径：rate<1 时翻成「X 从币 = 1 目标币」，不再给 0.318 这种反向小数
+                  value={formatRateEquation(
+                    tx.exchangeRate,
+                    fromAsset ? String(fromAsset.currency) : '',
+                    toAsset ? String(toAsset.currency) : ''
+                  )}
                 />
               ) : null}
             </>

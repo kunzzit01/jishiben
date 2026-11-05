@@ -1728,8 +1728,7 @@ export default function AssetScreen({ route }: any) {
                   <AccountTransactionList
                     transactions={accountTransactions}
                     categories={categories}
-                    assetId={sheetAsset.id}
-                    currency={sheetAsset.currency}
+                    assetId={sheetAsset.id}
                     resolveAsset={getAssetById}
                     // 点行 → 账单详情（带上「这个钱包」视角：转出钱包看 −，转入钱包看 +）
                     onPressTx={(tx) =>
