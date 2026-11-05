@@ -19,6 +19,8 @@ export interface SessionUser {
   emailVerified?: boolean;
   /** 是否已绑定 Google（设置页显示 已绑定/未绑定） */
   googleLinked?: boolean;
+  /** Google 头像 URL（缺失或加载失败时用默认头像） */
+  avatarUrl?: string | null;
 }
 
 export interface TokenPair {

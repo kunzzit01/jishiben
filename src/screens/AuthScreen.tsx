@@ -143,7 +143,15 @@ export default function AuthScreen({ navigation }: any) {
   // 已登录：个人中心内容（头像/使用情况,自 PersonalCenterScreen 迁移）
   // ---------------------------------------------------------
 
+
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  // 展示名优先级由后端解析好（自定义昵称 → Google 名称 → 邮箱前缀），这里只兜底邮箱前缀
+  const displayTitle =
+    (user?.displayName && user.displayName.trim()) || (user?.email ?? '').split('@')[0] || '';
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  // 头像优先级：Google picture → 本地自选头像 → 默认图标（失败也回退）
+  const effectiveAvatarUri =
+    !avatarFailed && user?.avatarUrl ? user.avatarUrl : avatarUri;
   const [useDays, setUseDays] = useState<number | null>(null);
   const avatarLoadedRef = useRef(false);
 
@@ -304,8 +312,12 @@ export default function AuthScreen({ navigation }: any) {
             accessibilityRole="button"
             accessibilityLabel={tr('addTx.pcPhotoTitle')}
           >
-            {avatarUri ? (
-              <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+            {effectiveAvatarUri ? (
+              <Image
+                source={{ uri: effectiveAvatarUri }}
+                style={styles.avatarImage}
+                onError={() => setAvatarFailed(true)}
+              />
             ) : (
               <Ionicons name="person-outline" size={42} color={semantic.textPrimary} />
             )}
@@ -314,10 +326,10 @@ export default function AuthScreen({ navigation }: any) {
             </View>
           </PressableScale>
           <AppText variant="title3" numberOfLines={1} style={styles.name}>
-            {user.email}
+            {displayTitle}
           </AppText>
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sub}>
-            Personal Finance
+            {user.email}
           </AppText>
 
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.section}>
