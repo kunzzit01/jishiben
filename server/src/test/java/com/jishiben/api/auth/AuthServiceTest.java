@@ -37,7 +37,7 @@ class AuthServiceTest {
     private ProfileService profiles;
 
     private AuthService service() {
-        return new AuthService(users, encoder, jwt, profiles, mock(GoogleTokenVerifier.class));
+        return new AuthService(users, encoder, jwt, profiles, mock(GoogleTokenVerifier.class), mock(org.springframework.jdbc.core.JdbcTemplate.class));
     }
 
     @Test

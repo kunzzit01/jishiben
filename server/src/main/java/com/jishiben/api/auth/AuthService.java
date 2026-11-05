@@ -30,15 +30,18 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final ProfileService profiles;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final GoogleTokenVerifier googleVerifier;
 
     public AuthService(UserRepository users, PasswordEncoder passwordEncoder, JwtService jwtService,
-                       ProfileService profiles, GoogleTokenVerifier googleVerifier) {
+            ProfileService profiles, GoogleTokenVerifier googleVerifier,
+            org.springframework.jdbc.core.JdbcTemplate jdbc) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.profiles = profiles;
         this.googleVerifier = googleVerifier;
+        this.jdbc = jdbc;
     }
 
     @Transactional
@@ -270,6 +273,44 @@ public class AuthService {
         }
     }
 
+    /**
+     * 立即硬删除账号：按外键依赖顺序清理（transactions/ledgers 之间是 RESTRICT，不能靠级联）。
+     * 校验：有密码的账号必须给对当前密码；Google-only 账号必须手输自己的邮箱。
+     */
+    @Transactional
+    public void deleteAccount(long ownerId, AuthDtos.DeleteAccountRequest request) {
+        User user = requireUser(ownerId);
+        if (user.getPasswordHash() != null) {
+            String password = request == null ? null : request.password();
+            if (password == null || password.isBlank()
+                    || !passwordEncoder.matches(password, user.getPasswordHash())) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS,
+                        "Password is required to delete this account");
+            }
+        } else {
+            String typed = request == null ? null : request.confirmEmail();
+            if (typed == null || !typed.trim().equalsIgnoreCase(user.getEmail())) {
+                throw ApiException.badRequest("Type your account email to confirm deletion");
+            }
+        }
+
+        String sqlUser = String.valueOf(user.getId());
+        // 顺序很关键：先删引用 ledgers 的子表，再删 ledgers 本身
+        String[] statements = {
+            "delete from transactions where user_id = ?",
+            "delete from budgets where user_id = ?",
+            "delete from payment_plans where user_id = ?",
+            "delete from assets where user_id = ?",
+            "delete from push_tokens where user_id = ?",
+            "delete from ledgers where user_id = ?",
+            "delete from profiles where user_id = ?",
+            "delete from users where id = ?",
+        };
+        for (String sql : statements) {
+            jdbc.update(sql, Long.valueOf(sqlUser));
+        }
+    }
+
     /** 展示名优先级：用户自定义昵称 → Google 名称 → 既有 displayName → 邮箱 @ 前段 */
     private static String resolveDisplayName(User user) {
         if (user.isDisplayNameCustom() && hasText(user.getDisplayName())) {
@@ -307,7 +348,7 @@ public class AuthService {
     private AuthDtos.UserResponse toResponse(User user) {
         return new AuthDtos.UserResponse(user.getId(), user.getEmail(), resolveDisplayName(user),
                 user.getUserRole(), user.getEmailVerifiedAt() != null, user.getCreatedAt(),
-                user.getGoogleSub() != null, user.getAvatarUrl());
+                user.getGoogleSub() != null, user.getAvatarUrl(), user.getPasswordHash() != null);
     }
 
     private static String normaliseEmail(String email) {

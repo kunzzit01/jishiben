@@ -44,7 +44,7 @@ class AuthServiceGoogleTest {
         profiles = mock(ProfileService.class);
         jwt = mock(JwtService.class);
         encoder = new BCryptPasswordEncoder();
-        service = new AuthService(users, encoder, jwt, profiles, verifier);
+        service = new AuthService(users, encoder, jwt, profiles, verifier, mock(org.springframework.jdbc.core.JdbcTemplate.class));
     }
 
     private GoogleTokenVerifier.GoogleIdentity identity(String sub, String email) {
@@ -71,6 +71,31 @@ class AuthServiceGoogleTest {
         assertThat(res.user().email()).isEqualTo("new@x.com");
     }
 
+    @Test
+    void deleteAccountRequiresPassword() {
+        User me = mock(User.class);
+        when(me.getId()).thenReturn(41L);
+        when(me.getEmail()).thenReturn("me@x.com");
+        when(me.getPasswordHash()).thenReturn("hashed");
+        when(users.findById(41L)).thenReturn(Optional.of(me));
+        when(encoder.matches("wrong", "hashed")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.deleteAccount(41L, new AuthDtos.DeleteAccountRequest("wrong", null)))
+                .isInstanceOf(ApiException.class);
+        verify(jdbc, never()).update(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(Object[].class));
+    }
+
+    @Test
+    void deleteAccountGoogleOnlyRequiresExactEmail() {
+        User me = mock(User.class);
+        when(me.getId()).thenReturn(42L);
+        when(me.getEmail()).thenReturn("g@x.com");
+        when(me.getPasswordHash()).thenReturn(null);
+        when(users.findById(42L)).thenReturn(Optional.of(me));
+
+        assertThatThrownBy(() -> service.deleteAccount(42L, new AuthDtos.DeleteAccountRequest(null, "other@x.com")))
+                .isInstanceOf(ApiException.class);
+    }
     @Test
     void googleNameAndPictureAreSaved() {
         when(verifier.verify("t")).thenReturn(identity("sub-21", "fresh@x.com"));

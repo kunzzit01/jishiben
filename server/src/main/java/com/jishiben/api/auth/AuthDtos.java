@@ -59,7 +59,15 @@ public final class AuthDtos {
             /** 是否已绑定 Google（UI 用它显示 已绑定/未绑定 + 决定「解绑」是否可点） */
             boolean googleLinked,
             /** Google 头像 URL（可为空；前端缺失时用默认头像） */
-            String avatarUrl) {
+            String avatarUrl,
+            /** 是否设置过密码（UI 用它决定删除账号时该问密码还是问邮箱） */
+            boolean hasPassword) {
+    }
+
+    /** 删除账号：有密码的用密码验证；Google-only 账号要求手动输入自己的邮箱确认 */
+    public record DeleteAccountRequest(
+            @Size(max = 72) String password,
+            @Size(max = 254) String confirmEmail) {
     }
 
     public record TokenResponse(

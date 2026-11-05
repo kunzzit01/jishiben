@@ -69,6 +69,15 @@ public class AuthController {
         return auth.me(CurrentUser.id());
     }
 
+    /** 删除账号：立即硬删除，不可恢复（有密码验密码 / Google-only 验邮箱） */
+    @org.springframework.web.bind.annotation.DeleteMapping("/me")
+    public org.springframework.http.ResponseEntity<Void> deleteAccount(
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody(required = false)
+            AuthDtos.DeleteAccountRequest request) {
+        auth.deleteAccount(CurrentUser.id(), request);
+        return org.springframework.http.ResponseEntity.noContent().build();
+    }
+
     @PatchMapping("/me")
     public AuthDtos.UserResponse updateMe(@Valid @RequestBody AuthDtos.UpdateMeRequest request) {
         return auth.updateMe(CurrentUser.id(), request);
