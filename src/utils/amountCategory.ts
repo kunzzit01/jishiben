@@ -157,6 +157,43 @@ export function hydrateAmountCategory(): Promise<void> {
   return hydration;
 }
 
+/**
+ * 分层取候选，解决「存的时候币种未知 / 查的时候默认账户币种不同」造成的漏命中：
+ *   1) L{账本}|C{币种}   —— 最精确
+ *   2) L{账本}|Call       —— 记账时 assets 还没加载，币种记为 all
+ *   3) Lall|C{币种}
+ *   4) Lall|Call          —— 迁移来的老数据
+ */
+function scopedCandidates(
+  type: AmountCategoryType,
+  ak: string,
+  scope?: AmountScope
+): Record<string, Candidate> | undefined {
+  const ledger = scope?.ledgerId == null ? 'all' : String(scope.ledgerId);
+  const currency = (scope?.currency || 'all').toUpperCase();
+  // 注意：scopeKey 会把 'all' 也大写（CALL），历史迁移数据里可能是 'Call' —— 两种都试
+  const tiers = [
+    `L${ledger}|C${currency}`,   // 最精确
+    `L${ledger}|CALL`,            // 记账当时币种未知
+    `L${ledger}|Call`,
+    `Lall|C${currency}`,          // 全局同币种
+    'Lall|CALL',
+    'Lall|Call',
+  ];
+  for (const key of tiers) {
+    const found = snapshot[type][key]?.[ak];
+    if (found && Object.keys(found).length > 0) return found;
+  }
+  // 最后兜底：同一账本下任意币种（用户换过账户币种的情况）
+  const prefix = `L${ledger}|`;
+  for (const key of Object.keys(snapshot[type])) {
+    if (!key.startsWith(prefix)) continue;
+    const found = snapshot[type][key]?.[ak];
+    if (found && Object.keys(found).length > 0) return found;
+  }
+  return undefined;
+}
+
 function prune(bucket: AmountMap[string]): AmountMap[string] {
   const keys = Object.keys(bucket);
   if (keys.length <= MAX_KEYS_PER_SCOPE) return bucket;
@@ -203,9 +240,7 @@ export function lookupCategoryForAmount(
 ): string | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
   const ak = amountKey(amount);
-  const scoped = snapshot[type][scopeKey(scope)]?.[ak];
-  // 该账本/币种没有记录时，退回全局（迁移来的老数据或跨账本习惯）
-  const candidates = scoped ?? snapshot[type]['Lall|Call']?.[ak];
+  const candidates = scopedCandidates(type, ak, scope);
   if (!candidates) return null;
 
   // 排序：票数优先，其次最近使用时间。始终返回最可能的那一个 ——
@@ -221,7 +256,7 @@ export function listCategoryHints(
   scope?: AmountScope
 ): Array<{ categoryId: string; n: number }> {
   const ak = amountKey(amount);
-  const candidates = snapshot[type][scopeKey(scope)]?.[ak];
+  const candidates = scopedCandidates(type, ak, scope);
   if (!candidates) return [];
   return Object.entries(candidates)
     .map(([categoryId, c]) => ({ categoryId, n: c.n }))
