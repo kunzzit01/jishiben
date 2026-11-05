@@ -54,8 +54,8 @@ import { getRecentAssetsSnapshot, rememberRecentAsset, useRecentAssets } from '.
 import {
   hydrateAmountCategory,
   lookupCategoryForAmount,
+  rebuildAmountCategory,
   rememberAmountCategory,
-  seedAmountCategory,
 } from '../utils/amountCategory';
 import { AmountCalculatorKeypad, keypadPanelHeight } from '../components/AmountCalculatorKeypad';
 import { CursorAmountText } from '../components/CursorAmountText';
@@ -359,7 +359,7 @@ const CATEGORY_ORDER_KEY = '@jizhang/categoryOrder';
 const RECENT_CATEGORY_HISTORY_LIMIT = Infinity;
 
 export default function AddTransactionScreen({ navigation, route }: any) {
-  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan, transactions: allTransactions } =
+  const { categories, categoryGroups, addCategory, addCategoryGroup, deleteCategoryGroup, addTransaction, updateTransaction, addTransfer, updateTransfer, updateCategory, deleteCategory, deleteTransaction, assets, activeAssets, getAssetBalance, currencySymbol, currency, activeLedgerId, paymentPlans, addPaymentPlan, loading: dataLoading, transactions: allTransactions } =
     useApp();
   const insets = useSafeAreaInsets();
   const { colors, isDark, semantic, spacing, layout, radius, elevation } = useTheme();
@@ -877,10 +877,13 @@ function fxAmountText(raw: string, live: string | null): string {
       : parseFloat(amountExpr.displayValue)
     : parseFloat(amount);
 
-  // 用本地历史账目播种「金额 → 类别」记忆：老用户/换机用户不用重记一遍才生效（幂等，只跑一次）
+  // 记忆 = 现存账目历史的统计。每次历史变化都整体重建：
+  // 删账 → 票自然消失；改账 → 旧票换新票；不会再出现「删掉又被播种回来」。
+  const lastHistorySignatureRef = useRef('');
   useEffect(() => {
-    if (!amountMemoryReady || seededRef.current) return;
+    if (!amountMemoryReady || dataLoading) return; // 数据未就绪时别拿空列表清空记忆
     const history = (allTransactions ?? []) as Array<{
+      id?: string;
       type: string;
       amount: number;
       categoryId?: string;
@@ -888,13 +891,20 @@ function fxAmountText(raw: string, live: string | null): string {
       assetId?: string;
       createdAt?: number;
     }>;
-    if (history.length === 0) return; // 历史还没加载出来，等下次依赖变化
-    seededRef.current = true;
+    // 廉价签名：条数 + 最大 createdAt + 金额/类别拼接的简易哈希，避免每次渲染都重算
+    let hash = 0;
+    for (const tx of history) {
+      const key = `${tx.id ?? ''}${tx.categoryId ?? ''}`;
+      for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+    }
+    const signature = `${history.length}:${hash}`;
+    if (lastHistorySignatureRef.current === signature) return;
+    lastHistorySignatureRef.current = signature;
+
     const assetCurrency = (id?: string) => assets.find((a) => a.id === id)?.currency ?? null;
-    seedAmountCategory(
+    rebuildAmountCategory(
       history
         .filter((tx) => tx.type === 'expense' || tx.type === 'income')
-        .slice(0, 500)
         .map((tx) => ({
           type: tx.type as 'expense' | 'income',
           amount: tx.amount,
@@ -903,7 +913,7 @@ function fxAmountText(raw: string, live: string | null): string {
           at: tx.createdAt,
         }))
     );
-  }, [amountMemoryReady, allTransactions, assets]);
+  }, [amountMemoryReady, dataLoading, allTransactions, assets]);
 
   // 金额变化时按「输入过的金额」带出类别：手选过 / 编辑态 / 转账兑换 一律不参与
   useEffect(() => {

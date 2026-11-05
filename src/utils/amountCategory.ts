@@ -298,3 +298,49 @@ export function forgetAmountCategory(
   snapshot = { ...snapshot, [type]: { ...snapshot[type], [sk]: nextBucket } };
   persist();
 }
+
+/**
+ * 用「当前账目历史」**重建**整份记忆（不是追加）。
+ *
+ * 为什么改成重建：增量播种在「删掉一笔重复账」时会把剩余历史重新灌回来，
+ * 表现为「删了又被记住」。而记忆本来就是「历史账目的统计」——
+ * 所以每次历史变化都整体重算，删账自然等于减票，不会再复活。
+ *
+ * votes 只来自现存账目，因此：删账 → 票消失；改账 → 旧票消失、新票出现。
+ */
+export function rebuildAmountCategory(
+  entries: Array<{
+    type: AmountCategoryType;
+    amount: number;
+    categoryId?: string | null;
+    scope?: AmountScope;
+    at?: number;
+  }>
+): void {
+  const next: StoreShape = { expense: {}, income: {} };
+
+  for (const e of entries) {
+    if (!e.categoryId) continue;
+    if (!Number.isFinite(e.amount) || e.amount <= 0) continue;
+    const sk = scopeKey(e.scope);
+    const ak = amountKey(e.amount);
+    const bucket = next[e.type][sk] ?? (next[e.type][sk] = {});
+    const candidates = bucket[ak] ?? (bucket[ak] = {});
+    const prev = candidates[e.categoryId];
+    candidates[e.categoryId] = {
+      n: (prev?.n ?? 0) + 1,
+      at: Math.max(prev?.at ?? 0, e.at ?? 0),
+    };
+  }
+
+  // 作用域条目数超限时按最近使用裁剪（每个 scope 单独裁）
+  (['expense', 'income'] as const).forEach((type) => {
+    Object.keys(next[type]).forEach((sk) => {
+      next[type][sk] = prune(next[type][sk]);
+    });
+  });
+
+  snapshot = next;
+  hydrated = true;
+  persist();
+}
