@@ -71,6 +71,8 @@ export default function AboutAppScreen({ navigation }: any) {
   }, []);
 
   const [phase, setPhase] = useState<UpdatePhase>('idle');
+  // 排查用：把 expo-updates 抛出的真实错误显示出来（原来只有「检查失败」三个字）
+  const [updateError, setUpdateError] = useState<string>('');
   const busyRef = useRef(false);
 
   const updateIdText = Updates.updateId ? Updates.updateId.slice(0, 8) : t('addTx.updateBuiltin');
@@ -109,7 +111,8 @@ export default function AboutAppScreen({ navigation }: any) {
       setPhase('downloading');
       await Updates.fetchUpdateAsync();
       setPhase('ready');
-    } catch {
+    } catch (e) {
+      setUpdateError(String((e as Error)?.message ?? e));
       setPhase('failed');
     } finally {
       busyRef.current = false;
@@ -159,6 +162,16 @@ export default function AboutAppScreen({ navigation }: any) {
               <Ionicons name="chevron-forward" size={18} color={semantic.textSecondary} />
             </View>
           </TouchableOpacity>
+
+          {/* 排查用：显示 expo-updates 抛出的真实错误（只有「检查失败」时无从定位） */}
+          {phase === 'failed' && !!updateError && (
+            <AppText variant="caption" color={semantic.textTertiary} style={styles.diagnostic}>
+              {updateError}
+            </AppText>
+          )}
+          <AppText variant="caption" color={semantic.textTertiary} style={styles.diagnostic}>
+            {`channel=${Updates.channel || '∅'} · runtime=${Updates.runtimeVersion || '∅'} · id=${(Updates.updateId || '∅').slice(0, 8)}`}
+          </AppText>
 
           {/* 已下载好、等重启：给出唯一的动作按钮（重启后立刻是新版本） */}
           {phase === 'ready' && (
@@ -257,6 +270,7 @@ function Row({
 }
 
 const styles = StyleSheet.create({
+  diagnostic: { paddingHorizontal: 16, paddingTop: 6, lineHeight: 16 },
   container: { flex: 1 },
   headerGlass: { position: 'absolute', width: 44, height: 44 },
   headerGlassInner: { width: 44, height: 44 },
