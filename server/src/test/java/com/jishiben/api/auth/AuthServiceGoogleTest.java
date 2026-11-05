@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,6 +71,52 @@ class AuthServiceGoogleTest {
         assertThat(res.user().email()).isEqualTo("new@x.com");
     }
 
+    @Test
+    void googleNameAndPictureAreSaved() {
+        when(verifier.verify("t")).thenReturn(identity("sub-21", "fresh@x.com"));
+        when(users.findByGoogleSub("sub-21")).thenReturn(Optional.empty());
+        User saved = mock(User.class);
+        when(saved.getId()).thenReturn(31L);
+        when(saved.getEmail()).thenReturn("fresh@x.com");
+        when(saved.getUserRole()).thenReturn("USER");
+        when(saved.getTokenVersion()).thenReturn(0);
+        when(saved.getDisplayName()).thenReturn("顺 铭");
+        when(saved.getGoogleName()).thenReturn("顺 铭");
+        when(saved.getAvatarUrl()).thenReturn("https://example.test/a.png");
+        when(users.save(any(User.class))).thenReturn(saved);
+        when(jwt.issue(any())).thenReturn(new JwtService.TokenPair("a", "r", 3600L));
+
+        AuthDtos.TokenResponse res = service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t"));
+
+        // 需求：新用户自动注册时保存 Google 名称与头像；展示名用 Google 原名（含空格）
+        verify(users).save(argThat(u -> "顺 铭".equals(u.getDisplayName())
+                && "顺 铭".equals(u.getGoogleName())
+                && "https://example.test/a.png".equals(u.getAvatarUrl())));
+        assertThat(res.user().displayName()).isEqualTo("顺 铭");
+        assertThat(res.user().avatarUrl()).isEqualTo("https://example.test/a.png");
+    }
+
+    @Test
+    void customNicknameIsNotOverwrittenByGoogle() {
+        when(verifier.verify("t")).thenReturn(identity("sub-22", "mine@x.com"));
+        User bound = mock(User.class);
+        when(bound.getId()).thenReturn(32L);
+        when(bound.getEmail()).thenReturn("mine@x.com");
+        when(bound.getUserRole()).thenReturn("USER");
+        when(bound.getTokenVersion()).thenReturn(0);
+        when(bound.getDisplayName()).thenReturn("小铭");
+        when(bound.isDisplayNameCustom()).thenReturn(true);
+        when(bound.getGoogleName()).thenReturn("顺 铭");
+        when(users.findByGoogleSub("sub-22")).thenReturn(Optional.of(bound));
+        when(users.save(any(User.class))).thenReturn(bound);
+        when(jwt.issue(any())).thenReturn(new JwtService.TokenPair("a", "r", 3600L));
+
+        AuthDtos.TokenResponse res = service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t"));
+
+        // 需求：用户自己改过的昵称必须保留
+        verify(bound, never()).setDisplayName(anyString());
+        assertThat(res.user().displayName()).isEqualTo("小铭");
+    }
     @Test
     void existingEmailIsAutoLinkedAndLoggedIn() {
         when(verifier.verify("t")).thenReturn(identity("sub-9", "old@x.com"));
