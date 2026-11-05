@@ -32,9 +32,17 @@ import { useDialog } from '../components/AppDialog';
 import PressableScale from '../components/PressableScale';
 import SegmentedControl from '../components/SegmentedControl';
 import BackButton from '../components/ui/BackButton';
+import GoogleLogo from '../components/GoogleLogo';
+
 import { AppText, GlassView, HeroGradient, withAlpha } from '../components/ui';
 
 type Mode = 'signin' | 'signup';
+
+/**
+ * 第一版 Google 登录只在原生端可用；生产 Web 不展示假入口（方案 §1）。
+ * 但本地开发（__DEV__）的 web 预览要能看到按钮设计，因此开发态放行 —— 点击只提示「Web 暂不支持」。
+ */
+const GOOGLE_ENABLED = Platform.OS !== 'web' || __DEV__;
 
 const AVATAR_STORAGE_KEY = '@jizhang/avatar';
 const FIRST_USE_STORAGE_KEY = '@jizhang/firstUseDate';
@@ -94,7 +102,7 @@ export default function AuthScreen({ navigation }: any) {
   const { pagePadding } = useLayout();
   const tr = useT();
   const dialog = useDialog(); // 主题化弹窗（替代系统 Alert）
-  const { signIn, signUp, signOut, sessionExpired, user, syncStatus, lastSyncAt, syncNow } = useAuth();
+  const { signIn, signUp, signInWithGoogle, signOut, sessionExpired, user, syncStatus, lastSyncAt, syncNow } = useAuth();
   const { transactions, ledgers, activeLedgerId } = useApp();
 
   // 立即同步(自设置页"账号与同步"迁入):手动触发一次云端备份
@@ -228,6 +236,30 @@ export default function AuthScreen({ navigation }: any) {
       return;
     }
     // 成功：留在本页,user 状态切换后自动变为"个人中心"视图
+  };
+
+  const handleGoogle = async () => {
+    // 本地 web 预览（web-preview）：只验证按钮设计，不发起真实登录
+    if (Platform.OS === 'web') {
+      dialog.alert({ title: tr('auth.googleWebPreview') });
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    const r = await signInWithGoogle();
+    setBusy(false);
+    if (r.ok) return;
+    // 取消是正常操作：不弹错
+    if (r.error === 'google_cancelled') return;
+    if (r.error === 'google_link_required') {
+      dialog.alert({ title: tr('auth.googleLinkRequired') });
+      return;
+    }
+    if (r.error === 'google_not_configured') {
+      dialog.alert({ title: tr('auth.googleNotConfigured') });
+      return;
+    }
+    dialog.alert({ title: tr('auth.googleUnavailable'), message: r.detail });
   };
 
   return (
@@ -367,6 +399,31 @@ export default function AuthScreen({ navigation }: any) {
               />
             </View>
 
+            {/* Google 登录：第一版仅 Android 原生；Web 不渲染假入口 */}
+            {GOOGLE_ENABLED ? (
+              <>
+                <PressableScale
+                  style={styles.googleBtn}
+                  activeScale={0.98}
+                  disabled={busy}
+                  onPress={() => void handleGoogle()}
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('auth.googleContinue')}
+                  testID="auth-google"
+                >
+                  <GoogleLogo size={18} />
+                  <AppText variant="subhead" weight="600" color={semantic.textPrimary}>
+                    {tr('auth.googleContinue')}
+                  </AppText>
+                </PressableScale>
+                <View style={styles.orRow}>
+                  <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                  <AppText variant="caption" color={semantic.textTertiary}>{tr('auth.or')}</AppText>
+                  <View style={[styles.orLine, { backgroundColor: semantic.hairline }]} />
+                </View>
+              </>
+            ) : null}
+
             <GlassView intensity={WEB_GLASS_INTENSITY} radius={26} style={styles.authCard}>
               <View>
                 <AppText variant="caption" color={semantic.textSecondary} style={styles.fieldLabel}>
@@ -456,6 +513,21 @@ function Info({ label, value, muted }: any) {
 }
 
 const styles = StyleSheet.create({
+  // Google 按钮：白底 + 细描边（官方风格），与蓝白主题一致
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 10,
+    minHeight: 50,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(60,64,67,0.28)',
+  },
+  // 「或」分隔：两条淡线夹一个字
+  orRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginVertical: 14 },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth },
   container: { flex: 1 },
   flex: { flex: 1 },
 

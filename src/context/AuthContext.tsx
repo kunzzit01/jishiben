@@ -12,6 +12,7 @@ import {
 import { INACTIVITY_LIMIT_MS } from '../config/apiConfig';
 import { fullSync, getSyncState, subscribeSyncState, SyncStatus } from '../services/syncService';
 import { cancelRemindersForUser } from '../hooks/useReminders';
+import { getGoogleIdToken } from '../services/googleAuth';
 
 // 距上次"上线"（打开 App）超过该时长 → 会话作废，要求重新登录
 const LAST_ACTIVE_KEY = '@jizhang/lastActiveAt';
@@ -34,6 +35,8 @@ interface AuthContextValue {
   sessionExpired: boolean;
   signIn: (email: string, password: string) => Promise<AuthActionResult>;
   signUp: (email: string, password: string) => Promise<AuthActionResult>;
+  /** Google 登录（Android 原生）：成功后写入本系统会话，失败返回稳定错误码 */
+  signInWithGoogle: () => Promise<AuthActionResult>;
   signOut: () => Promise<void>;
   syncStatus: SyncStatus;
   lastSyncAt: number | null;
@@ -160,6 +163,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithGoogle: AuthContextValue['signInWithGoogle'] = async () => {
+    const tokenResult = await getGoogleIdToken();
+    if (tokenResult.kind === 'cancelled') {
+      // 用户主动取消：不弹错、不动当前会话
+      return { ok: false, error: 'google_cancelled' };
+    }
+    if (tokenResult.kind === 'error') {
+      return { ok: false, error: 'google_unavailable', detail: tokenResult.reason };
+    }
+    try {
+      await authApi.googleLogin(tokenResult.idToken);
+      await AsyncStorage.setItem(LAST_ACTIVE_KEY, String(Date.now())).catch(() => {});
+      setSessionExpired(false);
+      return { ok: true };
+    } catch (e) {
+      const code = e instanceof ApiError ? e.code : 'unknown';
+      if (code === 'GOOGLE_LINK_REQUIRED') return { ok: false, error: 'google_link_required' };
+      if (code === 'GOOGLE_NOT_CONFIGURED') return { ok: false, error: 'google_not_configured' };
+      return { ok: false, error: mapAuthError(e), detail: e instanceof Error ? e.message : String(e) };
+    }
+  };
   const signOut: AuthContextValue['signOut'] = async () => {
     // 只退出登录，本机数据保留（离线照常用）；下次登录同账号会自动合并。
     // 后端没有"吊销本会话"的端点（只有 logout-all 会踢掉所有设备），所以这里只清本地令牌，
@@ -185,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionExpired,
         signIn,
         signUp,
+    signInWithGoogle,
         signOut,
         syncStatus: syncState.status,
         lastSyncAt: syncState.lastSyncAt,

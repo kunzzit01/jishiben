@@ -919,6 +919,12 @@ export const zh = {
     // 登录/注册独立页
     pageTitle: '登录 / 注册',
     modeSignIn: '登录',
+    googleContinue: '使用 Google 继续',
+    or: '或',
+    googleLinkRequired: '这个邮箱已有账号。请先用密码登录，再在设置里绑定 Google，账目会保留在同一账号中。',
+    googleUnavailable: 'Google 登录暂时不可用，请改用邮箱登录。',
+    googleNotConfigured: '服务器还没配置 Google 登录，请改用邮箱登录。',
+    googleWebPreview: 'Web 版暂不支持 Google 登录，这里只用于预览按钮样式。',
     modeSignUp: '注册',
     welcomeBack: '欢迎回来',
     passwordHint: '密码至少 8 位，区分大小写',

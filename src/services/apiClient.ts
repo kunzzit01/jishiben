@@ -619,6 +619,19 @@ export const authApi = {
       body: { email, password },
     }).then(adoptTokens),
 
+  /** Google 登录：把 SDK 的 ID Token 交给服务端验签，成功后同样是本系统令牌 */
+  googleLogin: (idToken: string) =>
+    authorizedRequest<AuthTokenResponse>('POST', '/api/auth/google', {
+      auth: false,
+      body: { idToken },
+    }).then(adoptTokens),
+
+  /** 同邮箱老账号绑定 Google：需要当前登录态 + 本 App 密码 */
+  googleLink: (idToken: string, password: string) =>
+    authorizedRequest<AuthTokenResponse>('POST', '/api/auth/google/link', {
+      body: { idToken, password },
+    }).then(adoptTokens),
+
   me: () => authorizedRequest<SessionUser>('GET', '/api/auth/me'),
 
   updateMe: (displayName: string) =>
@@ -749,6 +762,15 @@ export async function listAllTransactions(): Promise<TransactionDto[]> {
 
 
 /** 管理员广播：把一条通知发给所有已注册设备（服务端只允许 ADMIN 或配置的管理员邮箱） */
+/** Google 登录：把 SDK 拿到的 ID Token 换成我们自己的会话（服务端验签后才签发）。 */
+export async function googleLogin(idToken: string) {
+  return authorizedRequest<AuthTokenResponse>('POST', '/api/auth/google', { body: { idToken } });
+}
+
+/** 同邮箱老账号绑定：需要当前登录态 + 本 App 密码 + 重新验证的 Google ID Token。 */
+export async function googleLink(idToken: string, password: string) {
+  return authorizedRequest<AuthTokenResponse>('POST', '/api/auth/google/link', { body: { idToken, password } });
+}
 export async function broadcastPush(title: string, body: string) {
   return authorizedRequest<{ total: number; sent: number; failed: number; errors: string[] }>(
     'POST',

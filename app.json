@@ -81,7 +81,8 @@
           "style": "dark"
         }
       ],
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "eas": {
