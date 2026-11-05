@@ -53,6 +53,10 @@ public class GoogleTokenVerifier {
         GoogleIdToken parsed;
         try {
             parsed = verifier.verify(idToken);
+        } catch (IllegalArgumentException e) {
+            // 结构不合法（乱码/截断）：这是「Token 无效」，不是上游故障 —— 必须回 401 而不是 502
+            throw new ApiException(HttpStatus.UNAUTHORIZED, ErrorCode.GOOGLE_TOKEN_INVALID,
+                    "Google ID token is malformed");
         } catch (Exception e) {
             // 上游不可达（证书/JWKS 拉取失败）与「Token 不合法」必须区分，客户端才能决定重试还是重登
             throw new ApiException(HttpStatus.BAD_GATEWAY, ErrorCode.UPSTREAM_ERROR,
