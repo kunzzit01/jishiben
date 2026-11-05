@@ -39,7 +39,9 @@ export async function getGoogleIdToken(): Promise<GoogleIdTokenResult> {
     if (isErrorWithCode(e) && e.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
       return { kind: 'error', reason: 'play-services-unavailable' };
     }
-    return { kind: 'error', reason: String((e as Error)?.message ?? e) };
+    // 把 Play Services 的错误码带出来：10=DEVELOPER_ERROR / 12500=需登录 / 12501=取消 / 12502=进行中
+    const code = isErrorWithCode(e) ? String(e.code) : 'n/a';
+    return { kind: 'error', reason: `code=${code} ${String((e as Error)?.message ?? e)}` };
   }
 }
 
