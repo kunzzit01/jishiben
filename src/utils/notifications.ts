@@ -75,8 +75,13 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     return null;
   }
 
-  // projectId 来自 app.json / eas.json 里的 EAS 项目配置
-  const projectId = Constants?.expoConfig?.extra?.eas?.projectId;
+  // OTA 下发的 manifest 不带 extra → Constants.expoConfig.extra 会变 undefined（真机报过这个错），
+  // 因此保留一个编译期常量兜底，值与 app.json 的 extra.eas.projectId 一致。
+  const EAS_PROJECT_ID_FALLBACK = '3dba2e15-d71c-4ca6-af5d-04257ca3e073';
+  const projectId =
+    Constants?.expoConfig?.extra?.eas?.projectId ??
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
+    EAS_PROJECT_ID_FALLBACK;
   if (!projectId) {
     console.warn('找不到 EAS projectId,请确认已经跑过 eas build:configure');
     lastPushError = "app.json 缺 extra.eas.projectId";
