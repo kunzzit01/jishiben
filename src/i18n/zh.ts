@@ -527,6 +527,16 @@ export const zh = {
     budgetNearTitle: '%{name} 预算用到 %{percent}% 了，留意一下～',
     budgetOverTitle: '%{name} 预算已经超了（%{percent}%）～',
     budgetBody: '已花 %{spent}，预算 %{limit}',
+    statusSection: '通知状态',
+    statusPerm: '通知权限',
+    statusPermOn: '已授权',
+    statusPermOff: '未授权：系统设置里允许「记账」发通知后才会弹',
+    statusScheduled: '已排期提醒',
+    statusScheduledCount: '%{count} 条',
+    statusScheduledNone: '0 条：排期没成功，或权限被关掉了',
+    statusNext: '下一条',
+    statusNextNone: '没有排期',
+
     budgetSectionTitle: '预算提醒',
     rulesSectionTitle: '提醒规则',
     // 规则行副标题是单行契约（ListRow.subtitle），只说节奏，别塞提醒细节进去

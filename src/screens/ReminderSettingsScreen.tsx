@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ import type { ReminderRule } from '../reminders/rules';
 import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHeader, Switch } from '../components/ui';
 import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
+import * as NotificationsModule from 'expo-notifications';
 
 /**
  * 提醒设置（设置 → 功能）：提醒规则开关 + 预算提醒管理。展示的是"规则"，不是排期实例。
@@ -33,6 +34,36 @@ export default function ReminderSettingsScreen({ navigation }: any) {
   const onTabScroll = useTabBarScrollHandler();
   const { items, allItems, rules, disabledRules, toggleRule, loading } = useReminderItems();
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
+
+  // 通知状态诊断：权限 / 已排期条数 / 下一条触发时间 —— 用户「为什么没弹」时一眼能看出来
+  const [notifState, setNotifState] = useState<{ perm: string; scheduled: number; nextAt: Date | null }>({
+    perm: 'unknown',
+    scheduled: 0,
+    nextAt: null,
+  });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const perm = (await NotificationsModule.getPermissionsAsync()).status;
+        const scheduled = await NotificationsModule.getAllScheduledNotificationsAsync();
+        const dates = scheduled
+          .map((s) => {
+            const tr: any = s.trigger;
+            const t = tr?.date ?? tr?.value ?? null;
+            return t ? new Date(t as any) : null;
+          })
+          .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()))
+          .sort((a, b) => a.getTime() - b.getTime());
+        if (alive) setNotifState({ perm, scheduled: scheduled.length, nextAt: dates[0] ?? null });
+      } catch {
+        /* 读不到就保持 unknown，不影响页面其它部分 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /** 关掉/打开某条规则后要立刻重排，否则要等下一次数据变化 */
   const handleToggle = useCallback(
@@ -121,6 +152,30 @@ export default function ReminderSettingsScreen({ navigation }: any) {
             ))}
           </ListSection>
         ) : null}
+
+        {/* 通知状态：为什么没弹，一眼可见（权限 / 已排期条数 / 下一条触发时间） */}
+        <ListSection title={t('reminder.statusSection')} testID="reminder-notif-state">
+          <ListRow
+            icon={notifState.perm === 'granted' ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+            iconColor={notifState.perm === 'granted' ? semantic.accentText : semantic.danger}
+            title={t('reminder.statusPerm')}
+            subtitle={notifState.perm === 'granted' ? t('reminder.statusPermOn') : t('reminder.statusPermOff')}
+          />
+          <ListRow
+            icon="alarm-outline"
+            title={t('reminder.statusScheduled')}
+            subtitle={notifState.scheduled > 0 ? `${notifState.scheduled} 条` : t('reminder.statusScheduledNone')}
+          />
+          <ListRow
+            icon="time-outline"
+            title={t('reminder.statusNext')}
+            subtitle={
+              notifState.nextAt
+                ? `${formatDate(notifState.nextAt, langMode, { style: 'monthDay' })} ${String(notifState.nextAt.getHours()).padStart(2, '0')}:${String(notifState.nextAt.getMinutes()).padStart(2, '0')}`
+                : t('reminder.statusNextNone')
+            }
+          />
+        </ListSection>
 
         {/* 预算超支：本月已经触发的阈值，删掉 = 这个月不再为它提醒 */}
         {budgetAlerts.length > 0 ? (

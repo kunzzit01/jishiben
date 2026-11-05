@@ -150,6 +150,39 @@ export function addNotificationListeners(
  */
 
 /**
+ * 本地提醒的前置条件：通知权限 + Android 通知渠道。
+ *
+ * 为什么必须有：原来只有「注册推送 token」那条路会 requestPermissionsAsync / setNotificationChannelAsync，
+ * 而本地提醒（记一笔 21:00 / 还款日 / 月末总结）走的是另一条路，于是：
+ *   · Android 13+ 没请求过 POST_NOTIFICATIONS → 系统直接丢弃（用户表现：一条都不弹）
+ *   · Android 8+ 没有渠道 → 通知没有归属渠道，静默或被丢
+ * 这里在排期前兜底做一次（幂等：已授权时只是读状态）。
+ */
+export async function ensureLocalReminderReady(): Promise<{ granted: boolean; channelId: string }> {
+  const channelId = 'reminders';
+  if (!NotificationsModule) return { granted: false, channelId };
+  try {
+    let status = (await NotificationsModule.getPermissionsAsync()).status;
+    if (status !== 'granted') {
+      status = (await NotificationsModule.requestPermissionsAsync()).status;
+    }
+    if (Platform.OS === 'android') {
+      for (const id of [channelId, 'default']) {
+        await NotificationsModule.setNotificationChannelAsync(id, {
+          name: id === channelId ? '记账提醒' : 'default',
+          importance: NotificationsModule.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+        });
+      }
+    }
+    return { granted: status === 'granted', channelId };
+  } catch (e) {
+    console.warn('本地提醒前置检查失败', e);
+    return { granted: false, channelId };
+  }
+}
+
+/**
  * 本地通知调度(不依赖推送 token):财务规划的付款提醒等本地提醒用这个。
  * 返回系统分配的 notification id:只有拿到它才能事后取消,所以调用方要留存。
  * Expo Go 里安静跳过;development build 正常。
@@ -160,6 +193,11 @@ export async function scheduleLocalNotification(
   triggerDate: Date
 ): Promise<string | null> {
   if (!NotificationsModule) return null;
+  const ready = await ensureLocalReminderReady();
+  if (!ready.granted) {
+    console.warn('通知权限未授予，本地提醒无法显示');
+    return null;
+  }
   try {
     return await NotificationsModule.scheduleNotificationAsync({
       content: { title, body },
@@ -167,6 +205,7 @@ export async function scheduleLocalNotification(
       trigger: {
         type: (require('expo-notifications') as NotificationsModule).SchedulableTriggerInputTypes.DATE,
         date: triggerDate,
+        channelId: ready.channelId,
       } as Parameters<NotificationsModule['scheduleNotificationAsync']>[0]['trigger'],
     });
   } catch (e) {
