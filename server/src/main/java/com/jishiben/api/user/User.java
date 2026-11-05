@@ -33,7 +33,6 @@ public class User {
     @Column(name = "display_name", length = 100)
     private String displayName;
 
-    @Column(name = "user_role", nullable = false, length = 20)
     /** Google 返回的完整姓名（展示用；不用它判断账号身份） */
     @Column(name = "google_name", length = 120)
     private String googleName;
@@ -46,6 +45,7 @@ public class User {
     @Column(name = "display_name_custom", nullable = false)
     private boolean displayNameCustom = false;
 
+    @Column(name = "user_role", nullable = false, length = 20)
     private String userRole = "USER";
 
     @Column(name = "email_verified_at", columnDefinition = "datetime")

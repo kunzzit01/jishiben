@@ -247,6 +247,55 @@ public class AuthService {
         return toResponse(users.save(user));
     }
 
+    /**
+     * 用 Google 资料补齐/刷新账号：只写展示字段，账号身份始终是 users.id + google_sub。
+     * 用户在 App 内自己改过昵称（displayNameCustom）就不覆盖 displayName。
+     */
+    private void applyGoogleProfile(User user, GoogleTokenVerifier.GoogleIdentity identity) {
+        String googleName = Texts.trimToNull(identity.name());
+        String picture = Texts.trimToNull(identity.picture());
+        if (googleName != null) {
+            user.setGoogleName(googleName);
+        }
+        if (picture != null) {
+            user.setAvatarUrl(picture);
+        }
+        boolean blank = user.getDisplayName() == null || user.getDisplayName().isBlank();
+        if (!user.isDisplayNameCustom() && (blank || googleName != null)) {
+            if (googleName != null) {
+                user.setDisplayName(googleName);
+            } else if (blank) {
+                user.setDisplayName(emailLocalPart(user.getEmail()));
+            }
+        }
+    }
+
+    /** 展示名优先级：用户自定义昵称 → Google 名称 → 既有 displayName → 邮箱 @ 前段 */
+    private static String resolveDisplayName(User user) {
+        if (user.isDisplayNameCustom() && hasText(user.getDisplayName())) {
+            return user.getDisplayName();
+        }
+        if (hasText(user.getGoogleName())) {
+            return user.getGoogleName();
+        }
+        if (hasText(user.getDisplayName())) {
+            return user.getDisplayName();
+        }
+        return emailLocalPart(user.getEmail());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String emailLocalPart(String email) {
+        if (email == null) {
+            return "";
+        }
+        int at = email.indexOf('@');
+        return at > 0 ? email.substring(0, at) : email;
+    }
+
     private AuthDtos.TokenResponse tokens(User user) {
         AuthPrincipal principal = new AuthPrincipal(user.getId(), user.getEmail(), user.getUserRole(),
                 user.getTokenVersion());
