@@ -350,7 +350,10 @@ export default function AuthScreen({ navigation }: any) {
             </View>
           </PressableScale>
           <PressableScale
-            style={styles.nameRow}
+            style={[
+              styles.nameChip,
+              { borderColor: semantic.hairline, backgroundColor: semantic.surface },
+            ]}
             activeScale={0.97}
             onPress={() => setNameEditOpen(true)}
             accessibilityRole="button"
@@ -360,7 +363,7 @@ export default function AuthScreen({ navigation }: any) {
             <AppText variant="title3" numberOfLines={1} style={styles.name}>
               {displayTitle}
             </AppText>
-            <Ionicons name="pencil" size={15} color={semantic.textTertiary} />
+            <Ionicons name="pencil" size={14} color={semantic.accentText} />
           </PressableScale>
           <AppText variant="footnote" color={semantic.textSecondary} style={styles.sub}>
             {user.email}
@@ -622,7 +625,17 @@ const styles = StyleSheet.create({
   },
   // 外层容器：只负责定位，不裁剪（否则徽章会被圆的 overflow:hidden 切掉）
   // 昵称行：文字 + 铅笔，整体可点改名
-  nameRow: { flexDirection: 'row', alignItems: 'center', columnGap: 6, maxWidth: '86%' },
+  // 昵称胶囊：描边 + 44 高命中区，明确传达「可点改名」
+  nameChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 6,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxWidth: '88%',
+  },
   avatarWrap: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center' },
   avatar: {
     width: 88,
