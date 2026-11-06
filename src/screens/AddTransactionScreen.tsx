@@ -1778,6 +1778,9 @@ function fxAmountText(raw: string, live: string | null): string {
 
       if (result.amount == null) {
         dialog.alert({ title: t('common.confirm'), message: t('addTx.scanNoAmount') });
+      } else if ((result.confidence ?? 1) < 0.6) {
+        // 规则置信度低（没找到明确金额标签/货币符号）：提醒核对，而不是悄悄填错
+        dialog.alert({ title: t('addTx.scanCheckAmountTitle'), message: t('addTx.scanCheckAmountMsg') });
       }
     } catch (e: any) {
       dialog.alert({ title: t('addTx.scanFailed'), message: e?.message ?? t('addTx.scanFailed') });

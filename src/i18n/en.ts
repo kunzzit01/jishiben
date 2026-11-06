@@ -162,6 +162,9 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    // Scan: low-confidence hint
+    scanCheckAmountTitle: 'Please verify the result',
+    scanCheckAmountMsg: 'No clear amount label was found, so the amount may be inferred. Check it before saving.',
     // About: local OCR self-check
     localOcr: 'Local OCR',
     localOcrReady: 'Ready (offline scan)',

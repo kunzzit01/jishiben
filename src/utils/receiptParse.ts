@@ -34,15 +34,16 @@ const CURRENCY_WORDS: Array<[RegExp, string]> = [
 ];
 
 /** 不是「这笔花了多少」的行：出现这些词时，同行的数字不作为金额候选 */
-const AMOUNT_NOISE = /(手续费|服务费|小费|余额|找零|折扣|优惠|红包|积分|税率|利率|运费|税|change|balance|tip|discount|tax|fee)/i;
+const AMOUNT_NOISE = /(手续费|服务费|小费|余额|找零|折扣|优惠|红包|积分|points?|税率|利率|运费|税|change|balance|tip|discount|tax|fee|ref\b|reference|wallet ref|transaction no|order|invoice|serial|卡号|账号|单号|编号|流水)/i;
 /** 强金额标签：命中就优先 */
-const AMOUNT_STRONG = /(合计|总计|总价|总额|应付|实付|实收|应付金额|付款金额|消费金额|金额合计|total|grand total|amount due|subtotal)/i;
+const AMOUNT_STRONG = /(合计|总计|总价|总额|应付|实付|实收|应付金额|付款金额|消费金额|金额|total|grand total|amount due|amount|subtotal|paid)/i;
 
 const INCOME_WORDS = /(收款|收入|转入|入账|到账|已收款|工资|salary|refund|退款|received|credit)/i;
 const EXPENSE_WORDS = /(支出|消费|已支付|支付成功|付款|转出|提现|debit|paid|purchase)/i;
 
 /** 店铺类型信号：比单品关键词更可靠（超市里也可能买到水果） */
 const STORE_CATEGORY: Array<[string, RegExp]> = [
+  ['购物', /(apple\s?services|apple\s?store|app\s?store|itunes|icloud|apple pay|apple music|apple tv|google play|netflix|spotify)/i],
   ['日用', /(supermarket|speedmart|speed mart|99 speed|mart\b|grocery|giant|tesco|lotus|aeon|daiso|minimarket|便利店|超市)/i],
   ['餐饮', /(restoran|restaurant|mamak|kopitiam|cafe|coffee|bistro|kitchen|bakery|eatery|餐厅|饭店|茶餐室|咖啡)/i],
   ['交通', /(petronas|shell|petrol|caltex|bhp|gas station|油站|touch ?n ?go|parking|停车场)/i],
@@ -53,7 +54,7 @@ const STORE_CATEGORY: Array<[string, RegExp]> = [
 const CATEGORY_KEYWORDS: Array<[string, RegExp]> = [
   ['餐饮', /(餐|饭|food|restaurant|cafe|coffee|kopitiam|mamak|restoran|makan|饮食|火锅|快餐|麦当劳|肯德基|星巴克|subway|mcdonald|kfc|starbucks)/i],
   ['蔬菜', /(蔬菜|青菜|菜市场|market vegetable|sayur|vegetable|grocer)/i],
-  ['水果', /(水果|fruit|buah|apple|orange|mango)/i],
+  ['水果', /(水果|fruit|buah|苹果|orange|mango)/i],
   ['零食', /(零食|snack|chocolate|biscuit|candy|ice cream|dessert|甜品)/i],
   ['烟酒', /(烟|酒|tobacco|wine|beer|liquor|alcohol)/i],
   ['日用', /(日用|超市|supermarket|mart|grocery|tesco|lotus|99 speedmart|giant|aeon|daiso|生活用品)/i],
@@ -143,24 +144,31 @@ function numbersIn(line: string): number[] {
 }
 
 function extractAmount(lines: string[]): { amount: number | null; strength: number } {
+  // 评分规则（真实账单截图验证）：
+  //   3 = 带货币符号/代码的行（RM14.90、¥128.00、SGD 12.30）
+  //   2 = 带金额标签的行（Total / Amount / 金额 …）
+  //   1 = 其它裸数字
+  // 单号/参考号/积分/日期时间行一律跳过——它们动辄十几位，最容易被误当金额。
+  const TIME_RE = /\b\d{1,2}[:：]\d{2}([:：]\d{2})?\b/;
+  const DATE_RE = /\d{1,4}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,4}/;
   let best: { amount: number; strength: number } | null = null;
+
   for (const line of lines) {
     if (AMOUNT_NOISE.test(line)) continue;
+    if (TIME_RE.test(line) || DATE_RE.test(line)) continue;
+    const hasMoney = /[¥￥$€£]|\bRM\s?\d|\bRM\b|\bMYR\b|\bSGD\b|\bUSD\b|\bCNY\b|\bHKD\b/i.test(line);
     const strong = AMOUNT_STRONG.test(line);
-    const hasSymbol = /[¥￥$€£]|\bRM\b|\bSGD\b|\bMYR\b/i.test(line);
     const nums = numbersIn(line);
     if (nums.length === 0) continue;
-    // 一行多个数字时，取**最后一个**（收据里「标签 … 金额」金额在右侧）
     const value = nums[nums.length - 1];
-    if (value >= 100000) continue; // 单号/电话之类
-    const strength = strong ? 3 : hasSymbol ? 2 : 1;
+    if (value <= 0 || value >= 100000) continue;
+    const strength = hasMoney ? 3 : strong ? 2 : 1;
     if (!best || strength > best.strength || (strength === best.strength && value > best.amount)) {
       best = { amount: value, strength };
     }
   }
   return { amount: best?.amount ?? null, strength: best?.strength ?? 0 };
 }
-
 function extractMerchant(lines: string[]): string | null {
   for (const raw of lines.slice(0, 6)) {
     const line = raw.trim();

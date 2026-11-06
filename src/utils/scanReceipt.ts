@@ -1,9 +1,13 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export interface ScannedReceipt {
   amount: number | null;
   merchant: string | null;
   date: string | null; // YYYY-MM-DD
   type: 'expense' | 'income'; // 识别不准默认 expense
   suggestedCategory: string | null; // 中文分类名，例如"餐饮"或"工资"
+  /** 0–1 规则置信度：偏低时界面提示用户核对金额 */
+  confidence?: number;
   /** OCR 全文（查重用，界面不要展示） */
   rawText?: string;
   /** 这张小票最近扫过（订阅式提示，不阻止记账） */
@@ -12,6 +16,8 @@ export interface ScannedReceipt {
 }
 
 /** 识别失败的稳定信号：界面可以按 code 决定「提示后手动记账」还是「重试」。 */
+const LAST_SCAN_TEXT_KEY = '@jizhang/lastScanText';
+
 export class ReceiptScanError extends Error {
   readonly code: string;
 
@@ -57,12 +63,15 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     } catch {
       /* 查重失败不影响识别结果 */
     }
+    // 留一份最近识别文字：识别不准时可在「关于应用」里查看原文，便于定位规则问题
+    void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, parsed.rawText.slice(0, 1200)).catch(() => undefined);
     return {
       amount: parsed.amount,
       merchant: parsed.merchant,
       date: parsed.date,
       type: parsed.type,
       suggestedCategory: parsed.suggestedCategory,
+      confidence: parsed.confidence,
       rawText: parsed.rawText,
       duplicate,
       duplicateDaysAgo,

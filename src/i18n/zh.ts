@@ -164,6 +164,9 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    // 扫票：置信度偏低时提示核对
+    scanCheckAmountTitle: '识别结果请核对',
+    scanCheckAmountMsg: '没有找到明确的金额标签，金额可能是推断的。请确认无误后再保存。',
     // 关于应用：本地扫票模块自检
     localOcr: '本地识别',
     localOcrReady: '可用（支持离线扫票）',
