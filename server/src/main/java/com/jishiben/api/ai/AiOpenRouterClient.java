@@ -107,33 +107,6 @@ public class AiOpenRouterClient {
     }
 
     /**
-     * Sends one receipt image and maps the model answer onto the app contract.
-     *
-     * @param mimeType  sniffed MIME type, used only to build the data URL
-     * @param base64    compact base64 of that image (already validated and size-capped)
-     * @param imageBytes decoded length, logged instead of any image content
-     */
-    public AiReceiptDtos.ReceiptScanResponse scan(String mimeType, String base64, int imageBytes) {
-        if (!isConfigured()) {
-            throw AiApiException.notConfigured();
-        }
-        // Length only: the key and the image bytes must never reach a log line.
-        log.info("AI receipt scan: model={} mime={} bytes={}", model, mimeType, imageBytes);
-
-        Map<String, Object> body = Map.of(
-                "model", model,
-                "temperature", 0,
-                "max_tokens", maxTokens,
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", List.of(
-                                Map.of("type", "text", "text", PROMPT),
-                                Map.of("type", "image_url", "image_url",
-                                        Map.of("url", "data:" + mimeType + ";base64," + base64))))));
-        return parse(post("/chat/completions", body, "Receipt scanning"));
-    }
-
-    /**
      * One authenticated provider call. The upstream error body is dropped on purpose, so only a
      * status code or an exception class name can ever reach a log line or the client.
      */
@@ -257,33 +230,6 @@ public class AiOpenRouterClient {
             }
         }
         return false;
-    }
-
-    private AiReceiptDtos.ReceiptScanResponse parse(String response) {
-        if (response == null || response.isBlank()) {
-            throw AiApiException.upstream("Receipt scanning provider returned an empty response");
-        }
-        try {
-            JsonNode root = objectMapper.readTree(response);
-            String text = contentOf(root.path("choices").path(0).path("message").path("content"));
-            String cleaned = text.replace(FENCE + "json", "").replace(FENCE, "").trim();
-            int start = cleaned.indexOf('{');
-            int end = cleaned.lastIndexOf('}');
-            if (start < 0 || end <= start) {
-                throw AiApiException.upstream("Receipt scanning provider did not return a JSON object");
-            }
-            JsonNode parsed = objectMapper.readTree(cleaned.substring(start, end + 1));
-            return new AiReceiptDtos.ReceiptScanResponse(
-                    decimal(parsed.path("amount")),
-                    textOrNull(parsed.path("merchant")),
-                    date(parsed.path("date")),
-                    "income".equals(textOrNull(parsed.path("type"))) ? "income" : "expense",
-                    textOrNull(parsed.path("suggestedCategory")));
-        } catch (AiApiException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw AiApiException.upstream("Receipt scanning provider returned an unreadable payload");
-        }
     }
 
     private static String contentOf(JsonNode content) {

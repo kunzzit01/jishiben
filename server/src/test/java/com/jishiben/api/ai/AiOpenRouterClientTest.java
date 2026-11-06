@@ -101,38 +101,7 @@ class AiOpenRouterClientTest {
                 .containsExactly("AI_NOT_CONFIGURED", org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
     }
 
-    @Test
-    void aModelAnswerIsParsedIntoTheAppContract() throws Exception {
-        String modelText = FENCE + "json\n{\"amount\": 12.34, \"merchant\": \"星巴克\", \"date\": \"2025-03-01\","
-                + " \"type\": \"income\", \"suggestedCategory\": \"兼职\"}\n" + FENCE;
-        AiOpenRouterClient configured = client(TEST_KEY, 200, upstreamAnswer(modelText), 0, 5000);
 
-        AiReceiptDtos.ReceiptScanResponse response =
-                configured.scan("image/png", java.util.Base64.getEncoder().encodeToString(IMAGE), IMAGE.length);
-
-        assertThat(response.amount()).isEqualByComparingTo("12.34");
-        assertThat(response.merchant()).isEqualTo("星巴克");
-        assertThat(response.date()).isEqualTo(java.time.LocalDate.of(2025, 3, 1));
-        assertThat(response.type()).isEqualTo("income");
-        assertThat(response.suggestedCategory()).isEqualTo("兼职");
-        // The request really went to the provider's chat-completions path, carrying the bearer key.
-        assertThat(seenPath.get()).isEqualTo("/chat/completions");
-        assertThat(seenAuthorization.get()).isEqualTo("Bearer " + TEST_KEY);
-    }
-
-    @Test
-    void anUnknownFieldComesBackAsNullInsteadOfBreakingTheContract() throws Exception {
-        AiOpenRouterClient configured = client(TEST_KEY, 200,
-                upstreamAnswer("{\"amount\": null, \"merchant\": \"\", \"date\": \"not-a-date\"}"), 0, 5000);
-
-        AiReceiptDtos.ReceiptScanResponse response = configured.scan("image/png", "AQ==", 1);
-
-        assertThat(response.amount()).isNull();
-        assertThat(response.merchant()).isNull();
-        assertThat(response.date()).isNull();
-        assertThat(response.type()).isEqualTo("expense");
-        assertThat(response.suggestedCategory()).isNull();
-    }
 
     @Test
     void anUpstreamErrorBecomes502WithoutEchoingTheKey() throws Exception {

@@ -1,7 +1,6 @@
 // aiConfig.ts —— AI 客户端开关
 //
 // 安全基线：APP 包里**不再有任何第三方密钥，也不再直连任何第三方 AI 域名**。
-//   小票识别 → POST /api/ai/receipt-scan
 //   语音记账 → POST /api/ai/voice-parse
 //   两条线都由自家后端中转，OpenRouter 密钥只存在于服务器环境变量（OPENROUTER_API_KEY），
 //   永远不会被 Expo 内联进 bundle —— 解包也拿不到可盗用的东西。

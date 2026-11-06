@@ -571,19 +571,6 @@ function adoptTokens(response: AuthTokenResponse): AuthTokenResponse {
 }
 
 /**
- * 小票识别结果（POST /api/ai/receipt-scan）。服务端把「识别不到」写成 null，
- * 且 Spring 的 non_null 序列化会省略整个字段 —— 所以每个字段都可能 undefined。
- */
-export interface ReceiptScanDto {
-  amount?: number | null;
-  merchant?: string | null;
-  /** YYYY-MM-DD */
-  date?: string | null;
-  type?: 'expense' | 'income' | null;
-  suggestedCategory?: string | null;
-}
-
-/**
  * 语音记账结果（POST /api/ai/voice-parse）。服务端顺序做两步（转写 → 记账解析），
  * 形状与 utils/voiceAccounting.ts 的 VoiceAccountingResult 一一对应；除 transcript 外
  * 每个「识别不到」的字段都是 null，且 Spring 的 non_null 序列化会整体省略 → 可能 undefined。
@@ -601,7 +588,6 @@ export interface VoiceParseDto {
 
 
 /** 服务端上游超时 30s + 连接 5s，客户端留出余量，避免先于服务端报「网络超时」。 */
-const AI_SCAN_TIMEOUT_MS = 45_000;
 
 /** 语音是两步上游调用（转写 + 解析），这里再放宽一档，仍由服务端的 504 兜底。 */
 const AI_VOICE_TIMEOUT_MS = 90_000;
@@ -735,14 +721,6 @@ export const api = {
   // premium（桩：只读状态，内购未实现）
   premiumStatus: () =>
     authorizedRequest<{ active: boolean; implemented: boolean }>('GET', '/api/premium/status'),
-
-  // AI 小票识别：图片只发给自家后端，第三方密钥永远不进 APP 包。
-  // 服务端读图 + 调模型最长约 30s，所以这里单独放宽超时（默认 20s 会先于服务端超时）。
-  aiScanReceipt: (imageBase64: string) =>
-    authorizedRequest<ReceiptScanDto>('POST', '/api/ai/receipt-scan', {
-      body: { imageBase64 },
-      timeoutMs: AI_SCAN_TIMEOUT_MS,
-    }),
 
   // AI 语音记账：录音只发给自家后端（服务端做转写 + 记账解析），第三方密钥永远不进 APP 包。
   aiVoiceParse: (audioBase64: string, format: string) =>
