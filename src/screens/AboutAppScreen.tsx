@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { describeLocalOcr, isLocalOcrAvailable } from '../utils/receiptOcr';
+import { getReceiptAiStatus } from '../utils/receiptAi';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
 /**
@@ -48,6 +49,17 @@ export default function AboutAppScreen({ navigation }: any) {
    * 绝不假装在检查。                                               */
   /* 类别页性能数据（CategoryPage 每次打开都会写 @jizhang/lastCategoryPerf）：
    * 让用户随时能在关于页看到真机数字并截图，不用盯着那个默认不显示的调试白字。 */
+  // 端侧 AI（Gemini Nano）状态 + 上次扫票的 AI 诊断：只用于排查，不参与业务
+  useEffect(() => {
+    let alive = true;
+    void getReceiptAiStatus().then((s) => { if (alive) setAiStatus(s); });
+    void AsyncStorage.getItem('@jizhang/lastReceiptAi')
+      .then((v) => { if (alive) setLastAiDiag(v ?? '-'); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  const [aiStatus, setAiStatus] = useState<string>('-');
+  const [lastAiDiag, setLastAiDiag] = useState<string>('-');
   const [catPerf, setCatPerf] = useState<{
     first: number;
     full: number | null;
@@ -197,6 +209,28 @@ export default function AboutAppScreen({ navigation }: any) {
             value={describeLocalOcr()}
             muted={semantic.textSecondary}
           />
+
+          {/* 端侧 AI（Gemini Nano）：只有 AVAILABLE 才会用于难票兜底 */}
+          <Row
+            label={t('addTx.receiptAiRow')}
+            value={aiStatus}
+            muted={semantic.textSecondary}
+            wrap
+          />
+          {/* 上次扫票：是否尝试端侧 AI、是否采用、为什么没采用 */}
+          <Row
+            label={t('addTx.receiptAiLastRow')}
+            value={lastAiDiag}
+            muted={semantic.textSecondary}
+            wrap
+          />
+
+          {/* 模型「可下载但未下载」时给一句可执行提示，避免用户以为是 bug */}
+          {aiStatus === 'DOWNLOADABLE' && (
+            <AppText variant="footnote" color={semantic.textSecondary} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+              {t('addTx.receiptAiDownloadableHint')}
+            </AppText>
+          )}
           {/* 真机性能诊断（用户截图用）：数值来自最近一次打开「类别管理」页 */}
           <Row
             label={t('addTx.categoryPerfRow')}

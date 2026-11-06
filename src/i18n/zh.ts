@@ -164,6 +164,10 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    receiptAiDownloadableHint: '这台手机支持端侧 AI，但模型还没下载。到系统设置 → Google → 端侧模型（AICore）下载后，难票识别会更好；不下载也能正常扫票。',
+    // 关于应用：端侧 AI 诊断
+    receiptAiRow: '端侧 AI',
+    receiptAiLastRow: '上次扫票 AI',
     // 扫票币种与账户币种不一致
     scanCurrencyMismatchTitle: '币种不一致，请核对',
     scanCurrencyMismatchMsg: '识别到 {scan}，当前账户是 {account}。请确认是否换账户，或手动校正金额后再保存。',

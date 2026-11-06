@@ -31,6 +31,7 @@ export interface ScannedReceipt {
 
 /** 识别失败的稳定信号：界面可以按 code 决定「提示后手动记账」还是「重试」。 */
 const LAST_SCAN_TEXT_KEY = '@jizhang/lastScanText';
+const LAST_AI_DIAG_KEY = '@jizhang/lastReceiptAi';
 
 export class ReceiptScanError extends Error {
   readonly code: string;

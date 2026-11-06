@@ -158,3 +158,18 @@ export async function askReceiptAi(input: { lines: OcrLine[]; imageUri?: string 
     return null;
   }
 }
+
+/** 端侧 AI 的真实状态（给设置页展示）：AVAILABLE / DOWNLOADABLE / DOWNLOADING / UNAVAILABLE / …
+ *  永不抛：模块缺失返回 module-missing，异常返回 error:<msg> */
+export async function getReceiptAiStatus(): Promise<string> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { NativeModules } = require('react-native');
+    const native = NativeModules?.GeminiNano;
+    if (!native || typeof native.status !== 'function') return 'module-missing';
+    const raw = await native.status();
+    return typeof raw === 'string' && raw ? raw : 'unknown';
+  } catch (e) {
+    return 'error:' + String((e as Error)?.message ?? e).slice(0, 60);
+  }
+}

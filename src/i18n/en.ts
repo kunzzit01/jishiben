@@ -162,6 +162,10 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    receiptAiDownloadableHint: 'This phone supports on-device AI but the model is not downloaded yet. Get it in system settings → Google → on-device models (AICore) to improve hard receipts. Scanning works without it.',
+    // About: on-device AI diagnostics
+    receiptAiRow: 'On-device AI',
+    receiptAiLastRow: 'Last scan AI',
     // Scanned currency differs from the account currency
     scanCurrencyMismatchTitle: 'Currency mismatch',
     scanCurrencyMismatchMsg: 'Receipt says {scan} but the account is {account}. Switch the account or fix the amount before saving.',
