@@ -44,10 +44,7 @@ export interface ScannedReceipt {
   remoteLines?: OcrLine[];
   /** 本次扫票走通的服务端 OCR 轮数（0 = 没上传 / 没拿到行；当前实现每次扫票最多 1 轮） */
   serverPasses?: number;
-  /** 建议备注（只是建议：界面做成「点击填入」占位提示，绝不自动写入） */
-  noteSuggestion?: string | null;
   /** 备注建议的判定理由（诊断用，界面不展示） */
-  noteSuggestionReason?: string;
 }
 
 /** 识别失败的稳定信号：界面可以按 code 决定「提示后手动记账」还是「重试」。 */
@@ -391,17 +388,6 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     // 留一份最近识别文字：识别不准时可在「关于应用」里查看原文，便于定位规则问题
     void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawText.slice(0, 1200)).catch(() => undefined);
     // 备注建议（纯函数、只出文案）：界面做成「点击填入」占位提示，绝不自动写进备注
-    let noteText: string | null = null;
-    let noteReason = '';
-    try {
-      const { buildNoteSuggestion } = await import('./receiptNoteSuggestion');
-      const note = buildNoteSuggestion({ lines, merchant, merchantConfident, amount });
-      noteText = note.text;
-      noteReason = note.reason;
-    } catch (e) {
-      // 建议失败绝不能连累记账：静默降级成「没有建议」
-      noteReason = 'note-error: ' + String((e as Error)?.message ?? e).slice(0, 100);
-    }
     return {
       amount,
       merchant,
@@ -424,8 +410,6 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       // 服务端证据：只有真有服务端结果时才有值
       remoteLines: serverLines ?? undefined,
       serverPasses,
-      noteSuggestion: noteText,
-      noteSuggestionReason: noteReason,
     };
   } catch (e) {
     // 已经翻译过的错误（含「本地识别失败且服务端也没拿到行」）原样抛出，不再二次包装成 ocr-failed
