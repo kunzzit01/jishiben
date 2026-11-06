@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { describeLocalOcr, isLocalOcrAvailable } from '../utils/receiptOcr';
 import { describeReceiptAiStatus, getReceiptAiStatus } from '../utils/receiptAi';
+import { getServerOcrSettings, hydrateServerOcrSettings, isServerOcrUsable } from '../utils/scanSettings';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
 /**
@@ -53,6 +54,13 @@ export default function AboutAppScreen({ navigation }: any) {
   useEffect(() => {
     let alive = true;
     void getReceiptAiStatus().then((s) => { if (alive) setAiStatus(s); });
+    void hydrateServerOcrSettings().then(() => {
+      if (!alive) return;
+      const st = getServerOcrSettings();
+      const on = st.enabled ? '开' : '关';
+      const hasKey = st.key.trim() ? '已填密钥' : '未填密钥';
+      setServerOcrState(on + ' · ' + hasKey + (isServerOcrUsable(st) ? ' · 可用' : ' · 不会上传'));
+    }).catch(() => undefined);
     void AsyncStorage.getItem('@jizhang/lastScanText')
       .then((v) => { if (alive) setLastOcrText(v && v.trim() ? v.replace(/\s+/g, ' ').slice(0, 220) : '-'); })
       .catch(() => undefined);
@@ -64,6 +72,7 @@ export default function AboutAppScreen({ navigation }: any) {
   const [aiStatus, setAiStatus] = useState<string>('-');
   const [lastAiDiag, setLastAiDiag] = useState<string>('-');
   const [lastOcrText, setLastOcrText] = useState<string>('-');
+  const [serverOcrState, setServerOcrState] = useState<string>('-');
   const [catPerf, setCatPerf] = useState<{
     first: number;
     full: number | null;
@@ -229,7 +238,13 @@ export default function AboutAppScreen({ navigation }: any) {
             wrap
           />
           {/* 上一次扫票的 OCR 原文（截断）：扫不准时截图这一行即可反馈版式 */}
-          <Row
+                    <Row
+            label={t('addTx.serverOcrStateRow')}
+            value={serverOcrState}
+            muted={semantic.textSecondary}
+            wrap
+          />
+<Row
             label={t('addTx.receiptLastOcrRow')}
             value={lastOcrText}
             muted={semantic.textSecondary}
