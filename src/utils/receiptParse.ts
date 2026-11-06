@@ -205,6 +205,39 @@ function amountInRowAfterLabel(row: Row): number | null {
   return null;
 }
 
+/** 把「-RM17.90 / S$ 12.30 / ¥128.00 / 15.00」这类单元解析成数字；不是纯金额就返回 null */
+function moneyCellValue(text: string): number | null {
+  const cleaned = text
+    .replace(/[¥￥$€£]/g, '')
+    // 注意：不能要求词边界 —— "RM17.90" 里 RM 与数字之间没有边界
+    .replace(/(RM|MYR|SGD|USD|TWD|HKD|THB|IDR|PHP|VND|CNY|RMB)(?=\s*\d)/gi, '')
+    .replace(/^[+-]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/^[\d.,]+$/.test(cleaned)) return null;
+  const nums = numbersIn(cleaned);
+  return nums.length === 1 ? nums[0] : null;
+}
+
+/** 电子钱包账单：顶部那行带正负号的金额就是这笔交易的金额（无 total 标签） */
+function extractSignedTopAmount(rows: Row[]): AmountResult | null {
+  const PAY = /(e-?wallet|ewallet|payment method|duitnow|qr|card|tunai|cash)/i;
+  if (!rows.some((r) => PAY.test(r.text))) return null;
+  const hits: { idx: number; value: number }[] = [];
+  rows.slice(0, 6).forEach((row, idx) => {
+    if (NON_AMOUNT_LABEL.test(row.text)) return;
+    const signed = /^\s*[+-]\s*(?:[¥￥$€£]|RM|MYR|S\$|SGD|\d)/i.test(row.text.trim());
+    if (!signed) return;
+    for (const cell of row.cells) {
+      const v = moneyCellValue(cell.text);
+      if (v !== null && v > 0 && v < 100000) hits.push({ idx, value: v });
+    }
+  });
+  if (hits.length !== 1) return null;   // 有歧义就不填
+  const currency = rowCurrency(rows[hits[0].idx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
+  return { amount: hits[0].value, currency, confidence: 0.75, label: rows[hits[0].idx].text };
+}
+
 function isMoneyShaped(text: string): boolean {
   return /[¥￥$€£]|\bRM\b|\bMYR\b|\bSGD\b|\bTWD\b|\bUSD\b|\bCNY\b|\bHKD\b|\d[\d.,]*\d/i.test(text);
 }
@@ -236,10 +269,8 @@ function extractAmountColumn(rows: Row[]): AmountResult | null {
     if (NON_AMOUNT_LABEL.test(row.text)) return;
     for (const cell of row.cells) {
       const t = cell.text.trim();
-      if (!/^[¥￥$€£]?\s?[\d.,]+$/.test(t)) continue;
-      const nums = numbersIn(t);
-      if (nums.length !== 1) continue;
-      const v = nums[0];
+      const v = moneyCellValue(t);
+      if (v === null) continue;
       if (v <= 0 || v >= 100000) continue;
       cands.push({ rowIdx, value: v, right: cell.left + Math.max(cell.width, t.length * 8) });
     }
@@ -302,7 +333,9 @@ function extractAmount(rows: Row[]): AmountResult {
   const subtotalHit = tryLabels(SUBTOTAL_LABELS, 0.6);
   if (subtotalHit && subtotalHit.amount !== null) return subtotalHit;
 
-  // 没有任何标签 → 用右对齐金额列做保守兜底（有付款标记 + 列证据才认）
+  // 没有任何标签：电子钱包账单（顶部 -RM17.90 这种）优先，其次右对齐金额列
+  const signedHit = extractSignedTopAmount(rows);
+  if (signedHit) return signedHit;
   const columnHit = extractAmountColumn(rows);
   if (columnHit) return columnHit;
 
@@ -329,38 +362,74 @@ function extractDate(text: string): string | null {
   return null;
 }
 
-/** 抬头里的公司名：排除票据类型、付款方式、地址细节 */
+/** 票据类型/付款方式等绝不当店名的行首词 */
 const MERCHANT_STOP = /^(tax\s*invoice|invoice|reprint\s*receipt|receipt|resit|detailed\s*receipt|cash\s*bill|sales\s*receipt|credit\s*card|debit\s*card|cash|e-?wallet|payment|member|terminal|cashier|document\s*no|invoice\s*no|tel|phone|date|time|qty|gst|sst|total|jumlah|sub\s*total)\b/i;
 
+/**
+ * 抬头里的公司名。
+ * 真机教训：ML Kit 会把 "Reprint Receipt" 读成 "Reprnt Receipt --"（少字母 + 尾部短横），
+ * 只按正则前缀排除根本挡不住，而且同一张票每次 OCR 变异不同 → 备注每次都不一样。
+ * 所以改成「模糊排除票据类型词 + 给候选打分选最优」，结果稳定且更像店名。
+ */
+const RECEIPT_WORDS = /(rece?[il1]?pt|repr[iy]?nt|invoice|resit|cash\s*bill|sales|tax|duitnow|payment|status|successful)/i;
+const BUSINESS_WORDS = /(sdn\s*bhd|bhd|enterprise|trading|store|stationery|restaurant|restoran|mart|shop|market|supermarket|cafe|kopitiam|pharmacy|clinic|sdn|holdings|supply|services)/i;
+
+function cleanMerchantText(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/[\-–—_.,:;|]+$/g, '')   // 尾部 -- / 标点（OCR 噪声）
+    .trim();
+}
+
 function looksLikeMerchant(text: string): boolean {
-  const s = text.replace(/\s+/g, ' ').trim();
+  const s = cleanMerchantText(text);
   if (s.length < 3 || s.length > 40) return false;
   if (MERCHANT_STOP.test(s)) return false;
+  if (RECEIPT_WORDS.test(s)) return false;      // 模糊：Reprnt / Receipt / Reciept 都算
   if (NON_AMOUNT_LABEL.test(s)) return false;
-  if (/\d{3,}/.test(s)) return false;              // 门牌/电话/编号
-  if (/^[\d\W]+$/.test(s)) return false;          // 纯数字符号
-  if (/^[a-z0-9]{2,8}$/.test(s) && !/[aeiou]/.test(s)) return false; // h1qxr 这类单号碎片
+  if (/\d{3,}/.test(s)) return false;
+  if (/^[\d\W]+$/.test(s)) return false;
+  if (/^[a-z0-9]{2,8}$/.test(s) && !/[aeiou]/.test(s)) return false;
   if (!/[A-Za-z\u4e00-\u9fff]/.test(s)) return false;
   return true;
 }
 
+/** 店名打分：全大写多词 + 企业词 + 合理长度 → 越高 */
+function merchantScore(text: string): number {
+  const s = cleanMerchantText(text);
+  let score = 0;
+  const words = s.split(' ').filter(Boolean);
+  if (words.length >= 2) score += 2;
+  const upperWords = words.filter((w) => /^[A-Z][A-Z0-9&.'-]*$/.test(w)).length;
+  if (upperWords >= 2) score += 3;
+  else if (upperWords === 1 && words.length === 1) score += 1;
+  if (BUSINESS_WORDS.test(s)) score += 2;
+  if (s.length >= 8 && s.length <= 32) score += 1;
+  if (/\u4e00-\u9fff/.test(s)) score += 1;
+  if (/[a-z]/.test(s) && upperWords === 0) score -= 1;   // 全小写的碎行要减分
+  return score;
+}
+
 function extractMerchant(rows: Row[], amountRowIndex: number): string | null {
-  // 标签式：Merchant / 商户 / 商家 —— 同行的值或下一行
+  // ① 标签式：Merchant / 商户 / 商家 —— 同行的值或下一行（电子钱包账单都走这条）
   for (let i = 0; i < rows.length; i += 1) {
     const m = /^(merchant|商户|商家|店铺|收款方)\b[:：]?\s*/i.exec(rows[i].text.trim());
     if (!m) continue;
     const inline = rows[i].text.trim().slice(m[0].length).trim();
     for (const candidate of [inline, rows[i + 1]?.text ?? '']) {
-      if (looksLikeMerchant(candidate)) return candidate.trim();
+      if (looksLikeMerchant(candidate)) return cleanMerchantText(candidate);
     }
   }
-  // 抬头：金额行之前的行里，第一个像公司名的
-  const limit = amountRowIndex >= 0 ? amountRowIndex : Math.min(rows.length, 8);
+  // ② 抬头打分：金额行之前的所有候选里选分最高的（同分取更靠前的）
+  const limit = amountRowIndex >= 0 ? amountRowIndex : Math.min(rows.length, 10);
+  let best: { text: string; score: number } | null = null;
   for (let i = 0; i < limit; i += 1) {
-    const s = rows[i].text.trim();
-    if (looksLikeMerchant(s)) return s.replace(/\s+/g, ' ');
+    const s = cleanMerchantText(rows[i].text);
+    if (!looksLikeMerchant(s)) continue;
+    const score = merchantScore(s);
+    if (!best || score > best.score) best = { text: s, score };
   }
-  return null;
+  return best ? best.text : null;
 }
 
 const INCOME_WORDS = /(收款|收入|转入|入账|到账|已收款|工资|salary|refund|退款|received)/i;

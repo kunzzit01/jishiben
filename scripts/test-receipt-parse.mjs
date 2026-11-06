@@ -142,5 +142,33 @@ const r11 = parseReceiptOcr([
 ]);
 eq('[11] amount', r11.amount, null);
 
+console.log('\n[12] 真机 OCR 变异：把 Reprint Receipt 读成 "Reprnt Receipt --" 也不能当店名');
+const r12 = parseReceiptLines([
+  'Tax Invoice', 'Reprnt Receipt --', 'CHEE YU STATIONERY', '(202303069704)',
+  'Document No. : T01-036402', 'Date : 04-09-2026 01:46:20 PM',
+  'Rounded Total (RM): 15.00', 'Cash 100.00', 'Cash Change 85.00',
+]);
+eq('[12] merchant', r12.merchant, 'CHEE YU STATIONERY');
+eq('[12] amount', r12.amount, 15);
+
+console.log('\n[13] 同一张票两次 OCR 变异，店名必须一致（结果稳定）');
+const variants = [
+  ['TAX INVOICE', 'Resit', 'KK MART JUTC', 'TOTAL RM17.90', 'CASH 20.00'],
+  ['Tax  Invoice --', 'Res1t', 'KK MART JUTC', 'TOTAL RM17.90', 'CASH 20.00'],
+  ['tax invoice', 'reprint receipt', 'KK MART JUTC', 'TOTAL RM17.90', 'CASH 20.00'],
+];
+const names = variants.map((v) => parseReceiptLines(v).merchant);
+check('[13] 三次结果一致', new Set(names).size === 1, JSON.stringify(names));
+eq('[13] merchant', names[0], 'KK MART JUTC');
+
+console.log('\n[14] 电子钱包账单仍走标签式（Merchant 在下一行）');
+const r14 = parseReceiptLines([
+  'Details', '-RM17.90', 'Transaction Type  DuitNow QR', 'Merchant',
+  'KK Mart JUTC', 'Payment Details  DuitNow QR - KK Mart JUTC',
+  'Date/Time  03/11/2026 08:52:09', 'Status  Successful',
+]);
+eq('[14] merchant', r14.merchant, 'KK Mart JUTC');
+eq('[14] amount', r14.amount, 17.9);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);
