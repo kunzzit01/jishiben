@@ -170,5 +170,27 @@ const r14 = parseReceiptLines([
 eq('[14] merchant', r14.merchant, 'KK Mart JUTC');
 eq('[14] amount', r14.amount, 17.9);
 
+console.log('\n[15] 透视抖动：Cash Change 的 85.00 被聚进 Rounded Total 那一行，仍必须是 15.00');
+const skewed = [
+  { text: 'Tax Invoice', top: 100, left: 100, width: 140, height: 22 },
+  { text: 'CHEE YU STATIONERY', top: 150, left: 60, width: 320, height: 30 },
+  { text: 'Sub Total (Ex) :', top: 400, left: 100, width: 190, height: 20 },
+  { text: '15.00', top: 400, left: 420, width: 60, height: 20 },
+  { text: 'Rounded Total (RM):', top: 460, left: 100, width: 230, height: 22 },
+  { text: '15.00', top: 460, left: 420, width: 60, height: 22 },
+  // 关键：85.00 的 y 与合计行几乎相同（透视/合并导致），但在最右边
+  { text: 'Cash Change', top: 478, left: 100, width: 140, height: 20 },
+  { text: '85.00', top: 462, left: 560, width: 60, height: 20 },
+];
+const r15 = parseReceiptOcr(skewed);
+eq('[15] amount', r15.amount, 15);
+
+console.log('\n[16] 同一张票扫两次（坐标抖动）结果必须一致');
+const variant = skewed
+  .map((l) => ({ ...l, top: l.top + (l.text === '85.00' ? 12 : 0) }))
+  .map((l) => ({ ...l, top: l.top + (l.text === 'Rounded Total (RM):' ? -6 : 0) }));
+eq('[16] 第一次', parseReceiptOcr(skewed).amount, 15);
+eq('[16] 第二次', parseReceiptOcr(variant).amount, 15);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

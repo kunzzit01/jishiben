@@ -44,7 +44,7 @@ interface Row {
   top: number;
   height: number;
   /** 行内片段（按 left 升序）；没有坐标时只有一个片段 */
-  cells: { text: string; left: number; width: number }[];
+  cells: { text: string; left: number; width: number; centerY: number }[];
 }
 
 const CURRENCY_CODES = ['MYR', 'SGD', 'CNY', 'RMB', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'TWD', 'KRW', 'THB', 'VND', 'PHP', 'IDR', 'INR', 'AUD', 'NZD', 'CAD'];
@@ -130,7 +130,7 @@ function buildRows(lines: OcrLine[]): Row[] {
     return lines
       .map((l) => l.text.trim())
       .filter(Boolean)
-      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0, width: text.length * 8 }] }));
+      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0, width: text.length * 8, centerY: i }] }));
   }
 
   const items = lines
@@ -162,7 +162,7 @@ function buildRows(lines: OcrLine[]): Row[] {
     .map((r) => {
       const cells = [...r.cells]
         .sort((a, b) => a.left - b.left)
-        .map((c) => ({ text: c.text, left: c.left, width: c.width }));
+        .map((c) => ({ text: c.text, left: c.left, width: c.width, centerY: c.top + c.height / 2 }));
       return { text: cells.map((c) => c.text).join(' '), top: r.top, height: r.height, cells };
     });
 }
@@ -184,25 +184,35 @@ function rowCurrency(row: Row): string | null {
   return null;
 }
 
-/** 从一行里取「标签右侧最近的那个金额」；没有坐标时退化为「行内最后一个金额」 */
+/**
+ * 从一行里取与「合计标签」真正对应的金额。
+ * 关键：按**与标签的垂直距离**选，而不是「最右边那个」。
+ * 真机踩过：照片有透视，Cash Change 的 85.00 有时会被聚进 Rounded Total 那一行，
+ * 取最右边就会把 85.00 当成实付（同一张票第一次 15.00、第二次 85.00）。
+ */
 function amountInRowAfterLabel(row: Row): number | null {
   const cells = row.cells;
   if (cells.length <= 1) {
     const nums = numbersIn(row.text);
     return nums.length ? nums[nums.length - 1] : null;
   }
-  // 找到含标签的片段，取它右侧最近的「纯金额」片段
-  const labelIdx = cells.findIndex((c) => FINAL_TOTAL_LABELS.some((re) => re.test(c.text)) || SUBTOTAL_LABELS.some((re) => re.test(c.text)));
-  const start = labelIdx >= 0 ? labelIdx : 0;
-  for (let i = cells.length - 1; i >= start; i -= 1) {
-    const cell = cells[i];
-    if (i === labelIdx) continue;
-    if (NON_AMOUNT_LABEL.test(cell.text)) continue;
-    const nums = numbersIn(cell.text);
-    if (nums.length === 1) return nums[0];
-    if (nums.length > 1) return nums[nums.length - 1];
-  }
-  return null;
+  const isLabelCell = (t: string) =>
+    FINAL_TOTAL_LABELS.some((re) => re.test(t)) || SUBTOTAL_LABELS.some((re) => re.test(t));
+  const labelIdx = cells.findIndex((c) => isLabelCell(c.text));
+  const labelCenter = labelIdx >= 0 ? cells[labelIdx].centerY : row.cells[0].centerY;
+
+  const cands: { value: number; dy: number }[] = [];
+  cells.forEach((cell, idx) => {
+    if (idx === labelIdx) return;
+    if (isLabelCell(cell.text)) return;
+    if (NON_AMOUNT_LABEL.test(cell.text)) return;      // Cash Change 85.00 这类单元直接排除
+    const v = moneyCellValue(cell.text) ?? (numbersIn(cell.text).length === 1 ? numbersIn(cell.text)[0] : null);
+    if (v === null || v <= 0 || v >= 1e6) return;
+    cands.push({ value: v, dy: Math.abs(cell.centerY - labelCenter) });
+  });
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => a.dy - b.dy);
+  return cands[0].value;
 }
 
 /** 把「-RM17.90 / S$ 12.30 / ¥128.00 / 15.00」这类单元解析成数字；不是纯金额就返回 null */
@@ -327,8 +337,15 @@ function extractAmount(rows: Row[]): AmountResult {
     return { amount, currency, confidence, label: row.text };
   };
 
+  /** 这个数字在「找零/现金/单号/电话」行里也出现 → 说明很可能配错了 */
+  const appearsInNoiseRow = (value: number, excludeRow: string): boolean =>
+    rows.some((r) => r.text !== excludeRow && NON_AMOUNT_LABEL.test(r.text) && numbersIn(r.text).includes(value));
+
   const finalHit = tryLabels(FINAL_TOTAL_LABELS, 0.9);
-  if (finalHit && finalHit.amount !== null) return finalHit;
+  if (finalHit && finalHit.amount !== null) {
+    if (!appearsInNoiseRow(finalHit.amount, finalHit.label ?? '')) return finalHit;
+    // 与找零/现金同值 → 不可信，继续往下（小计 → 顶部符号金额 → 金额列 → null）
+  }
 
   const subtotalHit = tryLabels(SUBTOTAL_LABELS, 0.6);
   if (subtotalHit && subtotalHit.amount !== null) return subtotalHit;
