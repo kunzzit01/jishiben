@@ -170,18 +170,44 @@ function extractAmount(lines: string[]): { amount: number | null; strength: numb
   return { amount: best?.amount ?? null, strength: best?.strength ?? 0 };
 }
 function extractMerchant(lines: string[]): string | null {
+  // 优先「标签式」：Merchant / 商户 / 商家 / 店铺 —— 取同一行的值，或紧跟的下一行。
+  // 真实样本教训：TnG 账单里 Transaction No. 会折行成 `...03OQRp44` + `h1qxr`，
+  // 旧实现按「前 6 行里第一个像名字的行」猜，结果把 `hlqxr` 当商户写进了备注。
+  const LABEL = /^(merchant|商户|商家|店铺|收款方|支付对象)\b[:：]?\s*/i;
+  for (let i = 0; i < lines.length; i++) {
+    const m = LABEL.exec(lines[i].trim());
+    if (!m) continue;
+    const inline = lines[i].trim().slice(m[0].length).trim();
+    for (const candidate of [inline, lines[i + 1]?.trim() ?? '']) {
+    if (isLikelyMerchant(candidate)) return candidate;
+    }
+  }
+
+  // 退回启发式：前 6 行里第一个「像店名」的行
   for (const raw of lines.slice(0, 6)) {
     const line = raw.trim();
-    if (line.length < 2 || line.length > 28) continue;
-    if (/\d{3,}/.test(line)) continue;
-    if (AMOUNT_STRONG.test(line) || AMOUNT_NOISE.test(line)) continue;
-    if (/^(收据|小票|发票|订单|谢谢|欢迎|thank|receipt|invoice)/i.test(line)) continue;
-    if (/(rm|myr|sgd|cny|usd|total|date|time|tel|电话|地址)/i.test(line)) continue;
-    return line;
+    if (isLikelyMerchant(line)) return line;
   }
   return null;
 }
 
+/** 是否像「商户名」：排除标签行、单号/参考号、纯数字、乱码片段 */
+function isLikelyMerchant(line: string): boolean {
+  if (!line) return false;
+  const s = line.trim().replace(/\s+/g, ' ');
+  if (s.length < 2 || s.length > 40) return false;
+  // 标签/元数据行
+  if (/^(details|transaction type|transaction no\.?|payment details|payment method|date\/time|date|time|wallet ref|status|merchant|reference|total|amount)\b/i.test(s)) return false;
+  if (AMOUNT_STRONG.test(s) || AMOUNT_NOISE.test(s)) return false;
+  // 单号/参考号特征：长串字母数字、≥5 位连续数字、base32 风格的混合串
+  if (/\d{5,}/.test(s)) return false;
+  if (/^[A-Za-z0-9]{5,}$/.test(s) && /[A-Za-z]/.test(s) && /\d/.test(s)) return false;
+  // 纯小写无元音片段（如 h1qxr / hlqxr）：不像名字
+  if (/^[a-z0-9]{2,8}$/.test(s) && !/[aeiou]/.test(s)) return false;
+  // 必须至少有一个字母或汉字（排除纯符号/数字）
+  if (!/[A-Za-z\u4e00-\u9fff]/.test(s)) return false;
+  return true;
+}
 /** 主入口：把 OCR 行解析成记账需要的字段 */
 export function parseReceiptLines(lines: string[]): ParsedReceipt {
   const clean = lines.map((l) => l.trim()).filter(Boolean);
