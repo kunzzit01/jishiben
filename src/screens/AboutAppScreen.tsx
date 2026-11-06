@@ -54,7 +54,7 @@ export default function AboutAppScreen({ navigation }: any) {
     let alive = true;
     void getReceiptAiStatus().then((s) => { if (alive) setAiStatus(s); });
     void AsyncStorage.getItem('@jizhang/lastScanText')
-      .then((v) => { if (alive) setLastOcrText(v && v.trim() ? v.replace(/\s+/g, ' ').slice(0, 160) : '-'); })
+      .then((v) => { if (alive) setLastOcrText(v && v.trim() ? v.replace(/\s+/g, ' ').slice(0, 220) : '-'); })
       .catch(() => undefined);
     void AsyncStorage.getItem('@jizhang/lastReceiptAi')
       .then((v) => { if (alive) setLastAiDiag(v ?? '-'); })

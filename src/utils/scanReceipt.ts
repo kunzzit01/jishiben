@@ -97,6 +97,10 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     const learnedLabels = await getLearnedAmountLabels().catch(() => []);
     // 识别只做一次：本地解析与 AI 兜底共用同一批带坐标的 OCR 行
     const lines = await recognizeReceiptLines(imageUri, imageBase64);
+    // 诊断前置：识别一完成就把原文落盘，后续无论成功或失败都能在「关于应用」看到
+    const rawTextPreview = lines.map((l) => l.text).join('\n').slice(0, 1200);
+    void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawTextPreview).catch(() => undefined);
+    void AsyncStorage.setItem(LAST_AI_DIAG_KEY, 'stage=recognized lines=' + lines.length).catch(() => undefined);
     const parsed = parseReceiptOcr(lines, { learnedLabels });
 
     // 本地已经「有把握」（金额非空且置信度 ≥ 0.6）就不打扰端侧模型：AI 只是难票兜底
@@ -159,6 +163,11 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     };
   } catch (e) {
     const code = e instanceof ReceiptOcrError ? e.code : 'ocr-failed';
+    // 失败也要留下证据：这次是「识别层失败」还是「解析后金额为空」
+    void AsyncStorage.setItem(
+      LAST_AI_DIAG_KEY,
+      'stage=failed code=' + code + ' reason=' + String(e instanceof Error ? e.message : e).slice(0, 140),
+    ).catch(() => undefined);
     throw new ReceiptScanError(code, toReadableMessage(code, e instanceof Error ? e.message : undefined));
   }
 }
