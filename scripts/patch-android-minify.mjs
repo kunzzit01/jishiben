@@ -28,6 +28,21 @@ props = setProp(props, 'android.enableShrinkResourcesInReleaseBuilds', 'true');
 writeFileSync(gradleProps, props);
 
 let gradle = readFileSync(appGradle, 'utf8');
+// ML Kit 文本识别会带 5 种文字模型（latin/chinese/devanagari/japanese/korean，各约 3MB）。
+// 我们只用中文（小票/转账截图都是中英混排），排除其余三种可省约 9MB。
+if (!gradle.includes('text-recognition-japanese')) {
+  const EXCLUDES = [
+    "configurations.all {",
+    "    exclude group: 'com.google.mlkit', module: 'text-recognition-devanagari'",
+    "    exclude group: 'com.google.mlkit', module: 'text-recognition-japanese'",
+    "    exclude group: 'com.google.mlkit', module: 'text-recognition-korean'",
+    "}",
+    ""
+  ].join('\n');
+  gradle = gradle.replace('android {', EXCLUDES + 'android {');
+  writeFileSync(appGradle, gradle);
+}
+
 if (!gradle.includes('resConfigs')) {
   gradle = gradle.replace(
     '    androidResources {',
@@ -55,11 +70,25 @@ const KEEP = [
   '-dontwarn okio.**',
   '-dontwarn com.shopify.**',
   '-dontwarn expo.**',
+  '-dontwarn com.google.mlkit.vision.text.devanagari.**',
+  '-dontwarn com.google.mlkit.vision.text.japanese.**',
+  '-dontwarn com.google.mlkit.vision.text.korean.**',
   ''
 ].join('\n');
 
 if (existsSync(proguard)) {
   const cur = readFileSync(proguard, 'utf8');
-  if (!cur.includes('jishiben: R8 keep rules')) writeFileSync(proguard, cur + KEEP);
+  if (!cur.includes('jishiben: R8 keep rules')) {
+    writeFileSync(proguard, cur + KEEP);
+  } else if (!cur.includes('devanagari.**')) {
+    // 曾经注入过旧版规则：补上后来新增的 dontwarn（排除掉的三套 MLKit 模型仍被模块引用）
+    const EXTRA = [
+      '-dontwarn com.google.mlkit.vision.text.devanagari.**',
+      '-dontwarn com.google.mlkit.vision.text.japanese.**',
+      '-dontwarn com.google.mlkit.vision.text.korean.**',
+      ''
+    ].join('\n');
+    writeFileSync(proguard, cur + EXTRA);
+  }
 }
 console.log('[minify] release minify+shrink enabled (resConfigs zh/en)');

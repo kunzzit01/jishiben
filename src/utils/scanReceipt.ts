@@ -1,11 +1,3 @@
-import { ApiError, api } from '../services/apiClient';
-
-/**
- * 小票识别（扫票 → 预填金额/分类）。
- *
- * 图片只发给**自家后端** POST /api/ai/receipt-scan：OpenRouter 的密钥留在服务器环境变量里，
- * 不再内联进 APP 包（旧实现由客户端直连第三方 AI 服务，任何人解包都能盗用密钥）。
- */
 export interface ScannedReceipt {
   amount: number | null;
   merchant: string | null;
@@ -25,68 +17,44 @@ export class ReceiptScanError extends Error {
   }
 }
 
-/** AI 在小票识别上是否可用：后端未配置密钥时返回 503 AI_NOT_CONFIGURED，据此降级。 */
-export function isAiUnavailable(e: unknown): boolean {
-  return e instanceof ReceiptScanError && e.code === 'AI_NOT_CONFIGURED';
+/** 现在扫票是完全离线的本地 OCR + 规则解析：不调用 AI API，也没有「未配置密钥」状态。 */
+export function isAiUnavailable(_e: unknown): boolean {
+  return false;
 }
 
-function codeOf(e: unknown): string | null {
-  if (e instanceof ReceiptScanError) return e.code;
-  if (e instanceof ApiError) return typeof e.code === 'string' ? e.code : null;
-  return null;
-}
-
-/** 把后端的错误码翻译成用户能读懂的一句话；不把任何第三方原始报错透给用户。 */
-function toReadableMessage(e: unknown): string {
-  switch (codeOf(e)) {
-    case 'AI_NOT_CONFIGURED':
-      return '服务端还没有配置小票识别服务，暂时无法自动识别。你仍可手动记账，或给小票拍照留档。';
-    case 'PAYLOAD_TOO_LARGE':
-      return '这张照片太大了，请压缩后再试，或手动记账。';
-    case 'VALIDATION_FAILED':
-    case 'BAD_REQUEST':
-      return '这张照片没能识别成图片，请重新拍一张，或手动记账。';
-    case 'AI_UPSTREAM_TIMEOUT':
-    case 'TIMEOUT':
-      return '识别超时了，请检查网络后再试，或手动记账。';
-    case 'AI_UPSTREAM_ERROR':
-    case 'AI_UNAVAILABLE':
-    case 'UPSTREAM_ERROR':
-      return '识别服务暂时不可用，请稍后再试，或手动记账。';
-    case 'NETWORK_ERROR':
-      return '网络连接失败，请检查网络后再试，或手动记账。';
-    case 'UNAUTHORIZED':
-    case 'TOKEN_EXPIRED':
-    case 'TOKEN_INVALID':
-    case 'TOKEN_REVOKED':
-      return '登录状态已失效，请重新登录后再试。';
+/** 把 OCR/解析的错误码翻译成用户能读懂的一句话 */
+function toReadableMessage(code: string, detail?: string): string {
+  switch (code) {
+    case 'ocr-unavailable':
+      return '当前安装包不含本地识别模块，请更新 App 后再试';
+    case 'no-text':
+      return '这张图里没有识别到文字，换一张清晰的小票试试';
+    case 'unsupported-platform':
+      return '网页版不支持小票识别，请在 App 内使用';
+    case 'ocr-failed':
+      return '识别失败，请重试或手动填写';
     default:
-      return e instanceof Error && e.message ? e.message : '小票识别失败，请重试或手动记账。';
+      return detail || '识别失败，请手动填写';
   }
 }
 
-function textOrNull(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-export async function scanReceipt(base64Image: string): Promise<ScannedReceipt> {
-  if (!base64Image || !base64Image.trim()) {
-    throw new ReceiptScanError('VALIDATION_FAILED', '没有拿到照片内容，请重新拍一张。');
-  }
-
-  let dto;
+/**
+ * 小票识别（离线）：图片在设备上用 ML Kit（中文模型）读字，再用本地规则解析金额/日期/分类。
+ * 不上传图片、不调用第三方、无按次费用 —— 取代了原来的 AI(OpenRouter) 方案。
+ */
+export async function scanReceipt(imageUri: string): Promise<ScannedReceipt> {
+  const { scanReceiptLocally, ReceiptOcrError } = await import('./receiptOcr');
   try {
-    dto = await api.aiScanReceipt(base64Image);
+    const parsed = await scanReceiptLocally(imageUri);
+    return {
+      amount: parsed.amount,
+      merchant: parsed.merchant,
+      date: parsed.date,
+      type: parsed.type,
+      suggestedCategory: parsed.suggestedCategory,
+    };
   } catch (e) {
-    throw new ReceiptScanError(codeOf(e) ?? 'INTERNAL_ERROR', toReadableMessage(e));
+    const code = e instanceof ReceiptOcrError ? e.code : 'ocr-failed';
+    throw new ReceiptScanError(code, toReadableMessage(code, e instanceof Error ? e.message : undefined));
   }
-
-  return {
-    // 服务端用 BigDecimal 传金额，JSON 里是数字；其它类型一律当作「没识别到」
-    amount: typeof dto?.amount === 'number' && Number.isFinite(dto.amount) ? dto.amount : null,
-    merchant: textOrNull(dto?.merchant),
-    date: textOrNull(dto?.date),
-    type: dto?.type === 'income' ? 'income' : 'expense',
-    suggestedCategory: textOrNull(dto?.suggestedCategory),
-  };
 }
