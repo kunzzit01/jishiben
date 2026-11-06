@@ -270,5 +270,16 @@ const mergedCash = [
 const r25 = parseReceiptOcr(mergedCash);
 eq('[25] amount', r25.amount, 42.4);
 
+console.log('\n[26] 手写单据：金额「88/」写在 TOTAL/总额 的**上方**一行');
+const handwrite = [
+  { text: 'M/S', top: 210, left: 110, width: 60, height: 30 },
+  { text: 'JUS GAMAT', top: 400, left: 110, width: 200, height: 30 },
+  { text: '50 / =', top: 400, left: 520, width: 80, height: 30 },
+  { text: '88 / =', top: 720, left: 540, width: 90, height: 34 },
+  { text: 'TOTAL / 总额', top: 745, left: 470, width: 120, height: 26 },
+  { text: 'JUMLAH', top: 775, left: 470, width: 90, height: 26 },
+];
+eq('[26] amount', parseReceiptOcr(handwrite).amount, 88);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

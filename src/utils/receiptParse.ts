@@ -456,39 +456,55 @@ function extractAmountColumn(rows: Row[]): AmountResult | null {
 }
 
 function extractAmount(rows: Row[]): AmountResult {
+  /** 这个数字在「找零/现金/单号/电话」行里也出现 → 说明很可能配错了 */
+  const appearsInNoiseRow = (value: number, excludeRow: string): boolean =>
+    rows.some((r) => r.text !== excludeRow && NON_AMOUNT_LABEL.test(r.text) && numbersIn(r.text).includes(value));
+
   const tryLabels = (labels: RegExp[], confidence: number): AmountResult | null => {
-    // 从上往下找（账单通常标签在下方，但不要错过唯一一处）；命中多行时取最靠下的一处
+    // 命中多行时从**最后一个**往前试：每个候选依次尝试三种配对，第一个配到金额的就用它。
+    // （真机教训：JUMLAH / TOTAL 同时出现时，只看最后一行会永远配不到金额）
     const matches: number[] = [];
     rows.forEach((row, idx) => {
       if (labels.some((re) => re.test(row.text))) matches.push(idx);
     });
     if (matches.length === 0) return null;
-    const idx = matches[matches.length - 1];
-    const row = rows[idx];
 
-    // ① 同行右侧
-    let amount = amountInRowAfterLabel(row);
-    // ② 标签行没有金额 → 下一行必须是「纯金额行」
-    if (amount === null) {
-      const next = rows[idx + 1];
-      if (next) {
-        const nextText = next.text.trim();
-        const nums = numbersIn(nextText);
-        const digitsOnly = nextText.replace(/[\s¥￥$€£]|\bRM\b|\bMYR\b|\bSGD\b|\bTWD\b/gi, '');
-        if (nums.length === 1 && /^[\d.,]+$/.test(digitsOnly) && !NON_AMOUNT_LABEL.test(nextText)) {
-          amount = nums[0];
+    const looksPureAmount = (text: string): number | null => {
+      const t = text.trim();
+      if (NON_AMOUNT_LABEL.test(t)) return null;
+      const nums = numbersIn(t);
+      if (nums.length !== 1) return null;
+      const cleaned = t.replace(/[\s¥￥$€£]|\bRM\b|\bMYR\b|\bSGD\b|\bTWD\b/g, '');
+      return /^[\d.,]+\/?=?$/.test(cleaned) ? nums[0] : null;
+    };
+
+    for (let k = matches.length - 1; k >= 0; k -= 1) {
+      const idx = matches[k];
+      const row = rows[idx];
+      let amount = amountInRowAfterLabel(row);           // ① 同一行（右侧）
+      let hitRow = row;
+      if (amount === null) {
+        const next = rows[idx + 1];                      // ② 下一行是纯金额
+        if (next) {
+          const v = looksPureAmount(next.text);
+          if (v !== null) { amount = v; hitRow = next; }
         }
       }
+      if (amount === null) {
+        const prev = rows[idx - 1];                      // ③ 上一行是纯金额（手写单据：88 写在 TOTAL 上方）
+        if (prev) {
+          const v = looksPureAmount(prev.text);
+          if (v !== null) { amount = v; hitRow = prev; }
+        }
+      }
+      if (amount !== null && amount > 0 && amount < 1e6) {
+        const currency = rowCurrency(row) ?? rowCurrency(hitRow) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
+        return { amount, currency, confidence, label: row.text, tier: 'final' };
+      }
     }
-    if (amount === null) return { amount: null, currency: rowCurrency(row), confidence: 0.2, tier: 'label-no-amount' };
-    if (amount >= 1000000) return { amount: null, currency: rowCurrency(row), confidence: 0.1 };
-    const currency = rowCurrency(row) ?? rows.slice(0, Math.max(idx + 1, 1)).map(rowCurrency).filter(Boolean)[0] ?? null;
-    return { amount, currency, confidence, label: row.text, tier: 'final' };
+    // 有标签但配不到任何金额 → 金额留空（不猜）
+    return { amount: null, currency: rowCurrency(rows[matches[matches.length - 1]]) ?? null, confidence: 0.2, tier: 'label-no-amount' };
   };
-
-  /** 这个数字在「找零/现金/单号/电话」行里也出现 → 说明很可能配错了 */
-  const appearsInNoiseRow = (value: number, excludeRow: string): boolean =>
-    rows.some((r) => r.text !== excludeRow && NON_AMOUNT_LABEL.test(r.text) && numbersIn(r.text).includes(value));
 
   const finalHit = tryLabels(FINAL_TOTAL_LABELS, 0.9);
   if (finalHit && finalHit.amount !== null) {
