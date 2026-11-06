@@ -32,7 +32,9 @@ import { useT, useLanguage } from '../i18n/LanguageContext';
 import { getCategoryLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { scanReceipt, rememberReceiptRawText } from '../utils/scanReceipt';
+import { rememberAmountLabel, rememberMerchantCategory } from '../utils/receiptLearning';
 import { isLocalOcrAvailable } from '../utils/receiptOcr';
+import { persistReceiptImage } from '../utils/receiptStore';
 
 /** 大组排序的存储键：与「管理类别」页共用同一个键，两页顺序保持一致 */
 const GROUP_ORDER_KEY = '@jizhang/categoryGroupOrder';
@@ -468,6 +470,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   // 本次扫票的 OCR 原文：保存成功后写进本地查重库
   const lastScanRawTextRef = useRef<string | undefined>(undefined);
+  // 本次扫描的商户与「产生金额的标签行」：保存成功后写入本机学习库
+  const lastScanMetaRef = useRef<{ merchant?: string | null; amountLabel?: string | null }>({});
 
   // 普通收支专用：可选的资产账户（这笔钱从/到哪个账户）——没有编辑数据时，用"资产"页设的默认账户
   const [assetId, setAssetId] = useState<string | null>(editTransaction?.assetId ?? preferredAssetId);
@@ -1434,6 +1438,9 @@ function fxAmountText(raw: string, live: string | null): string {
     rememberAmountCategory(type === 'income' ? 'income' : 'expense', value, categoryId, amountScope);
     // 同一张小票只提示一次：记完账把指纹入库
     void rememberReceiptRawText(lastScanRawTextRef.current);
+    // 本机学习：这张票的实付标签 + 这个商户用的分类（下次直接命中）
+    void rememberAmountLabel(lastScanMetaRef.current.amountLabel);
+    void rememberMerchantCategory(lastScanMetaRef.current.merchant, categoryId);
 
     // 自动月结：开关打开（默认关，手动开）时，把这笔账同步建成一条「每月同日自动入账」的
     // 财务规划——之后每个月由补账引擎自动 ±账目。防重复：同名称+同金额+同周期+同账户的计划已存在则跳过
@@ -1746,6 +1753,7 @@ function fxAmountText(raw: string, live: string | null): string {
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
+      lastScanMetaRef.current = { merchant: result.merchant, amountLabel: result.amountLabel };
       if (result.duplicate) {
         dialog.alert({
           title: t('addTx.receiptDuplicateTitle'),
@@ -1755,7 +1763,11 @@ function fxAmountText(raw: string, live: string | null): string {
 
       setUiType(result.type);
 
-      if (result.suggestedCategory) {
+      if (result.learnedCategoryId) {
+        // 本机学过「这个商户属于哪个分类」→ 直接采用（比关键词更准）
+        const learned = categories.find((c) => c.type === result.type && c.id === result.learnedCategoryId);
+        if (learned) setCategoryId(learned.id);
+      } else if (result.suggestedCategory) {
         // AI 提示词固定中文，返回的是中文分类名 → 先映射成内置分类 id 再按 id 匹配，
         // 与界面语言（中文/英文）无关；AI 不会建议用户自建分类，不再按存储名兜底
         const suggestedId = findCategoryIdByChineseName(result.suggestedCategory);
@@ -1771,11 +1783,22 @@ function fxAmountText(raw: string, live: string | null): string {
       }
       if (result.date) setDate(result.date);
       if (result.merchant) setNote(result.merchant);
-      // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次
-      setReceiptUri(uri);
+      // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
+      // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
+      setReceiptUri(await persistReceiptImage(uri));
 
       setStep('detail');
 
+      const accountCurrency = assets.find((a) => a.id === assetId)?.currency ?? null;
+      if (result.currency && accountCurrency && result.currency !== accountCurrency) {
+        // 币种不一致：绝不把同一个数字按另一种币直接入账
+        dialog.alert({
+          title: t('addTx.scanCurrencyMismatchTitle'),
+          message: t('addTx.scanCurrencyMismatchMsg')
+            .replace('{scan}', result.currency)
+            .replace('{account}', accountCurrency),
+        });
+      }
       if (result.amount == null) {
         dialog.alert({ title: t('common.confirm'), message: t('addTx.scanNoAmount') });
       } else if ((result.confidence ?? 1) < 0.6) {
@@ -1834,7 +1857,10 @@ function fxAmountText(raw: string, live: string | null): string {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!result.canceled && result.assets?.[0]?.uri) setReceiptUri(result.assets[0].uri);
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      // 相册给的是临时 uri，同样先复制进 documentDirectory 再留档
+      setReceiptUri(await persistReceiptImage(result.assets[0].uri));
+    }
   };
 
   if (scanning) {
@@ -2439,7 +2465,8 @@ function fxAmountText(raw: string, live: string | null): string {
           onClose={() => setCameraMode(null)}
           onCapture={(photo) => {
             if (cameraMode === 'receipt') {
-              setReceiptUri(photo.uri);
+              // 仅留档凭证：先落盘再进表单（相机 uri 在 cache 里，会被系统清掉）
+              void persistReceiptImage(photo.uri).then(setReceiptUri);
             }
             setCameraMode(null);
           }}
@@ -2794,7 +2821,8 @@ function fxAmountText(raw: string, live: string | null): string {
           if (cameraMode === 'scan' && photo.base64) {
             runScan(photo.base64, photo.uri);
           } else if (cameraMode === 'receipt') {
-            setReceiptUri(photo.uri);
+            // 仅留档凭证：先落盘再进表单（相机 uri 在 cache 里，会被系统清掉）
+            void persistReceiptImage(photo.uri).then(setReceiptUri);
           }
           setCameraMode(null);
         }}

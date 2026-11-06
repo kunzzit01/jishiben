@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * One error envelope, explicit status codes, and no internals leaked to the client.
@@ -87,6 +88,14 @@ public class GlobalExceptionHandler {
         HttpStatusCode status = ex.getStatusCode();
         ErrorCode code = status.value() == 404 ? ErrorCode.NOT_FOUND : ErrorCode.BAD_REQUEST;
         return build(status, code, messageFor(status), request, null);
+    }
+
+    /** multipart 解析阶段就超限（application.yml 的 6 MB）时，仍然返回统一错误体而不是 500。 */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleUploadTooLarge(MaxUploadSizeExceededException ex,
+                                                         HttpServletRequest request) {
+        return build(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE,
+                "Uploaded file is too large", request, null);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

@@ -22,6 +22,7 @@ import { useT, useLanguage } from '../i18n/LanguageContext';
 import { PRESS_TRANSITION } from './PressableScale';
 import { hapticLight, hapticSelection } from '../utils/haptics';
 import { formatDate } from '../utils/formatDate';
+import { receiptImageSource } from '../utils/receiptStore';
 
 /** 键之间的缝（每个键四周留 KEY_GAP / 2，相邻两键之间正好 KEY_GAP） */
 const KEY_GAP = 8;
@@ -100,6 +101,8 @@ export function AmountCalculatorKeypad({
   // 键高按版型分级（窄 48 / 常规 56 / 大 60；矮屏统一 48）
   const { keypadKeyHeight: keyH, isShort } = useLayout();
   const notePillHeight = notePillHeightOf(isShort);
+  // 凭证可能是本地持久 uri（file://…）或同步回来的服务端相对路径（receipts/x.jpg），统一解析成可渲染 uri
+  const receiptSrc = receiptImageSource(receiptUri);
 
   // 日期键实时显示表单选中的日期；只有选中的就是今天时才标注"今天"
   const [today] = useState(() => new Date());
@@ -179,7 +182,7 @@ export function AmountCalculatorKeypad({
               placeholderTextColor={semantic.textTertiary}
             />
           </View>
-          {receiptUri ? (
+          {receiptSrc ? (
             <Pressable
               style={({ pressed }) => [
                 styles.receiptThumbPill,
@@ -192,7 +195,7 @@ export function AmountCalculatorKeypad({
               accessibilityRole="button"
               accessibilityLabel={t('addTx.keypadReceipt')}
             >
-              <Image source={{ uri: receiptUri }} style={[styles.receiptThumb, { backgroundColor: semantic.hairline }]} />
+              <Image source={{ uri: receiptSrc }} style={[styles.receiptThumb, { backgroundColor: semantic.hairline }]} />
               <Pressable onPress={onRemoveReceipt} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="close-circle" size={17} color={semantic.textSecondary} />
               </Pressable>

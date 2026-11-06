@@ -273,6 +273,94 @@ async function authorizedRequest<T>(
   throw error;
 }
 
+// ────────────────────────────── multipart 上传 ──────────────────────────────
+
+/**
+ * 文件直传（POST multipart/form-data）。
+ *
+ * 不复用 authorizedRequest：它把 body 按 JSON 序列化并固定写 Content-Type: application/json，
+ * 而 multipart 的 Content-Type 必须带上 boundary（只能由 fetch 自己生成）。鉴权与错误处理
+ * 保持同一套风格：将要过期先刷新、401 TOKEN_EXPIRED 刷新后重放一次、会话已死直接登出。
+ */
+async function uploadMultipart<T>(path: string, form: () => FormData): Promise<T> {
+  const send = async (token: string | null): Promise<RawResponse> => {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = setTimeout(() => controller?.abort(), API_TIMEOUT_MS);
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    let response: Response;
+    try {
+      response = await fetch(buildUrl(path), {
+        method: 'POST',
+        headers,
+        body: form(),
+        signal: controller?.signal,
+      });
+    } catch (e) {
+      const aborted = controller?.signal.aborted ?? false;
+      const message = e instanceof Error ? e.message : String(e);
+      throw aborted
+        ? new ApiError('TIMEOUT', 0, '上传超时：POST ' + path)
+        : new ApiError('NETWORK_ERROR', 0, '网络请求失败：POST ' + path + ' — ' + message);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const text = await response.text();
+    let body: unknown;
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = text;
+      }
+    }
+    return { status: response.status, ok: response.ok, body };
+  };
+
+  let token = getAccessToken();
+  if (token && Date.now() >= getAccessTokenExpiresAt() - TOKEN_REFRESH_MARGIN_MS) {
+    try {
+      token = await refreshAccessToken();
+    } catch (e) {
+      // 刷新失败不在这里登出：下面 401 分支统一处理 TOKEN_REVOKED/TOKEN_INVALID
+      if (isSessionDeadError(e)) throw e;
+    }
+  }
+
+  let raw = await send(token);
+  if (raw.ok) return raw.body as T;
+
+  let error = toApiError(raw, 'POST', path);
+  if (raw.status === 401) {
+    if (error.code === 'TOKEN_REVOKED' || error.code === 'TOKEN_INVALID') {
+      await clearSession();
+      throw error;
+    }
+    if (error.code === 'TOKEN_EXPIRED' || error.code === 'UNAUTHORIZED') {
+      const fresh = await refreshAccessToken();
+      raw = await send(fresh);
+      if (raw.ok) return raw.body as T;
+      error = toApiError(raw, 'POST', path);
+      if (raw.status === 401) {
+        await clearSession();
+        throw error;
+      }
+    }
+  }
+  throw error;
+}
+
+/** 凭证图片的 MIME（后端按扩展名存盘，这里只用于 multipart 的 Content-Type） */
+function receiptMimeType(fileName: string): string {
+  const ext = fileName.toLowerCase().split('.').pop() ?? '';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  return 'image/jpeg';
+}
+
 // ────────────────────────────── DTO 类型（camelCase，对齐 docs/API.md） ──────────────────────────────
 
 export interface AuthTokenResponse {
@@ -689,6 +777,21 @@ export const api = {
     authorizedRequest<TransactionDto>('PUT', '/api/transactions', { body }),
   deleteTransaction: (clientUid: string) =>
     authorizedRequest<unknown>('DELETE', '/api/transactions/' + encodeURIComponent(clientUid)),
+
+  // receipts（凭证图片：multipart 直传，服务端返回相对路径 receipts/xxx.jpg）
+  uploadReceipt: async (localUri: string): Promise<{ path: string }> => {
+    const name = localUri.split('?')[0].split('/').pop() ?? 'receipt.jpg';
+    // RN 的 FormData 认 { uri, name, type } 这种"文件"形状（DOM 类型里没有，故断言）
+    const part = { uri: localUri, name, type: receiptMimeType(name) };
+    const body = await uploadMultipart<{ path?: unknown }>('/api/receipts', () => {
+      const form = new FormData();
+      form.append('file', part as unknown as Blob);
+      return form;
+    });
+    const saved = body && typeof body.path === 'string' ? body.path : '';
+    if (!saved) throw new ApiError('INTERNAL_ERROR', 200, 'POST /api/receipts → 响应缺少 path');
+    return { path: saved };
+  },
 
   // budgets
   listBudgets: () => authorizedRequest<BudgetDto[]>('GET', '/api/budgets'),

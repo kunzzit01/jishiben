@@ -112,5 +112,35 @@ console.log('\n[8] 只有裸数字（没有应付标签）→ null');
 const r8 = parseReceiptLines(['SOME SHOP', '15.00', '100.00', '85.00']);
 eq('[8] amount', r8.amount, null);
 
+console.log('\n[9] 无应付标签，但有右对齐金额列 + 找零行 → 取列内最后一笔（保守兜底）');
+const columnReceipt = [
+  { text: 'MY SHOP', top: 10, left: 10, width: 120, height: 20 },
+  { text: 'Date 01/11/2026', top: 35, left: 10, width: 200, height: 20 },
+  { text: 'Item A', top: 80, left: 10, width: 100, height: 20 },
+  { text: '12.50', top: 80, left: 400, width: 60, height: 20 },
+  { text: 'Item B', top: 105, left: 10, width: 100, height: 20 },
+  { text: '4.40', top: 105, left: 405, width: 55, height: 20 },
+  { text: 'Cash', top: 160, left: 10, width: 60, height: 20 },
+  { text: '20.00', top: 160, left: 402, width: 58, height: 20 },
+  { text: 'Change', top: 185, left: 10, width: 80, height: 20 },
+  { text: '3.10', top: 185, left: 408, width: 52, height: 20 },
+];
+const r9 = parseReceiptOcr(columnReceipt);
+eq('[9] amount', r9.amount, 4.4);
+check('[9] 置信度中等', r9.confidence > 0.3 && r9.confidence < 0.9, 'confidence=' + r9.confidence);
+
+console.log('\n[10] 学到的金额标签优先（用户此前确认过 "Rounded Total (RM)"）');
+const r10 = parseReceiptLines(['SHOP', 'Sub Total (Ex) : 20.00', 'Rounded Total (RM): 18.90', 'Cash 50.00'], {
+  learnedLabels: ['Rounded Total (RM)'],
+});
+eq('[10] amount', r10.amount, 18.9);
+
+console.log('\n[11] 没有付款行也没有标签 → null（不给瞎猜）');
+const r11 = parseReceiptOcr([
+  { text: 'NOTE', top: 10, left: 10, width: 60, height: 20 },
+  { text: '12.50', top: 40, left: 300, width: 60, height: 20 },
+]);
+eq('[11] amount', r11.amount, null);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

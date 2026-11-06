@@ -74,8 +74,15 @@ services:
       AI_VOICE_STT_MODEL: ${AI_VOICE_STT_MODEL:-qwen/qwen3-asr-flash-2026-02-10}
       # 输出 token 上限：推理型免费视觉模型会先吃掉上千 reasoning token
       AI_MAX_TOKENS: ${AI_MAX_TOKENS:-2048}
+      # 凭证图片落盘目录（对应 application.yml 的 app.receipts.dir）
+      RECEIPTS_DIR: /data/receipts
       LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
       TZ: UTC
+    volumes:
+      # 凭证图片存在宿主机：重建镜像 / 重建容器都不丢（路径对应 /api/receipts 的存储目录）
+      # 首次部署先建目录并交给容器内 app 用户（uid 100 / gid 101）：
+      #   mkdir -p deploy/data/receipts && sudo chown 100:101 deploy/data/receipts
+      - ./data/receipts:/data/receipts
     networks:
       - jishiben-net
     # 不发布端口：外部只能经 nginx 进入

@@ -6,6 +6,10 @@ export interface ScannedReceipt {
   date: string | null; // YYYY-MM-DD
   type: 'expense' | 'income'; // 识别不准默认 expense
   suggestedCategory: string | null; // 中文分类名，例如"餐饮"或"工资"
+  /** 产生金额的那一行原文（保存成功后写入本机学习库） */
+  amountLabel?: string | null;
+  /** 本机学到的商户→分类（分类 id）；界面优先用它 */
+  learnedCategoryId?: string | null;
   /** 识别到的币种（RM→MYR 等）；界面需与账户币种比对 */
   currency?: string | null;
   /** 0–1 规则置信度：偏低时界面提示用户核对金额 */
@@ -52,9 +56,11 @@ function toReadableMessage(code: string, detail?: string): string {
  */
 export async function scanReceipt(imageUri: string, imageBase64?: string): Promise<ScannedReceipt> {
   const { scanReceiptLocally, ReceiptOcrError } = await import('./receiptOcr');
+  const { getLearnedAmountLabels, getMerchantCategory } = await import('./receiptLearning');
   const { checkReceiptDuplicate } = await import('./receiptDedupe');
   try {
-    const parsed = await scanReceiptLocally(imageUri, imageBase64);
+    const learnedLabels = await getLearnedAmountLabels().catch(() => []);
+    const parsed = await scanReceiptLocally(imageUri, imageBase64, learnedLabels);
     // 查重（本地指纹，不联网）：只提示，不阻止用户记账
     let duplicate = false;
     let duplicateDaysAgo: number | undefined;
@@ -73,7 +79,10 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       date: parsed.date,
       type: parsed.type,
       suggestedCategory: parsed.suggestedCategory,
+      // 本机学到的「这个商户用这个分类」（分类 id），界面优先于 suggestedCategory
+      learnedCategoryId: await getMerchantCategory(parsed.merchant).catch(() => null),
       currency: parsed.currency,
+      amountLabel: parsed.amountLabel ?? null,
       confidence: parsed.confidence,
       rawText: parsed.rawText,
       duplicate,

@@ -162,6 +162,9 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    // Scanned currency differs from the account currency
+    scanCurrencyMismatchTitle: 'Currency mismatch',
+    scanCurrencyMismatchMsg: 'Receipt says {scan} but the account is {account}. Switch the account or fix the amount before saving.',
     // Scan: low-confidence hint
     scanCheckAmountTitle: 'Please verify the result',
     scanCheckAmountMsg: 'No clear amount label was found, so the amount may be inferred. Check it before saving.',

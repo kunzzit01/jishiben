@@ -52,6 +52,9 @@ public class SecurityConfig {
                                 "/api/auth/refresh", "/api/auth/google")
                         .permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // 凭证图片：GET 允许匿名（随机 UUID 文件名，RN 的 <Image> 带不了 Authorization 头）；
+                        // POST 上传仍走下面的 authenticated
+                        .requestMatchers(HttpMethod.GET, "/api/receipts/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationEntryPoint)

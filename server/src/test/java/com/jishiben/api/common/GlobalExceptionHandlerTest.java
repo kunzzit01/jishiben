@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -59,6 +60,13 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void anOversizedMultipartUploadIs413AndNotAServerError() throws Exception {
+        mockMvc.perform(get("/probe/upload-too-large"))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
+    }
+
+    @Test
     void unexpectedFailuresStayGenericAndLeakNoInternals() throws Exception {
         mockMvc.perform(get("/probe/crash"))
                 .andExpect(status().isInternalServerError())
@@ -78,6 +86,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/probe/crash")
         void crash() {
             throw new IllegalStateException("database password is hunter2");
+        }
+
+        @GetMapping("/probe/upload-too-large")
+        void uploadTooLarge() {
+            throw new MaxUploadSizeExceededException(6L * 1024 * 1024);
         }
 
         @PostMapping("/probe/validate")

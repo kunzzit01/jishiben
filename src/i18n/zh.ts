@@ -164,6 +164,9 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    // 扫票币种与账户币种不一致
+    scanCurrencyMismatchTitle: '币种不一致，请核对',
+    scanCurrencyMismatchMsg: '识别到 {scan}，当前账户是 {account}。请确认是否换账户，或手动校正金额后再保存。',
     // 扫票：置信度偏低时提示核对
     scanCheckAmountTitle: '识别结果请核对',
     scanCheckAmountMsg: '没有找到明确的金额标签，金额可能是推断的。请确认无误后再保存。',

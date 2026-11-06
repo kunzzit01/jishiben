@@ -47,6 +47,13 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
+  servlet:
+    multipart:
+      # 凭证图片单文件上限是 5 MB（ReceiptController 里校验并返回 413）；
+      # 这里留 1 MB 余量，先让容器把 multipart 收下来，超限才由统一错误体回答
+      max-file-size: 6MB
+      max-request-size: 6MB
+
 server:
   port: "${SERVER_PORT:8080}"
   shutdown: graceful
@@ -67,6 +74,9 @@ management:
         enabled: true
 
 app:
+  receipts:
+    # 凭证图片落盘目录。compose 里挂到宿主机 ./data/receipts，重建容器不丢图。
+    dir: ${RECEIPTS_DIR:/data/receipts}
   google:
     # Google 登录的 ID Token 受众（Web application OAuth Client ID）。留空 = 该功能关闭，邮箱登录不受影响。
     web-client-id: ${GOOGLE_WEB_CLIENT_ID:}

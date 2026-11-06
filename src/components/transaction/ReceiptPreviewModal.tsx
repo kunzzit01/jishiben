@@ -8,6 +8,7 @@ import { useBottomSystemInset } from '../../hooks/useBottomSystemInset';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/useTheme';
+import { receiptImageSource } from '../../utils/receiptStore';
 
 interface Props {
   visible: boolean;
@@ -27,13 +28,15 @@ export function ReceiptPreviewModal({ visible, uri, onClose }: Props) {
   // 宽度收进安全区内（左右各 16），图片仍是 resizeMode="contain"，不会拉伸变形。
   const imageMaxHeight = Math.max(160, windowHeight - insets.top - bottomInset - 40);
   const imageWidth = Math.max(160, windowWidth - 32);
+  // 同步回来的凭证是服务端相对路径（receipts/x.jpg），本地是 file://…：都走 receiptImageSource 解析
+  const src = receiptImageSource(uri);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={styles.receiptViewerOverlay} activeOpacity={1} onPress={onClose}>
-        {uri && (
+        {src && (
           <Image
-            source={{ uri }}
+            source={{ uri: src }}
             style={[styles.receiptViewerImage, { width: imageWidth, maxHeight: imageMaxHeight }]}
             resizeMode="contain"
           />

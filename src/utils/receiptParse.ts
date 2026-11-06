@@ -23,6 +23,8 @@ export interface ParsedReceipt {
   suggestedCategory: string | null;
   /** 0–1，**只反映金额**的可信度（日期/商户成功不会抬高它） */
   confidence: number;
+  /** 产生金额的那一行原文（用于本机学习「哪种标签是实付」） */
+  amountLabel?: string | null;
   rawText: string;
 }
 
@@ -42,7 +44,7 @@ interface Row {
   top: number;
   height: number;
   /** 行内片段（按 left 升序）；没有坐标时只有一个片段 */
-  cells: { text: string; left: number }[];
+  cells: { text: string; left: number; width: number }[];
 }
 
 const CURRENCY_CODES = ['MYR', 'SGD', 'CNY', 'RMB', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'TWD', 'KRW', 'THB', 'VND', 'PHP', 'IDR', 'INR', 'AUD', 'NZD', 'CAD'];
@@ -128,7 +130,7 @@ function buildRows(lines: OcrLine[]): Row[] {
     return lines
       .map((l) => l.text.trim())
       .filter(Boolean)
-      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0 }] }));
+      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0, width: text.length * 8 }] }));
   }
 
   const items = lines
@@ -138,6 +140,7 @@ function buildRows(lines: OcrLine[]): Row[] {
       top: l.top ?? 0,
       height: Math.max(1, l.height ?? 12),
       left: l.left ?? 0,
+      width: l.width ?? Math.max(1, (l.text?.length ?? 1) * 8),
     }))
     .sort((a, b) => a.top - b.top || a.left - b.left);
 
@@ -157,7 +160,9 @@ function buildRows(lines: OcrLine[]): Row[] {
   return rows
     .sort((a, b) => a.top - b.top)
     .map((r) => {
-      const cells = [...r.cells].sort((a, b) => a.left - b.left).map((c) => ({ text: c.text, left: c.left }));
+      const cells = [...r.cells]
+        .sort((a, b) => a.left - b.left)
+        .map((c) => ({ text: c.text, left: c.left, width: c.width }));
       return { text: cells.map((c) => c.text).join(' '), top: r.top, height: r.height, cells };
     });
 }
@@ -207,8 +212,57 @@ function isMoneyShaped(text: string): boolean {
 interface AmountResult {
   amount: number | null;
   currency: string | null;
+  /** 命中标签所在行原文 */
+  label?: string | null;
   /** 0–1：只反映金额可信度 */
   confidence: number;
+}
+
+/**
+ * 没有任何应付标签时的**保守**兜底：右对齐金额列。
+ * 条件（缺一不可，宁可不填也不填错）：
+ *   - 票据里出现付款/找零标记（cash / change / tunai / baki / card / ewallet）
+ *   - 至少两个「纯金额」单元在右侧对齐成列（右边缘差 ≤ 12px）
+ *   - 取该列中位于第一处付款标记之前的最后一笔
+ */
+function extractAmountColumn(rows: Row[]): AmountResult | null {
+  const PAY = /(cash\s*change|change|tunai|baki|tendered|credit\s*card|debit\s*card|e-?wallet|ewallet|cash)/i;
+  const firstPayRow = rows.findIndex((r) => PAY.test(r.text));
+  if (firstPayRow < 0 && !rows.some((r) => PAY.test(r.text))) return null;
+
+  interface Cand { rowIdx: number; value: number; right: number }
+  const cands: Cand[] = [];
+  rows.forEach((row, rowIdx) => {
+    if (NON_AMOUNT_LABEL.test(row.text)) return;
+    for (const cell of row.cells) {
+      const t = cell.text.trim();
+      if (!/^[¥￥$€£]?\s?[\d.,]+$/.test(t)) continue;
+      const nums = numbersIn(t);
+      if (nums.length !== 1) continue;
+      const v = nums[0];
+      if (v <= 0 || v >= 100000) continue;
+      cands.push({ rowIdx, value: v, right: cell.left + Math.max(cell.width, t.length * 8) });
+    }
+  });
+  if (cands.length < 2) return null;
+
+  const columns = new Map<number, Cand[]>();
+  for (const c of cands) {
+    const key = Math.round(c.right / 12) * 12;
+    const bucket = columns.get(key) ?? [];
+    bucket.push(c);
+    columns.set(key, bucket);
+  }
+  let best: Cand[] = [];
+  for (const bucket of columns.values()) if (bucket.length > best.length) best = bucket;
+  if (best.length < 2) return null;
+
+  const before = best.filter((c) => firstPayRow < 0 || c.rowIdx < firstPayRow).sort((a, b) => a.rowIdx - b.rowIdx);
+  const pool = before.length > 0 ? before : best;
+  if (pool.length === 0) return null;
+  const chosen = pool[pool.length - 1];
+  const currency = rowCurrency(rows[chosen.rowIdx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
+  return { amount: chosen.value, currency, confidence: 0.55 };
 }
 
 function extractAmount(rows: Row[]): AmountResult {
@@ -239,7 +293,7 @@ function extractAmount(rows: Row[]): AmountResult {
     if (amount === null) return { amount: null, currency: rowCurrency(row), confidence: 0.2 };
     if (amount >= 1000000) return { amount: null, currency: rowCurrency(row), confidence: 0.1 };
     const currency = rowCurrency(row) ?? rows.slice(0, Math.max(idx + 1, 1)).map(rowCurrency).filter(Boolean)[0] ?? null;
-    return { amount, currency, confidence };
+    return { amount, currency, confidence, label: row.text };
   };
 
   const finalHit = tryLabels(FINAL_TOTAL_LABELS, 0.9);
@@ -247,6 +301,10 @@ function extractAmount(rows: Row[]): AmountResult {
 
   const subtotalHit = tryLabels(SUBTOTAL_LABELS, 0.6);
   if (subtotalHit && subtotalHit.amount !== null) return subtotalHit;
+
+  // 没有任何标签 → 用右对齐金额列做保守兜底（有付款标记 + 列证据才认）
+  const columnHit = extractAmountColumn(rows);
+  if (columnHit) return columnHit;
 
   // 没有任何应付标签 → 金额留空（裸数字不可信：可能是单号/电话/数量）
   const fallbackCurrency = rows.map(rowCurrency).filter(Boolean)[0] ?? null;
@@ -334,10 +392,23 @@ const CATEGORY_KEYWORDS: Array<[string, RegExp]> = [
 ];
 
 /** 主入口（带坐标）：优先用版面坐标配对标签与金额 */
-export function parseReceiptOcr(lines: OcrLine[]): ParsedReceipt {
+export interface ParseOptions {
+  /** 用户此前确认过的金额标签（本机学习），命中即按最终应付处理 */
+  learnedLabels?: string[];
+}
+
+export function parseReceiptOcr(lines: OcrLine[], options: ParseOptions = {}): ParsedReceipt {
   const rows = buildRows(lines);
   const text = rows.map((r) => r.text).join('\n');
-  const { amount, currency, confidence } = extractAmount(rows);
+  const learned = (options.learnedLabels ?? []).map((l) => l.trim().toLowerCase()).filter((l) => l.length >= 4);
+  const learnedRow = learned.length
+    ? rows.find((r) => learned.some((l) => r.text.toLowerCase().includes(l)))
+    : undefined;
+  const learnedHit: AmountResult | null = learnedRow
+    ? { amount: amountInRowAfterLabel(learnedRow) ?? numbersIn(learnedRow.text).slice(-1)[0] ?? null, currency: rowCurrency(learnedRow), confidence: 0.95 }
+    : null;
+  const best = learnedHit && learnedHit.amount !== null ? learnedHit : extractAmount(rows);
+  const { amount, currency, confidence } = best;
 
   const amountRowIndex = rows.findIndex((r) => FINAL_TOTAL_LABELS.some((re) => re.test(r.text)));
   const merchant = extractMerchant(rows, amountRowIndex);
@@ -371,11 +442,12 @@ export function parseReceiptOcr(lines: OcrLine[]): ParsedReceipt {
     merchant,
     suggestedCategory,
     confidence: Math.round(confidence * 100) / 100,
+    amountLabel: best.label ?? null,
     rawText: text,
   };
 }
 
 /** 兼容入口（只有文字，没有坐标）：逐行当作版面行，配对更保守 */
-export function parseReceiptLines(lines: string[]): ParsedReceipt {
-  return parseReceiptOcr(lines.map((text) => ({ text })));
+export function parseReceiptLines(lines: string[], options: ParseOptions = {}): ParsedReceipt {
+  return parseReceiptOcr(lines.map((text) => ({ text })), options);
 }

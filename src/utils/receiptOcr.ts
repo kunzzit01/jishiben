@@ -98,7 +98,11 @@ function getRecognizer(): Recognizer {
 }
 
 /** 识别一张本地图片 → 记账字段。失败抛 ReceiptOcrError（界面据此提示或让用户手填）。 */
-export async function scanReceiptLocally(uri: string, base64?: string): Promise<ParsedReceipt> {
+export async function scanReceiptLocally(
+  uri: string,
+  base64?: string,
+  learnedLabels: string[] = [],
+): Promise<ParsedReceipt> {
   const recognize = getRecognizer();
   let lines: OcrLine[] = [];
   const errors: string[] = [];
@@ -137,5 +141,5 @@ export async function scanReceiptLocally(uri: string, base64?: string): Promise<
   if (lines.length === 0) {
     throw new ReceiptOcrError('no-text', '这张图里没有识别到文字');
   }
-  return parseReceiptOcr(lines);
+  return parseReceiptOcr(lines, { learnedLabels });
 }

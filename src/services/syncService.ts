@@ -37,6 +37,7 @@ import {
   WeekStartsOn,
 } from '../types';
 import { amountKey, optionalAmount, optionalRate, parseAmount, rateKey } from '../utils/money4';
+import { isRemoteReceipt, localReceiptExists } from '../utils/receiptStore';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { t as translate } from '../i18n';
 
@@ -500,7 +501,38 @@ function categoryFromDto(d: CategoryDto): Category {
   };
 }
 
-function txToRow(t: Transaction): TxRow {
+/**
+ * 本地凭证 uri → 服务端 receipt_path。
+ *
+ * - 已经是 receipts/xxx.jpg：直接用；
+ * - 本地 file:// / content:// 且文件还在：上传，拿服务端返回的相对路径；
+ * - 上传失败（离线 / 服务端 5xx）：本笔照常同步，只是不带新凭证，记一条 warn。
+ *
+ * 两种缓存：uploadedReceipts 按本地 uri 复用上传结果（同一张图本次会话只传一次）；
+ * knownReceiptPaths 记住拉取时服务端已有的路径，上传失败时用它兜底——否则一次失败的
+ * 同步会把服务端已有的凭证清成 NULL。
+ */
+const uploadedReceipts = new Map<string, string>();
+const knownReceiptPaths = new Map<string, string>();
+
+async function receiptPathFor(txId: string, uri: string | undefined): Promise<string | null> {
+  if (!uri) return null;
+  if (isRemoteReceipt(uri)) return clip(uri, 512);
+  const cached = uploadedReceipts.get(uri);
+  if (cached) return clip(cached, 512);
+  if (!(await localReceiptExists(uri))) return knownReceiptPaths.get(txId) ?? null;
+  try {
+    const { path } = await api.uploadReceipt(uri);
+    uploadedReceipts.set(uri, path);
+    knownReceiptPaths.set(txId, path);
+    return clip(path, 512);
+  } catch (e) {
+    console.warn('[sync] 凭证上传失败，本笔交易先不带凭证：', errorMessage(e));
+    return knownReceiptPaths.get(txId) ?? null;
+  }
+}
+
+async function txToRow(t: Transaction): Promise<TxRow> {
   return {
     clientUid: t.id,
     ledgerUid: t.ledgerId,
@@ -518,11 +550,13 @@ function txToRow(t: Transaction): TxRow {
     occurredOn: t.date,
     note: clip(t.note ?? '', 500),
     displayName: t.displayName ? clip(t.displayName, 100) : null,
-    receiptPath: t.receiptUri ? clip(t.receiptUri, 512) : null,
+    receiptPath: await receiptPathFor(t.id, t.receiptUri),
   };
 }
 
 function txFromDto(d: TransactionDto): Transaction {
+  // 记下服务端已有的凭证路径：上传失败/本地文件丢失时用它兜底，别把云端的图清掉
+  if (d.receiptPath) knownReceiptPaths.set(d.clientUid, d.receiptPath);
   return {
     id: d.clientUid,
     amount: parseAmount(d.amount) ?? 0,
@@ -758,8 +792,8 @@ function effectiveGroups(s: LocalSnapshot): CategoryGroup[] {
   return out;
 }
 
-/** 把当前快照按表转成云端行（canonical 形状，diff 用） */
-function buildAllRows(s: LocalSnapshot): SyncMirror {
+/** 把当前快照按表转成云端行（canonical 形状，diff 用）；transactions 要先完成凭证上传 */
+async function buildAllRows(s: LocalSnapshot): Promise<SyncMirror> {
   // normalizeSnapshot 已把账本归属修好，这里只是兜底：账本 id 永远取自真实账本，
   // 绝不再回落到 'default' —— 那是个服务端不存在的账本，整行会被 400 拒写
   const fallbackLedgerId = resolveLedgerFallback(
@@ -772,7 +806,7 @@ function buildAllRows(s: LocalSnapshot): SyncMirror {
     assets: s.assets.map((a, i) => assetToRow(a, i, fallbackLedgerId, currency)),
     categoryGroups: effectiveGroups(s).map(groupToRow),
     categories: s.categories.map(categoryToRow),
-    transactions: s.transactions.map(txToRow),
+    transactions: await Promise.all(s.transactions.map(txToRow)),
     budgets: s.budgets.map((b) => budgetToRow(b, currency)),
     paymentPlans: s.paymentPlans.map((p, i) => planToRow(p, i, fallbackLedgerId)),
     profile: profileToRow(s),
@@ -1055,7 +1089,7 @@ async function fetchAll(): Promise<CloudPull> {
     assets: assets.map((a, i) => assetToRow(a, i, '', profile.currency)),
     categoryGroups: categoryGroups.map(groupToRow),
     categories: categories.map(categoryToRow),
-    transactions: transactions.map(txToRow),
+    transactions: await Promise.all(transactions.map(txToRow)),
     budgets: budgets.map((b) => budgetToRow(b, profile.currency)),
     paymentPlans: paymentPlans.map((p, i) => planToRow(p, i, '')),
     profile,
@@ -1379,7 +1413,7 @@ async function pushSnapshot(
   // 这种状态下 diff 会把云端每一本账本都当成"本地已删除"，推上去就是全量删账本，
   // 所以直接跳过推送，等首次拉取落定后再推。
   if (s.ledgers.length === 0) return [];
-  const current = buildAllRows(s);
+  const current = await buildAllRows(s);
   const mirror = await loadMirror();
   const failedRows: RowFailure[] = [];
 
