@@ -12,6 +12,7 @@ import {
   Platform,
   Keyboard,
   BackHandler,
+  Linking,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,7 +32,7 @@ import { useT, useLanguage } from '../i18n/LanguageContext';
 import { getCategoryLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { scanReceipt, rememberReceiptRawText } from '../utils/scanReceipt';
-import { isAiConfigured } from '../config/aiConfig';
+import { isLocalOcrAvailable } from '../utils/receiptOcr';
 
 /** 大组排序的存储键：与「管理类别」页共用同一个键，两页顺序保持一致 */
 const GROUP_ORDER_KEY = '@jizhang/categoryGroupOrder';
@@ -352,6 +353,8 @@ const RECENT_CATEGORY_KEY = '@jizhang/recentCategories';
 // TASK-022：每个类型的"最后选中类别"持久化（杀进程重启后自动恢复）——
 // 值形如 { expense?: string, income?: string }；transfer/exchange 页无类别网格不参与
 const LAST_CATEGORY_KEY = '@jizhang/lastCategory';
+// 更新入口：扫票依赖原生模块，老安装包拿到新 JS 时引导用户去下载最新 APK
+const APP_UPDATE_URL = 'https://187.127.125.136/downloads/';
 // TASK-022：每个类型的网格固定格（本次选过的类别置顶格）持久化，重启后网格原样恢复
 // 值形如 { expense?: string[], income?: string[] }
 const SESSION_PICKED_KEY = '@jizhang/sessionPickedCategories';
@@ -1725,15 +1728,22 @@ function fxAmountText(raw: string, live: string | null): string {
   // ---------- 扫描小票 ----------
   // 纯云端模式：统一走云端 OCR 解析（本地 AICore 模块已移除，ML Kit GenAI 依赖在
   // EAS 上无法解析——公开仓库不含该 artifact，恢复本地模式时从 Zcode 备份取回）
-  const runScan = async (base64: string, uri: string) => {
-    // 未配置 AI 密钥（环境变量缺失）→ 优雅降级：不请求、不崩，提示后让用户手动记账
-    if (!isAiConfigured) {
-      dialog.alert({ title: t('addTx.scanUnavailableTitle'), message: t('addTx.scanUnavailableMsg') });
+  const runScan = async (_base64: string, uri: string) => {
+    // 本地 OCR 需要新安装包：老 APK 拿到新 JS 时给出更新入口（不再依赖任何 AI 密钥）
+    if (!isLocalOcrAvailable()) {
+      dialog.alert({
+        title: t('addTx.scanNeedUpdateTitle'),
+        message: t('addTx.scanNeedUpdateMsg'),
+        buttons: [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('addTx.scanGoUpdate'), onPress: () => { void Linking.openURL(APP_UPDATE_URL); } },
+        ],
+      });
       return;
     }
     setScanning(true);
     try {
-      const result = await scanReceipt(base64);
+      const result = await scanReceipt(uri);
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
@@ -1783,9 +1793,16 @@ function fxAmountText(raw: string, live: string | null): string {
   const [cameraMode, setCameraMode] = useState<'scan' | 'receipt' | null>(null);
 
   const handleScanPress = () => {
-    // 没有 AI 密钥时不必开相机（拍了也解析不了）——直接给不可用提示
-    if (!isAiConfigured) {
-      dialog.alert({ title: t('addTx.scanUnavailableTitle'), message: t('addTx.scanUnavailableMsg') });
+    // 本地识别模块缺失时不必开相机（拍了也解析不了）——直接给更新入口
+    if (!isLocalOcrAvailable()) {
+      dialog.alert({
+        title: t('addTx.scanNeedUpdateTitle'),
+        message: t('addTx.scanNeedUpdateMsg'),
+        buttons: [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('addTx.scanGoUpdate'), onPress: () => { void Linking.openURL(APP_UPDATE_URL); } },
+        ],
+      });
       return;
     }
     setCameraMode('scan');

@@ -14,6 +14,18 @@ export class ReceiptOcrError extends Error {
 
 type Recognizer = (uri: string) => Promise<string[]>;
 
+/** 当前安装包是否带本地识别模块（老 APK 走 OTA 拿到新 JS 时会是 false）。 */
+export function isLocalOcrAvailable(): boolean {
+  if (Platform.OS === 'web') return false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('@react-native-ml-kit/text-recognition');
+    return !!((mod?.default ?? mod)?.recognize);
+  } catch {
+    return false;
+  }
+}
+
 let recognizer: Recognizer | null = null;
 
 /** 惰性加载原生模块：Web/未安装原生模块时给出可读错误，而不是崩溃 */

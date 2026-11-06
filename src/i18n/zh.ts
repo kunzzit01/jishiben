@@ -164,6 +164,10 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    // 扫票需要新版安装包（本地 OCR 是原生模块）
+    scanNeedUpdateTitle: '扫票需要更新 App',
+    scanNeedUpdateMsg: '本地识别是原生模块，当前安装包还没有。装一次最新版本后即可离线扫票（以后可 OTA 更新）。',
+    scanGoUpdate: '去下载最新版',
     // 扫票查重
     receiptDuplicateTitle: '这张小票好像记过了',
     receiptDuplicateMsg: '上次识别到它大约 {n} 天前。确定要再记一笔就继续。',
