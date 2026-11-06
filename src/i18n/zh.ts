@@ -164,6 +164,10 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    // 关于应用：本地扫票模块自检
+    localOcr: '本地识别',
+    localOcrReady: '可用（支持离线扫票）',
+    localOcrMissing: '不可用（安装包过旧）',
     // 扫票需要新版安装包（本地 OCR 是原生模块）
     scanNeedUpdateTitle: '扫票需要更新 App',
     scanNeedUpdateMsg: '本地识别是原生模块，当前安装包还没有。装一次最新版本后即可离线扫票（以后可 OTA 更新）。',

@@ -162,6 +162,10 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    // About: local OCR self-check
+    localOcr: 'Local OCR',
+    localOcrReady: 'Ready (offline scan)',
+    localOcrMissing: 'Unavailable (build too old)',
     // Receipt scanning needs the newer build (local OCR is a native module)
     scanNeedUpdateTitle: 'Update needed for scanning',
     scanNeedUpdateMsg: 'Local OCR is a native module and this build does not include it yet. Install the latest APK once; later updates can arrive via OTA.',
