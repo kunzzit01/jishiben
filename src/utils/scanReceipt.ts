@@ -109,6 +109,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let amount = parsed.amount;
     let currency = parsed.currency;
     let merchant = parsed.merchant;
+    let merchantConfident = parsed.merchantConfident ?? false;
     let date = parsed.date;
     let confidence = parsed.confidence;
     let aiTried = false;
@@ -126,7 +127,11 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
         // 校验通过的 AI 字段才允许覆盖本地结果；AI 给 null 的项沿用本地（本地也已各自过关）
         amount = attempt.draft.amount;
         currency = attempt.draft.currency ?? currency;
-        merchant = attempt.draft.merchant ?? merchant;
+        if (attempt.draft.merchant) {
+          // AI 的商户必须已通过 verify（出现在 OCR 文本里）→ 视为可核对，给备注建议
+          merchant = attempt.draft.merchant;
+          merchantConfident = true;
+        }
         date = attempt.draft.date ?? date;
         confidence = 0.7;
         aiUsed = true;
@@ -148,6 +153,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     return {
       amount,
       merchant,
+      merchantConfident,
       date,
       type: parsed.type,
       suggestedCategory: parsed.suggestedCategory,
