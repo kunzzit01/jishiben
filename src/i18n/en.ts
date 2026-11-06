@@ -275,7 +275,8 @@ export const en = {
     sameAccount: 'Outgoing and incoming accounts cannot be the same',
     rateInvalid: 'Please enter a valid rate',
     // Rate-source status line (exchange / cross-currency transfer): fetching / live / offline (server or local cache) / unavailable    scanLimitReached: 'Cloud receipt parsing limit reached',
-    scanNoAmount: 'AI could not read the amount, please fill it in manually',
+    // Receipt scan produced no amount (local rules and on-device AI fallback both failed) — keep the copy AI-free
+    scanNoAmount: 'Could not read the amount, please fill it in manually',
     addAssetTitle: 'Add Asset Account',
     editAssetTitle: 'Edit Account',
     balanceLabel: 'Opening Balance',

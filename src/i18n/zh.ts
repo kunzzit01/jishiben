@@ -277,7 +277,8 @@ export const zh = {
     sameAccount: '转出和转入不能是同一个账户',
     rateInvalid: '请输入正确的汇率',
     // 汇率来源状态行（兑换 / 跨币种转账）：拉取中 / 实时 / 离线（后端或本地缓存）/ 不可用    scanLimitReached: '云端小票解析次数已达上限',
-    scanNoAmount: 'AI没能读出金额，麻烦手动填一下',
+    // 扫票拿不到金额（本地规则与端侧 AI 兜底都没成功）——文案不提 AI，统一引导手填
+    scanNoAmount: '没能读出金额，请手动填写',
     addAssetTitle: '添加资产账户',
     editAssetTitle: '编辑账户',
     balanceLabel: '起始余额',

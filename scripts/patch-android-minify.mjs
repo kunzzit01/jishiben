@@ -43,6 +43,26 @@ if (!gradle.includes('text-recognition-japanese')) {
   writeFileSync(appGradle, gradle);
 }
 
+// 端侧 Gemini Nano（com.google.mlkit:genai-prompt:1.0.0-beta5）的 POM 把 kotlin-stdlib 抬到 2.4.0，
+// 而本 SDK 的 Kotlin 编译器（rootProject.ext.kotlinVersion = 2.1.20）只能读 metadata <= 2.2.0，
+// 结果 :app:compileReleaseKotlin 直接报 "Incompatible classes were found in dependencies"。
+// stdlib 向下 ABI 兼容，这里统一压回编译器自带的版本。
+if (!gradle.includes('jishiben: kotlin-stdlib 版本压制')) {
+  const KOTLIN_FORCE = [
+    "configurations.all {",
+    "    // jishiben: kotlin-stdlib 版本压制（由 patch-android-minify.mjs 注入）",
+    "    resolutionStrategy.eachDependency { details ->",
+    "        if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.startsWith('kotlin-stdlib')) {",
+    "            details.useVersion(rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : '2.1.20')",
+    "        }",
+    "    }",
+    "}",
+    ""
+  ].join('\n');
+  gradle = gradle.replace('android {', KOTLIN_FORCE + 'android {');
+  writeFileSync(appGradle, gradle);
+}
+
 if (!gradle.includes('resConfigs')) {
   gradle = gradle.replace(
     '    androidResources {',
@@ -65,6 +85,9 @@ const KEEP = [
   '-keep class com.reactnativegooglesignin.** { *; }',
   // 原生 OCR 桥（@react-native-ml-kit/text-recognition）：类与 @ReactMethod 都必须保留
   '-keep class com.rnmlkit.** { *; }',
+  // 端侧 Gemini Nano 桥（modules/react-native-gemini-nano）：PackageList 反射实例化 Package，
+  // @ReactMethod 也要靠反射暴露给 JS，整包保留
+  '-keep class com.gemini.nano.** { *; }',
   '-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }',
   '-keep @com.facebook.react.bridge.ReactModuleSpec class * { *; }',
   '-keep class expo.modules.** { *; }',
@@ -79,6 +102,26 @@ const KEEP = [
   '-dontwarn com.google.mlkit.vision.text.korean.**',
   ''
 ].join('\n');
+
+// 单独保证 Gemini Nano 桥的 keep：shadow 里的 android/ 往往已存在旧版规则块，
+// 上面那几个分支都不会命中，所以这里用「标记缺失才追加」的幂等写法。
+function ensureKeepRule(needle, block) {
+  if (!existsSync(proguard)) return;
+  const current = readFileSync(proguard, 'utf8');
+  if (!current.includes(needle)) {
+    writeFileSync(proguard, current.replace(/\s*$/, '') + '\n' + block);
+  }
+}
+
+ensureKeepRule(
+  'com.gemini.nano.**',
+  [
+    '',
+    '# ---- jishiben: 端侧 Gemini Nano 桥（modules/react-native-gemini-nano）----',
+    '-keep class com.gemini.nano.** { *; }',
+    ''
+  ].join('\n')
+);
 
 if (existsSync(proguard)) {
   const cur = readFileSync(proguard, 'utf8');

@@ -1,0 +1,23 @@
+{
+  "name": "react-native-gemini-nano",
+  "version": "0.0.1",
+  "description": "Android ML Kit GenAI Prompt API (on-device Gemini Nano) bridge for React Native",
+  "main": "index.js",
+  "react-native": "index.js",
+  "files": [
+    "index.js",
+    "android"
+  ],
+  "keywords": [
+    "react-native",
+    "android",
+    "ml-kit",
+    "genai",
+    "gemini-nano"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  }
+}
