@@ -1,0 +1,7 @@
+# 版本全部固定，避免重新构建时被上游漂移破坏
+fastapi==0.162.0
+uvicorn==0.54.0
+python-multipart==0.0.33
+pillow==13.0.0
+# PaddleOCR PP-OCR 的 ONNX 版（TeleBot 同款引擎）；模型随 wheel 分发，见 README
+rapidocr_onnxruntime==1.4.4

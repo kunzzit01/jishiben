@@ -1,4 +1,4 @@
-# 单机 Docker Compose 部署（api + mysql + nginx）
+# 单机 Docker Compose 部署（api + mysql + nginx + ocr）
 # 用法（在仓库根目录）：
 #   cp deploy/.env.example deploy/.env   # 填写真实口令，deploy/.env 不提交
 #   docker compose -f deploy/docker-compose.yml up -d --build
@@ -154,6 +154,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 服务端 OCR 兜底（本机 ML Kit 对 手写发票/热敏纸/反光照片 识别差时用）。
+  # RapidOCR = PaddleOCR PP-OCR 的 ONNX 版；只返回文字与像素坐标，不做金额解析。
+  # 不发布宿主端口：只能经 web 容器 nginx 的 /ocr/ 进入，镜像自带 HEALTHCHECK。
+  # 代码与用法见 ocr-service/README.md。
+  ocr:
+    build:
+      context: ../ocr-service
+      dockerfile: Dockerfile
+    image: jishiben/ocr:0.1.0
+    container_name: jishiben-ocr
+    restart: unless-stopped
+    environment:
+      # 客户端必须带同名请求头 X-OCR-Key；不填则 compose 直接报错，不放行
+      OCR_SHARED_KEY: ${OCR_SHARED_KEY:?OCR_SHARED_KEY is required}
+      TZ: UTC
+    # 仅内网可达：只写 expose，不写 ports（宿主机无法直连 8090）
+    expose:
+      - "8090"
+    # 单 worker 持有一份 onnx 模型 + 图片解码缓冲；Swarm 下改用 deploy.resources.limits
+    mem_limit: 2g
+    networks:
+      - jishiben-net
+    stop_grace_period: 30s
     logging:
       driver: json-file
       options:
