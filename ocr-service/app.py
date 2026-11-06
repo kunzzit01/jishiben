@@ -8,7 +8,12 @@
 
 接口：
     GET  /ocr/health            -> 引擎与版本（无需密钥，不触发模型加载）
-    POST /ocr/lines  (multipart) -> {"lines": [...], "avgScore": ..., "elapsedMs": ...}
+    POST /ocr/lines  (multipart) -> {"lines": [...], "avgScore": ..., "elapsedMs": ...,
+                                     "passes": 1|2, "warnings": [...], "crop": null|{...}}
+
+合计区域重读：首轮识别后做一次版面判断，命中合计标签行、但标签附近（同一行右侧 /
+上下相邻两行）没有任何「像金额」的字串时，按标签位置裁一块图再识别一次（每请求最多
+一次），二次结果映射回原图坐标后并入 lines。没有触发时 crop 为 null。
 
 错误统一为 {"code": "...", "message": "..."}。
 """
@@ -19,9 +24,12 @@ import asyncio
 import hmac
 import io
 import logging
+import math
 import os
+import re
 import threading
 import time
+import unicodedata
 from contextlib import asynccontextmanager
 from importlib import metadata
 
@@ -38,6 +46,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("jishiben.ocr")
 
+
+def _env_int(name: str, default: int) -> int:
+    """读正整数环境变量；值不合法只告警并回落，绝不让服务在 import 期崩掉。"""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("环境变量 %s=%r 不是整数，回落到 %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("环境变量 %s=%r 不是正数，回落到 %d", name, raw, default)
+        return default
+    return value
+
+
 # ── 限制 ────────────────────────────────────────────────────────────────────
 MAX_BYTES = 8 * 1024 * 1024  # 上传上限 8MB
 MAX_SIDE = 2000  # 解码后最长边上限：超出先缩小再识别，控内存
@@ -45,6 +70,17 @@ MAX_CONCURRENCY = 2  # 同时进识别的请求数上限
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 # 部分 RN 上传默认发 octet-stream：放行后由 Pillow 按真实字节校验
 LAX_MIME = ALLOWED_MIME | {"application/octet-stream", "image/jpg", ""}
+
+# ── 合计区域二次识别的参数 ──────────────────────────────────────────────────
+CROP_PAD_Y_RATIO = 1.5  # 标签框上下各外扩 1.5 倍行高
+CROP_PAD_X_RATIO = 0.40  # 标签框左右各外扩 40% 图宽
+SAME_ROW_OVERLAP = 0.5  # 垂直重叠 ≥ 50% 行高即算「同一行」
+ADJACENT_GAP_RATIO = 2.0  # 与标签行的垂直空隙 ≤ 2 倍行高即算「上下相邻两行」
+SECOND_PASS_MIN_MS = 800  # 剩余预算低于此值就不开第二次推理（起推理本身也要时间）
+DEFAULT_TOTAL_BUDGET_MS = 15000
+
+# 两次推理共享的总时限：从收到请求（含排队）算起，超了就放弃二次识别
+TOTAL_BUDGET_MS = _env_int("OCR_TOTAL_BUDGET_MS", DEFAULT_TOTAL_BUDGET_MS)
 
 OCR_SHARED_KEY = os.environ.get("OCR_SHARED_KEY", "")
 
@@ -96,6 +132,148 @@ def _engine_version() -> str:
         return "unknown"
 
 
+# ── 合计区域版面判断（纯函数：只吃 lines 与图片尺寸，不碰 PIL / 引擎） ──────
+def _norm(text: str) -> str:
+    """NFKC 折全角 + 转小写 + 压空白，让 ＴＯＴＡＬ / 总  额 这类变体也能命中。"""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text or "")).strip().lower()
+
+
+# 顺序有意义：先匹配更具体的写法，GRAND TOTAL 不会被降级成 TOTAL
+_TOTAL_LABEL_RULES = (
+    ("GRAND TOTAL", re.compile(r"\bgrand\s*total\b")),
+    ("AMOUNT DUE", re.compile(r"\bamount\s*due\b")),
+    ("JUMLAH", re.compile(r"\bjumlah\b")),
+    ("TOTAL", re.compile(r"\btotal\b")),
+    ("总额", re.compile(r"总额|總額|总金额|總金額|总计|總計")),
+    ("合计", re.compile(r"合计|合計")),
+)
+
+# 小计行不算合计行：SUBTOTAL / Sub Total 都不该触发重读
+_SUBTOTAL_RE = re.compile(r"\bsub[\s\-]*total\b")
+
+# 「像金额」的简单规则（判定只看字面，不做业务解析）：
+# 1–3 位小数（含印尼千分位 25.000）、88/= 手写写法、88,- / 88- 写法、整行就是一个数字
+_AMOUNT_PATTERNS = (
+    re.compile(r"\d+[.,]\d{1,3}"),
+    re.compile(r"\d+/="),
+    re.compile(r"\d+,?-$"),
+    re.compile(r"^(?:rp\.?|idr|rm|\$|¥|€)?\d{1,9}(?:[.,]\d{3})*(?:[.,]\d{1,3})?$"),
+)
+
+
+def match_total_label(text: str) -> str | None:
+    """命中合计标签时返回规范化的标签名（如 "TOTAL" / "总额"），否则 None。"""
+    norm = _norm(text)
+    if not norm:
+        return None
+    compact = norm.replace(" ", "")  # 中文票据常被识别成「总 额」
+    if _SUBTOTAL_RE.search(norm) or _SUBTOTAL_RE.search(compact):
+        return None  # 小计行：标签命中也要放弃
+    for name, pattern in _TOTAL_LABEL_RULES:
+        if pattern.search(norm) or pattern.search(compact):
+            return name
+    return None
+
+
+def looks_like_amount(text: str) -> bool:
+    """粗略判断一段字串像不像金额；宁可多报（多报只是少做一次优化）。"""
+    norm = _norm(text).replace(" ", "")
+    if not norm:
+        return False
+    return any(pattern.search(norm) for pattern in _AMOUNT_PATTERNS)
+
+
+def _row_overlap_ratio(a: dict, b: dict) -> float:
+    """垂直重叠占较矮一行的比例；同一行约等于 1。"""
+    top = max(a["top"], b["top"])
+    bottom = min(a["top"] + a["height"], b["top"] + b["height"])
+    shorter = min(max(1, a["height"]), max(1, b["height"]))
+    return max(0.0, bottom - top) / float(shorter)
+
+
+def _row_gap(a: dict, b: dict) -> float:
+    """两框之间的垂直空隙；同一行或已重叠时为 0。"""
+    return max(0.0, b["top"] - (a["top"] + a["height"]), a["top"] - (b["top"] + b["height"]))
+
+
+def label_has_amount_nearby(label: dict, lines: list[dict]) -> bool:
+    """标签行自身、同一行右侧、或上下相邻两行内是否已有「像金额」的字串。"""
+    if looks_like_amount(label["text"]):
+        return True  # 引擎可能把「TOTAL 88.00」并进同一行
+    center_x = label["left"] + label["width"] / 2.0
+    max_gap = ADJACENT_GAP_RATIO * max(1, label["height"])
+    for other in lines:
+        if other is label or not looks_like_amount(other["text"]):
+            continue
+        if _row_overlap_ratio(label, other) >= SAME_ROW_OVERLAP:
+            if other["left"] + other["width"] / 2.0 > center_x:
+                return True  # 同一行且落在标签右侧
+        elif _row_gap(label, other) <= max_gap:
+            return True  # 上下相邻两行（含字迹比标签行更高的情况）
+    return False
+
+
+def _expand_box(label: dict, img_w: int, img_h: int) -> dict:
+    """标签框外扩成裁框：上下各 1.5 倍行高、左右各 40% 图宽，越界时整体平移回图内。
+
+    越界用「平移」而不是「裁切」：保持裁框尺寸不变，只是把它推回票据范围内。
+    """
+    pad_x = CROP_PAD_X_RATIO * img_w
+    pad_y = CROP_PAD_Y_RATIO * max(1, label["height"])
+    width = min(float(img_w), label["width"] + 2.0 * pad_x)
+    height = min(float(img_h), max(1, label["height"]) + 2.0 * pad_y)
+    left = min(max(0.0, label["left"] - pad_x), img_w - width)
+    top = min(max(0.0, label["top"] - pad_y), img_h - height)
+    left_i = int(round(left))
+    top_i = int(round(top))
+    width_i = max(1, min(int(round(width)), img_w - left_i))
+    height_i = max(1, min(int(round(height)), img_h - top_i))
+    return {"top": top_i, "left": left_i, "width": width_i, "height": height_i}
+
+
+def plan_crop(lines: list[dict], img_w: int, img_h: int) -> tuple[str | None, dict | None]:
+    """版面判断：命中合计标签且附近没金额 -> (标签名, 原图裁框)；否则 (None, None)。"""
+    for label in lines:
+        name = match_total_label(label["text"])
+        if not name or label_has_amount_nearby(label, lines):
+            continue  # 不是合计标签，或金额已经配到了，不必重读
+        return name, _expand_box(label, img_w, img_h)
+    return None, None
+
+
+def _iou(a: dict, b: dict) -> float:
+    inter_w = min(a["left"] + a["width"], b["left"] + b["width"]) - max(a["left"], b["left"])
+    inter_h = min(a["top"] + a["height"], b["top"] + b["height"]) - max(a["top"], b["top"])
+    if inter_w <= 0 or inter_h <= 0:
+        return 0.0
+    inter = inter_w * inter_h
+    union = a["width"] * a["height"] + b["width"] * b["height"] - inter
+    return inter / float(union) if union > 0 else 0.0
+
+
+def merge_lines(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    """把二次识别结果并进首轮：同一块区域被读到两次时只留首轮那条，最后按 (top,left) 排序。"""
+    merged = list(primary)
+    for line in secondary:
+        if any(
+            _iou(line, kept) >= 0.5
+            or (_norm(line["text"]) == _norm(kept["text"]) and _iou(line, kept) >= 0.2)
+            for kept in merged
+        ):
+            continue
+        merged.append(line)
+    merged.sort(key=_sort_key)
+    return merged
+
+
+def _sort_key(line: dict) -> tuple[int, int]:
+    return line["top"], line["left"]
+
+
+def _avg_score(lines: list[dict]) -> float:
+    return round(sum(line["score"] for line in lines) / len(lines), 4) if lines else 0.0
+
+
 # ── 识别 ────────────────────────────────────────────────────────────────────
 def _decode(raw: bytes) -> tuple[Image.Image, int, int]:
     """解码 + 限制最长边，返回 (RGB 图, 原图宽, 原图高)。
@@ -131,15 +309,21 @@ def _decode(raw: bytes) -> tuple[Image.Image, int, int]:
     return img, orig_w, orig_h
 
 
-def _recognize_sync(raw: bytes) -> dict:
-    """同步识别（在线程池里跑，不阻塞事件循环）。坐标为原图像素。"""
-    started = time.monotonic()
-    img, orig_w, orig_h = _decode(raw)
-    work_w, work_h = img.size
-    # 缩小识别后把框按比例还原到原图像素空间，客户端才能直接和原图做版面配对
-    scale_x = orig_w / float(work_w)
-    scale_y = orig_h / float(work_h)
+def _fit_for_infer(patch: Image.Image) -> tuple[Image.Image, float]:
+    """裁图若还超过最长边上限，先缩一次；返回 (送进引擎的图, 裁图像素/送入像素)。"""
+    longest = max(patch.size)
+    if longest <= MAX_SIDE:
+        return patch, 1.0
+    ratio = MAX_SIDE / float(longest)
+    resized = patch.resize(
+        (max(1, int(round(patch.size[0] * ratio))), max(1, int(round(patch.size[1] * ratio)))),
+        Image.LANCZOS,
+    )
+    return resized, patch.size[0] / float(resized.size[0])
 
+
+def _run_engine(img: Image.Image) -> list:
+    """跑一次推理，返回 RapidOCR 的原始结果（box, text, score）。"""
     try:
         result, _elapse = _get_engine()(np.asarray(img))
     except OCRError:
@@ -147,9 +331,20 @@ def _recognize_sync(raw: bytes) -> dict:
     except Exception as exc:  # noqa: BLE001 - 推理异常统一暴露为 500，不泄露内部细节
         logger.exception("rapidocr inference failed")
         raise OCRError("ENGINE_ERROR", "OCR 引擎识别失败") from exc
+    return result or []
 
-    lines = []
-    scores = []
+
+def _collect_lines(
+    result: list, ax: float, bx: float, ay: float, by: float, orig_w: int, orig_h: int
+) -> list[dict]:
+    """引擎原始结果 -> 原图像素的行 dict。
+
+    坐标还原公式（x 用 ax/bx，y 用 ay/by）：
+        原图坐标 = 引擎坐标 × 比例 + 原点偏移
+    首轮：比例 = 工作图→原图，偏移 = 0；
+    二次：比例 = 裁图内部缩放 × 工作图→原图，偏移 = 裁框左上角（已换算到原图坐标）。
+    """
+    lines: list[dict] = []
     for item in result or []:
         try:
             box, text, score = item[0], item[1], item[2]
@@ -162,31 +357,116 @@ def _recognize_sync(raw: bytes) -> dict:
         if not text:
             continue
 
-        left = min(xs)
-        top = min(ys)
-        # 先缩放回原图再取整：宽高由右上/左下角推得，避免两次取整误差叠加
-        left_i = int(round(left * scale_x))
-        top_i = int(round(top * scale_y))
-        right_i = int(round(max(xs) * scale_x))
-        bottom_i = int(round(max(ys) * scale_y))
+        # 先乘比例再加偏移，最后才取整：减少两次取整的误差叠加
+        # 左/上先夹进图内再推宽高，保证 left+width 不会因为负偏移冲出原图
+        left_i = max(0, min(orig_w, int(round(min(xs) * ax + bx))))
+        top_i = max(0, min(orig_h, int(round(min(ys) * ay + by))))
+        right_i = max(left_i, min(orig_w, int(round(max(xs) * ax + bx))))
+        bottom_i = max(top_i, min(orig_h, int(round(max(ys) * ay + by))))
 
         lines.append(
             {
                 "text": text,
-                "top": max(0, min(orig_h, top_i)),
-                "left": max(0, min(orig_w, left_i)),
-                "width": max(0, right_i - left_i),
-                "height": max(0, bottom_i - top_i),
+                "top": top_i,
+                "left": left_i,
+                "width": right_i - left_i,
+                "height": bottom_i - top_i,
                 "score": round(float(score), 4),
             }
         )
-        scores.append(float(score))
+    return lines
 
-    lines.sort(key=lambda line: (line["top"], line["left"]))
+
+def _read_total_region(
+    img: Image.Image,
+    box: dict,
+    scale_x: float,
+    scale_y: float,
+    orig_w: int,
+    orig_h: int,
+    label: str,
+) -> dict:
+    """在裁框上做第二次识别，并把结果映射回原图坐标。"""
+    # 原图框 -> 工作图框：向下取整 / 向上取整，宁可多切一点，不让边缘字被切掉
+    x0 = max(0, min(img.width - 1, int(math.floor(box["left"] / scale_x))))
+    y0 = max(0, min(img.height - 1, int(math.floor(box["top"] / scale_y))))
+    x1 = max(x0 + 1, min(img.width, int(math.ceil((box["left"] + box["width"]) / scale_x))))
+    y1 = max(y0 + 1, min(img.height, int(math.ceil((box["top"] + box["height"]) / scale_y))))
+
+    patch, inner = _fit_for_infer(img.crop((x0, y0, x1, y1)))
+    result = _run_engine(patch)
+
+    lines = _collect_lines(
+        result,
+        inner * scale_x,
+        x0 * scale_x,
+        inner * scale_y,
+        y0 * scale_y,
+        orig_w,
+        orig_h,
+    )
+    lines.sort(key=_sort_key)
+    return {
+        # 返回实际裁到的框（换算回原图），客户端可以据此核对区域
+        "box": {
+            "top": int(round(y0 * scale_y)),
+            "left": int(round(x0 * scale_x)),
+            "width": int(round((x1 - x0) * scale_x)),
+            "height": int(round((y1 - y0) * scale_y)),
+        },
+        "lines": lines,
+        "matchedLabel": label,
+    }
+
+
+def _recognize_sync(raw: bytes, deadline: float | None = None) -> dict:
+    """同步识别（在线程池里跑，不阻塞事件循环）：首轮 + 至多一次合计区域重读。
+
+    deadline 是 monotonic 时间点，两次推理共用；None 表示按 TOTAL_BUDGET_MS 从现在起算。
+    """
+    started = time.monotonic()
+    if deadline is None:
+        deadline = started + TOTAL_BUDGET_MS / 1000.0
+
+    img, orig_w, orig_h = _decode(raw)
+    work_w, work_h = img.size
+    # 缩小识别后把框按比例还原到原图像素空间，客户端才能直接和原图做版面配对
+    scale_x = orig_w / float(work_w)
+    scale_y = orig_h / float(work_h)
+
+    lines = _collect_lines(_run_engine(img), scale_x, 0.0, scale_y, 0.0, orig_w, orig_h)
+    lines.sort(key=_sort_key)
+
+    warnings: list[str] = []
+    crop = None
+    label, box = plan_crop(lines, orig_w, orig_h)
+
+    if label and box:
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        if remaining_ms < SECOND_PASS_MIN_MS:
+            warnings.append(
+                f"合计标签「{label}」附近没有金额，但剩余 {max(0, remaining_ms)}ms "
+                f"不足 {SECOND_PASS_MIN_MS}ms，放弃裁图重读"
+            )
+        else:
+            try:
+                crop = _read_total_region(img, box, scale_x, scale_y, orig_w, orig_h, label)
+            except OCRError as exc:
+                crop = None
+                warnings.append(f"合计区域二次识别失败（{exc.code}），已返回首轮结果")
+
+        if crop is not None:
+            if not crop["lines"]:
+                warnings.append(f"合计区域二次识别未检出文字（{label}）")
+            lines = merge_lines(lines, crop["lines"])
+
     return {
         "lines": lines,
-        "avgScore": round(sum(scores) / len(scores), 4) if scores else 0.0,
+        "avgScore": _avg_score(lines),
         "elapsedMs": int((time.monotonic() - started) * 1000),
+        "passes": 2 if crop is not None else 1,
+        "warnings": warnings,
+        "crop": crop,
     }
 
 
@@ -247,18 +527,22 @@ async def ocr_lines(
 
     raw = await _read_limited(file)
 
+    # 总时限从收包开始算：排队 + 解码 + 两次推理共用一个 deadline
+    deadline = started + TOTAL_BUDGET_MS / 1000.0
     # 信号量覆盖「解码 + 识别」整段，真正压住 CPU 与内存峰值
     async with _semaphore:
-        payload = await asyncio.to_thread(_recognize_sync, raw)
+        payload = await asyncio.to_thread(_recognize_sync, raw, deadline)
 
     payload["elapsedMs"] = int((time.monotonic() - started) * 1000)
     # 只记字节数与耗时，绝不打印图片内容或识别文本
     logger.info(
-        "ocr ok bytes=%d lines=%d avgScore=%.3f elapsedMs=%d",
+        "ocr ok bytes=%d lines=%d avgScore=%.3f passes=%d elapsedMs=%d warnings=%d",
         len(raw),
         len(payload["lines"]),
         payload["avgScore"],
+        payload["passes"],
         payload["elapsedMs"],
+        len(payload["warnings"]),
     )
     return payload
 
@@ -268,12 +552,13 @@ async def ocr_lines(
 async def _lifespan(_: FastAPI):
     if not OCR_SHARED_KEY:
         logger.error("OCR_SHARED_KEY 未设置：/ocr/lines 将全部拒绝，仅健康检查可用")
+    logger.info("ocr total budget %dms", TOTAL_BUDGET_MS)
     yield
 
 
 app = FastAPI(
     title="jishiben OCR",
-    version="0.1.0",
+    version="0.2.0",
     docs_url=None,
     redoc_url=None,
     lifespan=_lifespan,

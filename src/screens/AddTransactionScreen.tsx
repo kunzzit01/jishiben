@@ -469,6 +469,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [receiptUri, setReceiptUri] = useState<string | null>(editTransaction?.receiptUri ?? null);
   // 扫票识别到的商户：只做「一键填入备注」的建议，绝不自动写进备注
   const [scanMerchant, setScanMerchant] = useState<string | null>(null);
+  // 扫票后的**备注建议**（receiptNoteSuggestion：购买明细 / 采购类别）：同样只是建议，
+  // 用户点备注框且备注为空时才填入，可改可删
+  const [noteSuggestion, setNoteSuggestion] = useState<string | null>(null);
+  // 用户手动改过备注 → 本次票据内不再自动填入/覆盖（重新扫票才复位）
+  const noteTouchedRef = useRef(false);
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   // 本次扫票的 OCR 原文：保存成功后写进本地查重库
   const lastScanRawTextRef = useRef<string | undefined>(undefined);
@@ -1115,6 +1120,8 @@ function fxAmountText(raw: string, live: string | null): string {
     setAmountKeypadOpen(true);
     setNote('');
     setScanMerchant(null);
+    setNoteSuggestion(null);
+    noteTouchedRef.current = false;
     setDate(todayStr());
     // 重置后恢复"自动跟随默认账户"（金额币种只认所选账户，无需复位手动币种）
     userPickedAssetRef.current = false;
@@ -1178,6 +1185,21 @@ function fxAmountText(raw: string, live: string | null): string {
   // 自绘面板共存的场景，keyboardDidShow 时不能把面板收掉（否则备注框随面板卸载、
   // 系统键盘跟着掉下来、面板又被 keyboardDidHide 弹回来，两套键盘互相卡死）
   const noteFocusRef = useRef(false);
+  // 「点击填入：X」的 X：优先商品/类别建议，没有则退回高置信商户名（原有行为）
+  const noteFillText = noteSuggestion || scanMerchant || null;
+  const notePlaceholderText = noteFillText
+    ? t('addTx.noteFillSuggestion').replace('{m}', noteFillText)
+    : undefined;
+  // 备注框获得焦点：备注为空且用户没手动改过 → 填入建议（填进去的只是草稿，可改可删）
+  const handleNoteFocus = () => {
+    noteFocusRef.current = true;
+    if (!note && !noteTouchedRef.current && noteFillText) setNote(noteFillText);
+  };
+  // 手动改过备注（只有用户输入会走到这里，程序填入走 setNote）→ 本次票据不再自动覆盖建议
+  const handleNoteChange = (value: string) => {
+    noteTouchedRef.current = true;
+    setNote(value);
+  };
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       setKeyboardVisible(true);
@@ -1797,6 +1819,10 @@ function fxAmountText(raw: string, live: string | null): string {
       // 备注不再自动填充（OCR 商户名常抓错字眼）；只存成建议，由用户点备注框时决定
       // 方案 B：只有票据里有明确 Merchant 标签（钱包账单）才给备注建议；纸质小票一律不给
       setScanMerchant(result.merchantConfident ? result.merchant ?? null : null);
+      // 备注建议：1–2 件商品「购买 A、B」→ ≥3 件「采购文具」→ 高置信商户兜底；null 表示不给建议
+      setNoteSuggestion(result.noteSuggestion ?? null);
+      // 新票据 = 新建议：复位「手动改过」标记（已有备注不会被覆盖，填入只发生在备注为空时）
+      noteTouchedRef.current = false;
       // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
       // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
       setReceiptUri(await persistReceiptImage(uri));
@@ -2412,14 +2438,14 @@ function fxAmountText(raw: string, live: string | null): string {
               }}
               onConfirmLongPress={handleTransferCalculatorConfirmAndContinue}
               note={note}
-              onNoteChange={setNote}
-              notePlaceholder={scanMerchant ? t('addTx.noteFillSuggestion').replace('{m}', scanMerchant) : undefined}
+              onNoteChange={handleNoteChange}
+              notePlaceholder={notePlaceholderText}
               receiptUri={receiptUri}
               onAttachReceipt={handleAttachReceipt}
               onRemoveReceipt={() => setReceiptUri(null)}
               onPreviewReceipt={() => setReceiptPreviewOpen(true)}
               noteInputRef={noteInputRef}
-              onNoteFocus={() => { noteFocusRef.current = true; if (!note && scanMerchant) setNote(scanMerchant); }}
+              onNoteFocus={handleNoteFocus}
               onNoteBlur={() => { noteFocusRef.current = false; }}
             />
           </View>
@@ -2807,14 +2833,14 @@ function fxAmountText(raw: string, live: string | null): string {
             onClear={() => { amountExpr.reset(); setAmountCursor(0); }}
             onConfirmLongPress={isEditing ? undefined : handleKeypadConfirmAndContinue}
             note={note}
-            onNoteChange={setNote}
-            notePlaceholder={scanMerchant ? t('addTx.noteFillSuggestion').replace('{m}', scanMerchant) : undefined}
+            onNoteChange={handleNoteChange}
+            notePlaceholder={notePlaceholderText}
             receiptUri={receiptUri}
             onAttachReceipt={handleAttachReceipt}
             onRemoveReceipt={() => setReceiptUri(null)}
             onPreviewReceipt={() => setReceiptPreviewOpen(true)}
             noteInputRef={noteInputRef}
-            onNoteFocus={() => { noteFocusRef.current = true; if (!note && scanMerchant) setNote(scanMerchant); }}
+            onNoteFocus={handleNoteFocus}
             onNoteBlur={() => { noteFocusRef.current = false; }}
           />
         </View>

@@ -36,6 +36,18 @@ export interface ScannedReceipt {
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
   ocrSource: 'local' | 'server' | 'local-after-server-failed';
+  /**
+   * 服务端 OCR 的原始行（诊断/证据核对用，界面不展示）。
+   * 只有真正拿到服务端结果时才填充；注意 /ocr/lines 只回 lines（没有 crop 信息），
+   * 所以这里没有 cropBox/cropLines —— 不凭空造字段。
+   */
+  remoteLines?: OcrLine[];
+  /** 本次扫票走通的服务端 OCR 轮数（0 = 没上传 / 没拿到行；当前实现每次扫票最多 1 轮） */
+  serverPasses?: number;
+  /** 建议备注（只是建议：界面做成「点击填入」占位提示，绝不自动写入） */
+  noteSuggestion?: string | null;
+  /** 备注建议的判定理由（诊断用，界面不展示） */
+  noteSuggestionReason?: string;
 }
 
 /** 识别失败的稳定信号：界面可以按 code 决定「提示后手动记账」还是「重试」。 */
@@ -95,35 +107,41 @@ async function tryReceiptAi(lines: OcrLine[], imageUri: string): Promise<AiAttem
 interface RemoteAttempt {
   /** 采用的服务端解析结果；null 表示没有「比本地更好」的可用结果 */
   parsed: ParsedReceipt | null;
+  /** 服务端返回的原始行（诊断/证据核对用）；null 表示这次没拿到行 */
+  lines: OcrLine[] | null;
   /** 是否真的发出了上传请求（开关关闭 / 无密钥 / 熔断冷却 → false，等于一点等待都没付） */
   attempted: boolean;
   /** 诊断原因（写入本机诊断日志，界面不展示） */
   reason: string;
 }
 
+interface RemoteLinesAttempt {
+  /** 服务端行；null 表示这次没有可用结果 */
+  lines: OcrLine[] | null;
+  /** 是否真的发出了上传请求 */
+  attempted: boolean;
+  reason: string;
+}
+
 /**
- * 服务端 OCR 兜底：只在本地拿不准时才调用。
+ * 唯一的上传入口：发一次请求、拿回服务端行（不做任何采用判断）。
  *
  * 隐私与失败边界（按顺序判定，任何一条不满足就不上传）：
  * 1) 设置里开关打开 **且** 有密钥；2) 不在失败冷却期（10 分钟）；
  * 3) 上传一次（超时 6s），失败不重试、不排队。
- *
- * 采用规则：服务端那批行用**同一个** parseReceiptOcr 解析，只有「解析出金额且置信度比本地更高」
- * 才采用 —— 更差的结果绝不覆盖本地。任何异常都吞掉 → parsed=null，上层照旧用本地结果。
+ * 任何异常都吞掉 → lines=null，由调用方决定怎么退。
  */
-async function tryReceiptRemote(
+async function fetchRemoteLines(
   imageUri: string,
   imageBase64: string | undefined,
-  local: ParsedReceipt,
-  learnedLabels: string[],
-): Promise<RemoteAttempt> {
+): Promise<RemoteLinesAttempt> {
   try {
     const { hydrateServerOcrSettings, getServerOcrSettings, isServerOcrUsable } = await import('./scanSettings');
     await hydrateServerOcrSettings();
     const settings = getServerOcrSettings();
     if (!isServerOcrUsable(settings)) {
       return {
-        parsed: null,
+        lines: null,
         attempted: false,
         reason: settings.enabled ? 'server-skip（没有密钥）' : 'server-off（设置里未开启）',
       };
@@ -133,41 +151,66 @@ async function tryReceiptRemote(
     );
     if (isRemoteOcrBlocked()) {
       return {
-        parsed: null,
+        lines: null,
         attempted: false,
         reason: 'server-cooldown（上次失败：' + getRemoteOcrBlockReason() + '）',
       };
     }
-    const remoteLines = await recognizeReceiptLinesRemote(imageUri, imageBase64, settings);
-    const { parseReceiptOcr } = await import('./receiptParse');
-    const remoteParsed = parseReceiptOcr(remoteLines, { learnedLabels });
-    if (remoteParsed.amount === null) {
-      return { parsed: null, attempted: true, reason: 'server-no-amount（服务端行里也没找到应付金额）' };
-    }
-    if (remoteParsed.confidence <= local.confidence) {
-      return {
-        parsed: null,
-        attempted: true,
-        reason:
-          'server-not-better（confidence ' +
-          remoteParsed.confidence.toFixed(2) +
-          ' ≤ 本地 ' +
-          local.confidence.toFixed(2) +
-          '）',
-      };
-    }
-    return {
-      parsed: remoteParsed,
-      attempted: true,
-      reason: 'server-used（amount=' + remoteParsed.amount + ' confidence=' + remoteParsed.confidence.toFixed(2) + '）',
-    };
+    const lines = await recognizeReceiptLinesRemote(imageUri, imageBase64, settings);
+    return { lines, attempted: true, reason: 'server-lines=' + lines.length };
   } catch (e) {
     return {
-      parsed: null,
+      lines: null,
       attempted: true,
       reason: 'server-error: ' + String((e as Error)?.message ?? e).slice(0, 120),
     };
   }
+}
+
+/**
+ * 服务端 OCR 兜底：只在本地拿不准时才调用。
+ *
+ * 采用规则：服务端那批行用**同一个** parseReceiptOcr 解析，只有「解析出金额且置信度比本地更高」
+ * 才采用 —— 更差的结果绝不覆盖本地。任何异常都吞掉 → parsed=null，上层照旧用本地结果。
+ * 拿到的原始行无论采用与否都带回去（服务端确有结果时才有值，供诊断/证据核对）。
+ */
+async function tryReceiptRemote(
+  imageUri: string,
+  imageBase64: string | undefined,
+  local: ParsedReceipt,
+  learnedLabels: string[],
+): Promise<RemoteAttempt> {
+  const got = await fetchRemoteLines(imageUri, imageBase64);
+  if (!got.lines) return { parsed: null, lines: null, attempted: got.attempted, reason: got.reason };
+  const { parseReceiptOcr } = await import('./receiptParse');
+  const remoteParsed = parseReceiptOcr(got.lines, { learnedLabels });
+  if (remoteParsed.amount === null) {
+    return {
+      parsed: null,
+      lines: got.lines,
+      attempted: true,
+      reason: 'server-no-amount（服务端行里也没找到应付金额）',
+    };
+  }
+  if (remoteParsed.confidence <= local.confidence) {
+    return {
+      parsed: null,
+      lines: got.lines,
+      attempted: true,
+      reason:
+        'server-not-better（confidence ' +
+        remoteParsed.confidence.toFixed(2) +
+        ' ≤ 本地 ' +
+        local.confidence.toFixed(2) +
+        '）',
+    };
+  }
+  return {
+    parsed: remoteParsed,
+    lines: got.lines,
+    attempted: true,
+    reason: 'server-used（amount=' + remoteParsed.amount + ' confidence=' + remoteParsed.confidence.toFixed(2) + '）',
+  };
 }
 
 /**
@@ -184,14 +227,43 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
   const { parseReceiptOcr } = await import('./receiptParse');
   const { getLearnedAmountLabels, getMerchantCategory } = await import('./receiptLearning');
   const { checkReceiptDuplicate } = await import('./receiptDedupe');
+  // 服务端证据：拿到行就留在这两个变量里，最后原样带回返回值（诊断/核对用）
+  let serverLines: OcrLine[] | null = null;
+  let serverPasses = 0;
   try {
     const learnedLabels = await getLearnedAmountLabels().catch(() => []);
     // 识别只做一次：本地解析与 AI 兜底共用同一批带坐标的 OCR 行
-    const lines = await recognizeReceiptLines(imageUri, imageBase64);
+    let lines: OcrLine[];
+    let localRecognitionFailed = false;
+    let localFailCode = '';
+    try {
+      lines = await recognizeReceiptLines(imageUri, imageBase64);
+    } catch (e) {
+      const code = e instanceof ReceiptOcrError ? e.code : 'ocr-failed';
+      const detail = e instanceof Error ? e.message : undefined;
+      // 本机根本没有识别能力（老安装包 / 网页版）：补传也解析不出东西，按原样报错
+      if (code === 'unsupported-platform') {
+        throw new ReceiptScanError(code, toReadableMessage(code, detail));
+      }
+      // 本地一行都没读到（no-text / ocr-failed），但**图片本身还在本地磁盘** ——
+      // 上传不依赖本地识别结果，所以让服务端再读一次；服务端也拿不到行，才把本地这条错误抛给用户。
+      const got = await fetchRemoteLines(imageUri, imageBase64);
+      if (!got.lines) {
+        throw new ReceiptScanError(code, toReadableMessage(code, detail));
+      }
+      lines = got.lines;
+      serverLines = got.lines;
+      serverPasses = 1;
+      localRecognitionFailed = true;
+      localFailCode = code;
+    }
     // 诊断前置：识别一完成就把原文落盘，后续无论成功或失败都能在「关于应用」看到
     const rawTextPreview = lines.map((l) => l.text).join('\n').slice(0, 1200);
     void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawTextPreview).catch(() => undefined);
-    void AsyncStorage.setItem(LAST_AI_DIAG_KEY, 'stage=recognized lines=' + lines.length).catch(() => undefined);
+    void AsyncStorage.setItem(
+      LAST_AI_DIAG_KEY,
+      'stage=recognized lines=' + lines.length + ' serverLines=' + (serverLines?.length ?? 0) + ' passes=' + serverPasses,
+    ).catch(() => undefined);
     const parsed = parseReceiptOcr(lines, { learnedLabels });
     const { isWeakAmountTier } = await import('./receiptParse');
 
@@ -209,16 +281,39 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let aiTried = false;
     let aiUsed = false;
     let aiReason = '';
-    let ocrSource: 'local' | 'server' | 'local-after-server-failed' = 'local';
+    // 本地识别整体失败时，解析结果本来就来自服务端行 → 路径直接记 server
+    let ocrSource: 'local' | 'server' | 'local-after-server-failed' = localRecognitionFailed ? 'server' : 'local';
+    let serverReason = '';
+    // 本地识别失败时服务端行已经在上面拿到 → 复用它，不为同一份结果再上传第二次
+    const prefetched: RemoteAttempt | null = localRecognitionFailed
+      ? {
+          parsed: parsed.amount !== null ? parsed : null,
+          lines,
+          attempted: true,
+          reason:
+            parsed.amount !== null
+              ? 'server-used（本地识别失败：' + localFailCode + '，改用服务端行）'
+              : 'server-no-amount（本地识别失败：' + localFailCode + '，服务端行里也没找到金额）',
+        }
+      : null;
 
     // 弱档（金额列/唯一金额/付款行/无符号大字）即使 confidence 看起来不低也要送服务端复核
     const localIsConfident =
       parsed.amount !== null && parsed.confidence >= 0.6 && !isWeakAmountTier(parsed.amountTier);
     if (localIsConfident) {
-      aiReason = '本地解析已够用（amount ≠ null 且 confidence ≥ 0.6）';
+      aiReason = localRecognitionFailed
+        ? '本地识别失败，改用服务端行；解析已够用（amount ≠ null 且 confidence ≥ 0.6）'
+        : '本地解析已够用（amount ≠ null 且 confidence ≥ 0.6）';
+      serverReason = localRecognitionFailed ? 'server-lines（本地识别失败，已用服务端行）' : 'server-skip（已够用）';
     } else {
-      // a) 服务端 OCR 兜底：开关打开 + 有密钥才会上传；熔断冷却期内直接跳过（不付任何等待）
-      const remote = await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels);
+      // a) 服务端 OCR 兜底：开关打开 + 有密钥才会上传；熔断冷却期内直接跳过（不付任何等待）。
+      //    本地识别失败时这里用上面的预取结果 —— 一次扫票最多上传一次。
+      const remote = prefetched ?? (await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels));
+      if (remote.lines) {
+        serverLines = remote.lines;
+        serverPasses = 1;
+      }
+      serverReason = remote.reason;
       // 先算采用与否，再决定用哪份数据（避免「服务端更差也覆盖本地」）
       const adoptPre = !!remote.parsed && remote.parsed.amount !== null && true;
       // 采用规则：服务端更自信，或本地本来就来自弱档 → 用服务端结果
@@ -231,7 +326,8 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
         if (!suggestedCategory && remote.parsed.suggestedCategory) suggestedCategory = remote.parsed.suggestedCategory;
       }
       const active = adoptServer ? remote.parsed! : parsed;
-      if (remote.parsed && adoptServer) ocrSource = 'server';
+      // 本地识别失败时数据一律来自服务端行；否则只有「真的采用了服务端那份」才记 server
+      if (localRecognitionFailed || (remote.parsed && adoptServer)) ocrSource = 'server';
       else if (remote.attempted) ocrSource = 'local-after-server-failed';
       // 采用「最终采用的那份解析」的字段（服务端更好时就是服务端那份，否则仍是本地那份）
       amount = active.amount;
@@ -269,12 +365,15 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
           aiUsed = true;
         }
       }
-      // c) 两条兜底都过完了：把这次走的路径落盘，识别不准时可到「关于应用」定位
-      void AsyncStorage.setItem(
-        LAST_AI_DIAG_KEY,
-        'stage=scan ocrSource=' + ocrSource + ' server=' + remote.reason + ' ai=' + aiReason,
-      ).catch(() => undefined);
     }
+
+    // c) 两条兜底都过完了：把这次走的路径落盘，识别不准时可到「关于应用」定位。
+    //    这里同时带上服务端真正给了多少行 / 走过几轮（单行、不换行 —— 关于页那行直接展示）
+    void AsyncStorage.setItem(
+      LAST_AI_DIAG_KEY,
+      'stage=scan ocrSource=' + ocrSource + ' server=' + serverReason + ' ai=' + aiReason +
+        ' serverLines=' + (serverLines?.length ?? 0) + ' passes=' + serverPasses,
+    ).catch(() => undefined);
 
     // 查重（本地指纹，不联网）：只提示，不阻止用户记账
     let duplicate = false;
@@ -288,6 +387,18 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     }
     // 留一份最近识别文字：识别不准时可在「关于应用」里查看原文，便于定位规则问题
     void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawText.slice(0, 1200)).catch(() => undefined);
+    // 备注建议（纯函数、只出文案）：界面做成「点击填入」占位提示，绝不自动写进备注
+    let noteText: string | null = null;
+    let noteReason = '';
+    try {
+      const { buildNoteSuggestion } = await import('./receiptNoteSuggestion');
+      const note = buildNoteSuggestion({ lines, merchant, merchantConfident, amount });
+      noteText = note.text;
+      noteReason = note.reason;
+    } catch (e) {
+      // 建议失败绝不能连累记账：静默降级成「没有建议」
+      noteReason = 'note-error: ' + String((e as Error)?.message ?? e).slice(0, 100);
+    }
     return {
       amount,
       merchant,
@@ -307,13 +418,28 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       aiUsed,
       aiReason,
       ocrSource,
+      // 服务端证据：只有真有服务端结果时才有值
+      remoteLines: serverLines ?? undefined,
+      serverPasses,
+      noteSuggestion: noteText,
+      noteSuggestionReason: noteReason,
     };
   } catch (e) {
+    // 已经翻译过的错误（含「本地识别失败且服务端也没拿到行」）原样抛出，不再二次包装成 ocr-failed
+    if (e instanceof ReceiptScanError) {
+      void AsyncStorage.setItem(
+        LAST_AI_DIAG_KEY,
+        'stage=failed code=' + e.code + ' reason=' + String(e.message).slice(0, 140) +
+          ' serverLines=' + (serverLines?.length ?? 0) + ' passes=' + serverPasses,
+      ).catch(() => undefined);
+      throw e;
+    }
     const code = e instanceof ReceiptOcrError ? e.code : 'ocr-failed';
     // 失败也要留下证据：这次是「识别层失败」还是「解析后金额为空」
     void AsyncStorage.setItem(
       LAST_AI_DIAG_KEY,
-      'stage=failed code=' + code + ' reason=' + String(e instanceof Error ? e.message : e).slice(0, 140),
+      'stage=failed code=' + code + ' reason=' + String(e instanceof Error ? e.message : e).slice(0, 140) +
+        ' serverLines=' + (serverLines?.length ?? 0) + ' passes=' + serverPasses,
     ).catch(() => undefined);
     throw new ReceiptScanError(code, toReadableMessage(code, e instanceof Error ? e.message : undefined));
   }
