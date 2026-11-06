@@ -224,6 +224,12 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       // 采用规则：服务端更自信，或本地本来就来自弱档 → 用服务端结果
       const localWeak = isWeakAmountTier(parsed.amountTier);
       const adoptServer = adoptPre && (remote.parsed!.confidence > parsed.confidence || localWeak);
+      // 金额没救回来，但服务端读到了日期/分类/商户时，这些字段仍然有价值（不影响金额可信度）
+      if (!adoptServer && remote.parsed) {
+        if (!date && remote.parsed.date) date = remote.parsed.date;
+        if (!merchant && remote.parsed.merchant) { merchant = remote.parsed.merchant; merchantConfident = remote.parsed.merchantConfident ?? false; }
+        if (!suggestedCategory && remote.parsed.suggestedCategory) suggestedCategory = remote.parsed.suggestedCategory;
+      }
       const active = adoptServer ? remote.parsed! : parsed;
       if (remote.parsed && adoptServer) ocrSource = 'server';
       else if (remote.attempted) ocrSource = 'local-after-server-failed';

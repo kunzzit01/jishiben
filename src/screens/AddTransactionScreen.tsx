@@ -1741,6 +1741,8 @@ function fxAmountText(raw: string, live: string | null): string {
   // ---------- 扫描小票 ----------
   // 完全本地：设备端 ML Kit（中文模型）读字 → 本地规则解析 → 本地查重；不调用任何服务端/AI 接口。
   const runScan = async (base64: string, uri: string) => {
+    // 每次扫票先复位日期：否则扫描失败时会留下上一张票的日期（真机出现过 1月15日 残留）
+    setDate(todayStr());
     // 本地 OCR 需要新安装包：老 APK 拿到新 JS 时给出更新入口（不再依赖任何 AI 密钥）
     if (!isLocalOcrAvailable()) {
       dialog.alert({
