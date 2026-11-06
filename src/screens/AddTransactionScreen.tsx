@@ -1800,6 +1800,9 @@ function fxAmountText(raw: string, live: string | null): string {
         });
       }
       if (result.amount == null) {
+        // 清空金额框：否则会残留上一次扫描/输入的数值，用户一路「完成」就记错了
+        setAmount('');
+        amountExpr.reset();
         dialog.alert({ title: t('common.confirm'), message: t('addTx.scanNoAmount') });
       } else if ((result.confidence ?? 1) < 0.6) {
         // 规则置信度低（没找到明确金额标签/货币符号）：提醒核对，而不是悄悄填错

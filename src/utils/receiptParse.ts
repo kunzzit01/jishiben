@@ -221,7 +221,8 @@ function moneyCellValue(text: string): number | null {
     .replace(/[¥￥$€£]/g, '')
     // 注意：不能要求词边界 —— "RM17.90" 里 RM 与数字之间没有边界
     .replace(/(RM|MYR|SGD|USD|TWD|HKD|THB|IDR|PHP|VND|CNY|RMB)(?=\s*\d)/gi, '')
-    .replace(/^[+-]\s*/, '')
+    // 数字前可能出现的各种减号/破折号（U+2212 / en dash / em dash / 全角）都要能吃
+    .replace(/^[+\-−–—－﹣]\s*/, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!/^[\d.,]+$/.test(cleaned)) return null;
@@ -236,14 +237,17 @@ function extractSignedTopAmount(rows: Row[]): AmountResult | null {
   const hits: { idx: number; value: number }[] = [];
   rows.slice(0, 6).forEach((row, idx) => {
     if (NON_AMOUNT_LABEL.test(row.text)) return;
-    const signed = /^\s*[+-]\s*(?:[¥￥$€£]|RM|MYR|S\$|SGD|\d)/i.test(row.text.trim());
-    if (!signed) return;
+    const signed = /^\s*[+\-−–—－﹣]\s*(?:[¥￥$€£]|RM|MYR|S\$|SGD|\d)/i.test(row.text.trim());
+    // 没有符号也接受：钱包详情页的金额常是顶部第一行且带货币（− 可能被 OCR 丢掉）
+    const currencyLed = /^\s*(?:[¥￥$€£]|RM\s?\d|MYR\s?\d|S\$\s?\d|SGD\s?\d)/i.test(row.text.trim());
+    if (!signed && !currencyLed) return;
     for (const cell of row.cells) {
       const v = moneyCellValue(cell.text);
       if (v !== null && v > 0 && v < 100000) hits.push({ idx, value: v });
     }
   });
-  if (hits.length !== 1) return null;   // 有歧义就不填
+  // 只在全票顶部区域只有唯一一笔金额时采用（有歧义就不填）
+  if (hits.length !== 1) return null;
   const currency = rowCurrency(rows[hits[0].idx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
   return { amount: hits[0].value, currency, confidence: 0.75, label: rows[hits[0].idx].text };
 }

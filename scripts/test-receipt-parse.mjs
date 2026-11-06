@@ -192,5 +192,18 @@ const variant = skewed
 eq('[16] 第一次', parseReceiptOcr(skewed).amount, 15);
 eq('[16] 第二次', parseReceiptOcr(variant).amount, 15);
 
+console.log('\n[17] 钱包账单：OCR 把「−」读成「–」或干脆丢掉，仍要取到 14.90（Apple Services）');
+const apple1 = ['Details', '−RM14.90', '+14 points', 'Transaction Type  Payment', 'Merchant  Apple Services', 'Payment Method  eWallet Balance', 'Date/Time  02/11/2026 22:27:08', 'Status  Successful', 'Transaction No.  MLJWVFKHD6a0'];
+eq('[17a] 全角减号', parseReceiptLines(apple1).amount, 14.9);
+const apple2 = ['Details', '–RM14.90', '+14 points', 'Merchant  Apple Services', 'Payment Method  eWallet Balance'];
+eq('[17b] en dash', parseReceiptLines(apple2).amount, 14.9);
+const apple3 = ['Details', 'RM14.90', '+14 points', 'Merchant  Apple Services', 'Payment Method  eWallet Balance'];
+eq('[17c] 符号丢失但有货币', parseReceiptLines(apple3).amount, 14.9);
+eq('[17d] 商户', parseReceiptLines(apple3).merchant, 'Apple Services');
+
+console.log('\n[18] 钱包账单但没有任何金额（只有单号/日期）→ null，不能瞎填');
+const noAmount = ['Details', 'Merchant  Apple Services', 'Payment Method  eWallet Balance', 'Date/Time  02/11/2026 22:27:08', 'Transaction No.  MLJWVFKHD6a0', 'Wallet Ref  2026110210110000010000TNGOW3MY1'];
+eq('[18] amount', parseReceiptLines(noAmount).amount, null);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);
