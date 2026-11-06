@@ -415,7 +415,15 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 「上一次用的钱包」（用户 2026-11-03）：默认账户只是兜底，真正优先的是上次记同类账用过的账户。
   // 记忆里的 id 必须仍然可用（存在 / 未归档 / 属当前账本），否则回落默认账户，再回落「未选择」。
   const recentAssets = useRecentAssets();
-  const pickUsableAsset = (id?: string) => (id && activeAssets.some((a) => a.id === id) ? id : null);
+  // 记忆里的 id 必须仍然可用：优先本账本活跃账户，其次全部账户（未归档），最后才回落默认
+  const pickUsableAsset = (id?: string) => {
+    if (!id) return null;
+    if (activeAssets.some((a) => a.id === id)) return id;
+    // 账本归属规则可能把「上次用的钱包」过滤掉（例如刚切过账本）→ 只要账户还在且未归档就认它，
+    // 否则用户会觉得「上次选的钱包没被记住」。
+    const anyAsset = assets.find((a) => a.id === id);
+    return anyAsset && !anyAsset.archivedAt ? id : null;
+  };
   const preferredAssetId =
     pickUsableAsset(recentAssets[uiType === 'income' ? 'income' : 'expense']) ?? defaultAsset?.id ?? null;
   // 转账只让「转出」跟随记忆：转入是资金去向，仍让用户自己点一次（避免手滑转到上次那个账户）
@@ -2782,6 +2790,8 @@ function fxAmountText(raw: string, live: string | null): string {
           onPickAsset={(id) => {
             userPickedAssetRef.current = true;
             setAssetId(id);
+            // 选中即刻记住（万一这次最后没保存，也仍然记得上次用的钱包）
+            rememberRecentAsset(uiType === 'income' ? 'income' : 'expense', id);
             // 金额币种自动跟随新账户（只认所选账户）
             setAssetPickerOpen(false);
           }}
