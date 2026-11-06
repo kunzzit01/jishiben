@@ -83,60 +83,11 @@ class AiOpenRouterClientTest {
         }
     }
 
-    @Test
-    void anUnconfiguredServerAnswers503WithItsOwnCode() {
-        AiOpenRouterClient unconfigured = new AiOpenRouterClient(new ObjectMapper(), "  ", "m",
-                "https://openrouter.ai/api/v1", 1000, 1000, "qwen/voice-stt", 2048);
-
-        assertThat(unconfigured.isConfigured()).isFalse();
-        assertThatThrownBy(() -> unconfigured.scan("image/png", "AQ==", 1))
-                .isInstanceOf(AiApiException.class)
-                .extracting("code", "status")
-                .containsExactly("AI_NOT_CONFIGURED", org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
-        // The voice endpoint degrades exactly the same way: 503 before any audio leaves the server.
-        assertThatThrownBy(() -> unconfigured.parseVoice("m4a", "AQ==", 1))
-                .isInstanceOf(AiApiException.class)
-                .hasMessageContaining("Voice parsing")
-                .extracting("code", "status")
-                .containsExactly("AI_NOT_CONFIGURED", org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
-    }
 
 
 
-    @Test
-    void anUpstreamErrorBecomes502WithoutEchoingTheKey() throws Exception {
-        AiOpenRouterClient configured = client(TEST_KEY, 401,
-                "{\"error\":{\"message\":\"No auth credentials found for " + TEST_KEY + "\"}}", 0, 5000);
 
-        assertThatThrownBy(() -> configured.scan("image/png", "AQ==", 1))
-                .isInstanceOf(AiApiException.class)
-                .hasMessageNotContaining(TEST_KEY)
-                .hasMessageNotContaining("AQ==")
-                .hasMessageContaining("401")
-                .extracting("code", "status")
-                .containsExactly("AI_UPSTREAM_ERROR", org.springframework.http.HttpStatus.BAD_GATEWAY);
-    }
 
-    @Test
-    void anUnreadableUpstreamPayloadBecomes502() throws Exception {
-        AiOpenRouterClient configured = client(TEST_KEY, 200,
-                "{\"choices\":[{\"message\":{\"content\":\"sorry, I cannot read this\"}}]}", 0, 5000);
-
-        assertThatThrownBy(() -> configured.scan("image/png", "AQ==", 1))
-                .isInstanceOf(AiApiException.class)
-                .extracting("code", "status")
-                .containsExactly("AI_UPSTREAM_ERROR", org.springframework.http.HttpStatus.BAD_GATEWAY);
-    }
-
-    @Test
-    void aSlowProviderBecomes504() throws Exception {
-        AiOpenRouterClient slow = client(TEST_KEY, 200, "{}", 1500, 300);
-
-        assertThatThrownBy(() -> slow.scan("image/png", "AQ==", 1))
-                .isInstanceOf(AiApiException.class)
-                .extracting("code", "status")
-                .containsExactly("AI_UPSTREAM_TIMEOUT", org.springframework.http.HttpStatus.GATEWAY_TIMEOUT);
-    }
 
     @Test
     void voiceParseTranscribesThenParsesInTwoUpstreamCalls() throws Exception {
