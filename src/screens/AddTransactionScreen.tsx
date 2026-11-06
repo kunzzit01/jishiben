@@ -467,6 +467,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [scanning, setScanning] = useState(false);
   // 凭证：支出/收入详情页里附加的真实单据照片（拍照或从相册选）
   const [receiptUri, setReceiptUri] = useState<string | null>(editTransaction?.receiptUri ?? null);
+  // 扫票识别到的商户：只做「一键填入备注」的建议，绝不自动写进备注
+  const [scanMerchant, setScanMerchant] = useState<string | null>(null);
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   // 本次扫票的 OCR 原文：保存成功后写进本地查重库
   const lastScanRawTextRef = useRef<string | undefined>(undefined);
@@ -1112,6 +1114,7 @@ function fxAmountText(raw: string, live: string | null): string {
     amountExpr.reset();
     setAmountKeypadOpen(true);
     setNote('');
+    setScanMerchant(null);
     setDate(todayStr());
     // 重置后恢复"自动跟随默认账户"（金额币种只认所选账户，无需复位手动币种）
     userPickedAssetRef.current = false;
@@ -1782,7 +1785,8 @@ function fxAmountText(raw: string, live: string | null): string {
         amountExpr.reset(result.amount);
       }
       if (result.date) setDate(result.date);
-      if (result.merchant) setNote(result.merchant);
+      // 备注不再自动填充（OCR 商户名常抓错字眼）；只存成建议，由用户点备注框时决定
+      setScanMerchant(result.merchant ?? null);
       // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
       // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
       setReceiptUri(await persistReceiptImage(uri));
@@ -2399,12 +2403,13 @@ function fxAmountText(raw: string, live: string | null): string {
               onConfirmLongPress={handleTransferCalculatorConfirmAndContinue}
               note={note}
               onNoteChange={setNote}
+              notePlaceholder={scanMerchant ? t('addTx.noteFillSuggestion').replace('{m}', scanMerchant) : undefined}
               receiptUri={receiptUri}
               onAttachReceipt={handleAttachReceipt}
               onRemoveReceipt={() => setReceiptUri(null)}
               onPreviewReceipt={() => setReceiptPreviewOpen(true)}
               noteInputRef={noteInputRef}
-              onNoteFocus={() => { noteFocusRef.current = true; }}
+              onNoteFocus={() => { noteFocusRef.current = true; if (!note && scanMerchant) setNote(scanMerchant); }}
               onNoteBlur={() => { noteFocusRef.current = false; }}
             />
           </View>
@@ -2793,12 +2798,13 @@ function fxAmountText(raw: string, live: string | null): string {
             onConfirmLongPress={isEditing ? undefined : handleKeypadConfirmAndContinue}
             note={note}
             onNoteChange={setNote}
+            notePlaceholder={scanMerchant ? t('addTx.noteFillSuggestion').replace('{m}', scanMerchant) : undefined}
             receiptUri={receiptUri}
             onAttachReceipt={handleAttachReceipt}
             onRemoveReceipt={() => setReceiptUri(null)}
             onPreviewReceipt={() => setReceiptPreviewOpen(true)}
             noteInputRef={noteInputRef}
-            onNoteFocus={() => { noteFocusRef.current = true; }}
+            onNoteFocus={() => { noteFocusRef.current = true; if (!note && scanMerchant) setNote(scanMerchant); }}
             onNoteBlur={() => { noteFocusRef.current = false; }}
           />
         </View>

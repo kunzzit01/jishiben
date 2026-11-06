@@ -164,6 +164,7 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    noteFillSuggestion: '点击填入：{m}',
     receiptLastOcrRow: '上次识别文字',
     receiptAiMissingHint: '这台手机的安装包还不含端侧 AI 模块。到「设置 → 关于应用」看 APK 大小应为 73,776,339 字节；小于它说明装的是旧包，重装最新版即可。扫票本身不受影响。',
     receiptAiDownloadableHint: '这台手机支持端侧 AI，但模型还没下载。到系统设置 → Google → 端侧模型（AICore）下载后，难票识别会更好；不下载也能正常扫票。',
