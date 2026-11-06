@@ -1726,8 +1726,7 @@ function fxAmountText(raw: string, live: string | null): string {
   const handleSaveTransfer = () => handleSaveTransferWithAmount();
 
   // ---------- 扫描小票 ----------
-  // 纯云端模式：统一走云端 OCR 解析（本地 AICore 模块已移除，ML Kit GenAI 依赖在
-  // EAS 上无法解析——公开仓库不含该 artifact，恢复本地模式时从 Zcode 备份取回）
+  // 完全本地：设备端 ML Kit（中文模型）读字 → 本地规则解析 → 本地查重；不调用任何服务端/AI 接口。
   const runScan = async (base64: string, uri: string) => {
     // 本地 OCR 需要新安装包：老 APK 拿到新 JS 时给出更新入口（不再依赖任何 AI 密钥）
     if (!isLocalOcrAvailable()) {

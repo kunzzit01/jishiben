@@ -22,7 +22,7 @@ export function isLocalOcrAvailable(): boolean {
     // 只看 JS 导出会在「原生没链接/R8 裁掉」时误判为可用，然后在识别时报错。
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { NativeModules } = require('react-native');
-    const native = NativeModules?.RNMLKitTextRecognition;
+    const native = NativeModules?.TextRecognition;
     return !!(native && typeof native.recognize === 'function');
   } catch {
     return false;
@@ -45,7 +45,7 @@ export function describeLocalOcr(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { NativeModules } = require('react-native');
-    native = typeof NativeModules?.RNMLKitTextRecognition?.recognize === 'function';
+    native = typeof NativeModules?.TextRecognition?.recognize === 'function';
   } catch {
     native = false;
   }
