@@ -34,15 +34,6 @@ public class AiOpenRouterClient {
     private static final Logger log = LoggerFactory.getLogger(AiOpenRouterClient.class);
     private static final String FENCE = "```";
 
-    private static final String PROMPT = """
-            你是一个记账助手。请识别这张照片（可能是消费小票/收据，也可能是工资单、转账/收款截图等收入凭证），提取以下信息，只返回JSON，不要输出任何其他文字、不要用markdown代码块包裹：
-            {
-              "amount": 总金额的数字（不含货币符号，识别不到则为null）,
-              "merchant": 商家或收款/付款方名称（识别不到则为null）,
-              "date": "凭证上的日期，格式YYYY-MM-DD，识别不到则用null",
-              "type": "判断这张图片记录的是一笔支出还是收入，只能是 expense 或 income 两个值之一，看不出来就用expense",
-              "suggestedCategory": "如果type是expense，从这些分类里选一个最合适的中文名称：餐饮、购物、日用、交通、蔬菜、水果、零食、运动、娱乐、通讯、服饰、美容、住房、居家、数码、汽车、医疗、书籍、其他；如果type是income，从这些分类里选一个最合适的中文名称：工资、奖金、兼职、理财、红包、其他收入"
-            }""";
 
     /** Step two of the voice path: turns the transcript into accounting fields. */
     private static final String VOICE_PROMPT = """

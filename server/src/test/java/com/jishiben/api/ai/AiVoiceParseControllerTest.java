@@ -33,7 +33,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Same harness as the receipt-scan controller test, on purpose: /api/ai/voice-parse must sit behind
+ * Pure controller-level harness for the voice-parse endpoint, on purpose: /api/ai/voice-parse must sit behind
  * the identical JWT gate and answer with the shared error envelope and the same AI codes.
  */
 @WebMvcTest(controllers = AiVoiceParseController.class)

@@ -27,10 +27,6 @@ public class AiApiException extends RuntimeException {
         return code;
     }
 
-    /** 503: the operator has not set an AI key yet. Clients degrade to manual entry. */
-    public static AiApiException notConfigured() {
-        return notConfigured("Receipt scanning");
-    }
 
     /** Same 503 for any AI feature, naming the one that is unavailable. */
     public static AiApiException notConfigured(String feature) {

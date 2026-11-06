@@ -22,11 +22,6 @@ export class ReceiptScanError extends Error {
   }
 }
 
-/** 现在扫票是完全离线的本地 OCR + 规则解析：不调用 AI API，也没有「未配置密钥」状态。 */
-export function isAiUnavailable(_e: unknown): boolean {
-  return false;
-}
-
 /** 把 OCR/解析的错误码翻译成用户能读懂的一句话 */
 function toReadableMessage(code: string, detail?: string): string {
   switch (code) {

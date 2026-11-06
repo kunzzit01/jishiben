@@ -26,7 +26,7 @@ class AiOpenRouterClientTest {
 
     private static final String FENCE = "```";
     private static final String TEST_KEY = "sk-or-v1-test-key-that-must-never-leak";
-    private static final byte[] IMAGE = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+
 
     private HttpServer server;
     private final AtomicReference<String> seenPath = new AtomicReference<>();
