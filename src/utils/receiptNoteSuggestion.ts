@@ -126,6 +126,8 @@ function lastNumber(text: string): number | null {
 // ── 噪声行（绝不进备注）────────────────────────────────────────────────────
 /** 表格标题 / 地址 / 电话 / 单号 / 付款方式 / 找零 / 合计 / 税 / 折扣 / 日期 / 会员 */
 const NOISE = new RegExp(
+  // 积分/奖励/状态这类绝不能当商品（真机把 "+14 points" 当商品过）
+  'point|积分|reward|cashback|bonus|status|successful|balance|余额|' +
   [
     // 表格标题
     '^(item|items|description|particulars|product|goods|qty|quantity|unit\\s*price|u\\.?price|price|amount|code|item\\s*code|no\\.?|bil\\.?|s/n|sn\\.?|#|商品|品名|名称|数量|单价|金额)(\\s|$)',
