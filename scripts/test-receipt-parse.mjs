@@ -135,7 +135,7 @@ const r10 = parseReceiptLines(['SHOP', 'Sub Total (Ex) : 20.00', 'Rounded Total 
 });
 eq('[10] amount', r10.amount, 18.9);
 
-console.log('\n[11] 没有付款行也没有标签 → null（不给瞎猜）');
+console.log('\n[11] 没有标签、没有币种、没有日期（纯裸数字）→ null（不给瞎猜）');
 const r11 = parseReceiptOcr([
   { text: 'NOTE', top: 10, left: 10, width: 60, height: 20 },
   { text: '12.50', top: 40, left: 300, width: 60, height: 20 },
@@ -204,6 +204,16 @@ eq('[17d] 商户', parseReceiptLines(apple3).merchant, 'Apple Services');
 console.log('\n[18] 钱包账单但没有任何金额（只有单号/日期）→ null，不能瞎填');
 const noAmount = ['Details', 'Merchant  Apple Services', 'Payment Method  eWallet Balance', 'Date/Time  02/11/2026 22:27:08', 'Transaction No.  MLJWVFKHD6a0', 'Wallet Ref  2026110210110000010000TNGOW3MY1'];
 eq('[18] amount', parseReceiptLines(noAmount).amount, null);
+
+console.log('\n[19] 标签全丢，但全票非噪声行只有一个金额且有币种 → 采用并标记低置信（界面要求核对）');
+const onlyAmount = ['KEDAI ABC', 'Date 04-09-2026', 'RM 15.00', 'Terima kasih', 'Cash 100.00', 'Cash Change 85.00'];
+const r19 = parseReceiptLines(onlyAmount);
+eq('[19] amount', r19.amount, 15);
+check('[19] 低置信', r19.confidence <= 0.6, 'confidence=' + r19.confidence);
+
+console.log('\n[20] 两个不同的非噪声金额（有歧义）→ null');
+const ambiguous = ['SHOP A', 'RM 15.00', 'RM 22.00', 'Date 04-09-2026'];
+eq('[20] amount', parseReceiptLines(ambiguous).amount, null);
 
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

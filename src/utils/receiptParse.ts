@@ -79,11 +79,12 @@ const CURRENCY_WORDS: Array<[RegExp, string]> = [
 
 /** 最终应付标签（优先级从高到低）。命中即视为「这就是要付的钱」。 */
 const FINAL_TOTAL_LABELS: RegExp[] = [
-  /(rounded\s*total|rounding\s*total)/i,
-  /(grand\s*total)/i,
-  /(amount\s*due|total\s*due|balance\s*due)/i,
-  /(jumlah|实付|应付|应付金额|实收|合计金额|总计)/i,
-  /(total)/i,
+  /(rounded\s*tota[1l]|rounding\s*tota[1l])/i,
+  /(grand\s*tota[1l])/i,
+  /(amount\s*due|tota[1l]\s*due|balance\s*due)/i,
+  /(jumla[hj]|jumlha|实付|应付|应付金额|实收|合计金额|总计)/i,
+  // 兜底：tota1 / TOTAL / TotaI 之类（OCR 会把 l 读成 1 或 I）
+  /(tota[1li]\b|\btotal\b)/i,
 ];
 /** 小计类：只有找不到最终应付时才兜底 */
 const SUBTOTAL_LABELS: RegExp[] = [/(sub\s*-?\s*total|subtotal|小计)/i];
@@ -249,7 +250,9 @@ function extractSignedTopAmount(rows: Row[]): AmountResult | null {
   // 只在全票顶部区域只有唯一一笔金额时采用（有歧义就不填）
   if (hits.length !== 1) return null;
   const currency = rowCurrency(rows[hits[0].idx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
-  return { amount: hits[0].value, currency, confidence: 0.75, label: rows[hits[0].idx].text };
+  const hitRow = rows[hits[0].idx];
+  const hasSign = /^\s*[+\-−–—－﹣]/.test(hitRow.text.trim());
+  return { amount: hits[0].value, currency, confidence: hasSign ? 0.75 : 0.55, label: hitRow.text };
 }
 
 function isMoneyShaped(text: string): boolean {
@@ -272,6 +275,33 @@ interface AmountResult {
  *   - 至少两个「纯金额」单元在右侧对齐成列（右边缘差 ≤ 12px）
  *   - 取该列中位于第一处付款标记之前的最后一笔
  */
+/**
+ * 最保守的兜底：全票「非噪声行」中只存在**唯一一个**金额值时采用它。
+ * 证据强度低于标签配对，所以 confidence 只有 0.5，界面会提示「金额为推断，请核对」。
+ * 有多笔不同金额（有歧义）一律返回 null —— 宁可留空也不填错。
+ */
+function extractUniqueMoney(rows: Row[]): AmountResult | null {
+  const values = new Map<number, string>();   // 值 → 首次出现的行文本
+  for (const row of rows) {
+    if (NON_AMOUNT_LABEL.test(row.text)) continue;      // 找零/现金/单号/日期/数量行不算
+    for (const cell of row.cells) {
+      const v = moneyCellValue(cell.text);
+      if (v === null || v <= 0 || v >= 1e6) continue;
+      // 只认带小数的金额（避免把数量 1 / 2 当成金额）
+      if (!/[.,]\d{2}\b/.test(cell.text.trim())) continue;
+      if (!values.has(v)) values.set(v, row.text);
+    }
+  }
+  if (values.size !== 1) return null;
+  // 必须有票据语境：出现币种或日期，才认为这是「一张收据上的唯一金额」而不是截图里的一个裸数字
+  const text = rows.map((r) => r.text).join('\n');
+  const hasCurrency = rows.some((r) => rowCurrency(r) !== null);
+  const hasDate = /(20\d{2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/.test(text);
+  if (!hasCurrency && !hasDate) return null;
+  const [value, rowText] = [...values.entries()][0];
+  return { amount: value, currency: rowCurrency({ text: rowText, top: 0, height: 1, cells: [] }) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null, confidence: 0.5, label: rowText };
+}
+
 function extractAmountColumn(rows: Row[]): AmountResult | null {
   const PAY = /(cash\s*change|change|tunai|baki|tendered|credit\s*card|debit\s*card|e-?wallet|ewallet|cash)/i;
   const firstPayRow = rows.findIndex((r) => PAY.test(r.text));
@@ -359,6 +389,10 @@ function extractAmount(rows: Row[]): AmountResult {
   if (signedHit) return signedHit;
   const columnHit = extractAmountColumn(rows);
   if (columnHit) return columnHit;
+
+  // 最后一档：全票只有唯一一个非噪声金额（置信度低，界面会要求核对）
+  const uniqueHit = extractUniqueMoney(rows);
+  if (uniqueHit) return uniqueHit;
 
   // 没有任何应付标签 → 金额留空（裸数字不可信：可能是单号/电话/数量）
   const fallbackCurrency = rows.map(rowCurrency).filter(Boolean)[0] ?? null;
