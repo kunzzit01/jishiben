@@ -166,7 +166,7 @@ export async function getReceiptAiStatus(): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { NativeModules } = require('react-native');
     const native = NativeModules?.GeminiNano;
-    if (!native || typeof native.status !== 'function') return 'module-missing';
+    if (!native || typeof native.status !== 'function') return 'module-missing（安装包过旧，需装含端侧 AI 的新 APK）';
     const raw = await native.status();
     return typeof raw === 'string' && raw ? raw : 'unknown';
   } catch (e) {

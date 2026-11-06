@@ -226,6 +226,11 @@ export default function AboutAppScreen({ navigation }: any) {
           />
 
           {/* 模型「可下载但未下载」时给一句可执行提示，避免用户以为是 bug */}
+          {aiStatus.startsWith('module-missing') && (
+            <AppText variant="footnote" color={semantic.textSecondary} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+              {t('addTx.receiptAiMissingHint')}
+            </AppText>
+          )}
           {aiStatus === 'DOWNLOADABLE' && (
             <AppText variant="footnote" color={semantic.textSecondary} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
               {t('addTx.receiptAiDownloadableHint')}
