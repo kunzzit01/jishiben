@@ -1099,6 +1099,10 @@ function fxAmountText(raw: string, live: string | null): string {
     // 重置后恢复"自动跟随默认账户"（金额币种只认所选账户，无需复位手动币种）
     userPickedAssetRef.current = false;
     userPickedFromRef.current = false;
+    // ⚠ 关键：上一笔手动点过类别会把 userPickedCategoryRef 置 true，
+    // 而「记一笔」这个 Tab 页不会卸载 —— 不复位就会导致「回到首页再记一笔，
+    // 输入过往金额永远不自动带类别，必须杀进程」的反馈。
+    userPickedCategoryRef.current = false;
     // 现场读快照，而不是渲染期的 preferredAssetId：saveTransaction 刚写进去的记忆还没走完一次渲染，
     // 用闭包会拿到上一笔之前的旧值（表现：必须重载 App 才记得上次的钱包）。resetAll 一律回到支出档。
     setAssetId(pickUsableAsset(getRecentAssetsSnapshot().expense) ?? defaultAsset?.id ?? null);
