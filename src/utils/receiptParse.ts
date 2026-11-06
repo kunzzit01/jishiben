@@ -232,6 +232,9 @@ function moneyCellValue(text: string): number | null {
 }
 
 /** 电子钱包账单：顶部那行带正负号的金额就是这笔交易的金额（无 total 标签） */
+/** 只有货币符号/代码的行，例如 "−RM"、"RM"、"S$"、"¥" */
+const CURRENCY_ONLY = /^\s*[+\-−–—－﹣]?\s*(RM|MYR|S\$|SGD|US\$|USD|HK\$|HKD|¥|￥|\$|€|£)\s*$/i;
+
 function extractSignedTopAmount(rows: Row[]): AmountResult | null {
   const PAY = /(e-?wallet|ewallet|payment method|duitnow|qr|card|tunai|cash)/i;
   if (!rows.some((r) => PAY.test(r.text))) return null;
@@ -248,6 +251,18 @@ function extractSignedTopAmount(rows: Row[]): AmountResult | null {
     }
   });
   // 只在全票顶部区域只有唯一一笔金额时采用（有歧义就不填）
+  // 大字金额被拆成两行：「−RM」+「14.90」→ 跨行配对（符号行紧跟纯数字行）
+  if (hits.length === 0) {
+    for (let i = 0; i < Math.min(rows.length - 1, 6); i += 1) {
+      if (!CURRENCY_ONLY.test(rows[i].text.trim())) continue;
+      const next = rows[i + 1].text.trim();
+      if (!/^[\d.,]+$/.test(next)) continue;
+      const v = moneyCellValue(next);
+      if (v === null || v <= 0 || v >= 1e6) continue;
+      const currency = rowCurrency(rows[i]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
+      return { amount: v, currency, confidence: 0.7, label: rows[i].text + ' ' + next };
+    }
+  }
   if (hits.length !== 1) return null;
   const currency = rowCurrency(rows[hits[0].idx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
   const hitRow = rows[hits[0].idx];

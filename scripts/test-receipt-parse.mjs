@@ -215,5 +215,11 @@ console.log('\n[20] 两个不同的非噪声金额（有歧义）→ null');
 const ambiguous = ['SHOP A', 'RM 15.00', 'RM 22.00', 'Date 04-09-2026'];
 eq('[20] amount', parseReceiptLines(ambiguous).amount, null);
 
+console.log('\n[21] 大字金额被 ML Kit 拆成两行：「−RM」+「14.90」');
+const splitAmount = ['Details', '−RM', '14.90', '+14 points', 'Transaction Type  Payment', 'Merchant  Apple Services', 'Payment Method  eWallet Balance', 'Date/Time  02/11/2026 22:27:08'];
+const r21 = parseReceiptLines(splitAmount);
+eq('[21] amount', r21.amount, 14.9);
+eq('[21] merchant', r21.merchant, 'Apple Services');
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);
