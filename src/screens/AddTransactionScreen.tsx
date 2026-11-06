@@ -30,7 +30,7 @@ import { TransactionType, Transaction, Category } from '../types';
 import { useT, useLanguage } from '../i18n/LanguageContext';
 import { getCategoryLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
-import { scanReceipt } from '../utils/scanReceipt';
+import { scanReceipt, rememberReceiptRawText } from '../utils/scanReceipt';
 import { isAiConfigured } from '../config/aiConfig';
 
 /** 大组排序的存储键：与「管理类别」页共用同一个键，两页顺序保持一致 */
@@ -463,6 +463,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 凭证：支出/收入详情页里附加的真实单据照片（拍照或从相册选）
   const [receiptUri, setReceiptUri] = useState<string | null>(editTransaction?.receiptUri ?? null);
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  // 本次扫票的 OCR 原文：保存成功后写进本地查重库
+  const lastScanRawTextRef = useRef<string | undefined>(undefined);
 
   // 普通收支专用：可选的资产账户（这笔钱从/到哪个账户）——没有编辑数据时，用"资产"页设的默认账户
   const [assetId, setAssetId] = useState<string | null>(editTransaction?.assetId ?? preferredAssetId);
@@ -1427,6 +1429,8 @@ function fxAmountText(raw: string, live: string | null): string {
     rememberRecentAsset(type === 'income' ? 'income' : 'expense', assetId);
     // 同时学习「这个金额对应哪个类别」：下次输入同一金额直接带出（精确匹配，最近一次优先）
     rememberAmountCategory(type === 'income' ? 'income' : 'expense', value, categoryId, amountScope);
+    // 同一张小票只提示一次：记完账把指纹入库
+    void rememberReceiptRawText(lastScanRawTextRef.current);
 
     // 自动月结：开关打开（默认关，手动开）时，把这笔账同步建成一条「每月同日自动入账」的
     // 财务规划——之后每个月由补账引擎自动 ±账目。防重复：同名称+同金额+同周期+同账户的计划已存在则跳过
@@ -1730,6 +1734,15 @@ function fxAmountText(raw: string, live: string | null): string {
     setScanning(true);
     try {
       const result = await scanReceipt(base64);
+
+      // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
+      lastScanRawTextRef.current = result.rawText;
+      if (result.duplicate) {
+        dialog.alert({
+          title: t('addTx.receiptDuplicateTitle'),
+          message: t('addTx.receiptDuplicateMsg').replace('{n}', String(result.duplicateDaysAgo ?? 0)),
+        });
+      }
 
       setUiType(result.type);
 

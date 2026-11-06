@@ -164,6 +164,9 @@ export const zh = {
     other: '其他',
   },
   addTx: {
+    // 扫票查重
+    receiptDuplicateTitle: '这张小票好像记过了',
+    receiptDuplicateMsg: '上次识别到它大约 {n} 天前。确定要再记一笔就继续。',
     expense: '支出',
     income: '收入',
     transfer: '转账',

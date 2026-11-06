@@ -4,6 +4,11 @@ export interface ScannedReceipt {
   date: string | null; // YYYY-MM-DD
   type: 'expense' | 'income'; // 识别不准默认 expense
   suggestedCategory: string | null; // 中文分类名，例如"餐饮"或"工资"
+  /** OCR 全文（查重用，界面不要展示） */
+  rawText?: string;
+  /** 这张小票最近扫过（订阅式提示，不阻止记账） */
+  duplicate?: boolean;
+  duplicateDaysAgo?: number;
 }
 
 /** 识别失败的稳定信号：界面可以按 code 决定「提示后手动记账」还是「重试」。 */
@@ -44,17 +49,38 @@ function toReadableMessage(code: string, detail?: string): string {
  */
 export async function scanReceipt(imageUri: string): Promise<ScannedReceipt> {
   const { scanReceiptLocally, ReceiptOcrError } = await import('./receiptOcr');
+  const { checkReceiptDuplicate } = await import('./receiptDedupe');
   try {
     const parsed = await scanReceiptLocally(imageUri);
+    // 查重（本地指纹，不联网）：只提示，不阻止用户记账
+    let duplicate = false;
+    let duplicateDaysAgo: number | undefined;
+    try {
+      const check = await checkReceiptDuplicate(parsed.rawText);
+      duplicate = check.duplicate;
+      duplicateDaysAgo = check.daysAgo;
+    } catch {
+      /* 查重失败不影响识别结果 */
+    }
     return {
       amount: parsed.amount,
       merchant: parsed.merchant,
       date: parsed.date,
       type: parsed.type,
       suggestedCategory: parsed.suggestedCategory,
+      rawText: parsed.rawText,
+      duplicate,
+      duplicateDaysAgo,
     };
   } catch (e) {
     const code = e instanceof ReceiptOcrError ? e.code : 'ocr-failed';
     throw new ReceiptScanError(code, toReadableMessage(code, e instanceof Error ? e.message : undefined));
   }
+}
+
+/** 保存成功后调用：把这张小票的指纹记入本地查重库 */
+export async function rememberReceiptRawText(rawText?: string): Promise<void> {
+  if (!rawText) return;
+  const { rememberReceipt } = await import('./receiptDedupe');
+  await rememberReceipt(rawText).catch(() => undefined);
 }

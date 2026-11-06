@@ -162,6 +162,9 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    // Receipt duplicate hint
+    receiptDuplicateTitle: 'This receipt looks familiar',
+    receiptDuplicateMsg: 'It was scanned about {n} day(s) ago. Continue if you really want another entry.',
     expense: 'Expense',
     income: 'Income',
     transfer: 'Transfer',
