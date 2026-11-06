@@ -354,7 +354,7 @@ const RECENT_CATEGORY_KEY = '@jizhang/recentCategories';
 // 值形如 { expense?: string, income?: string }；transfer/exchange 页无类别网格不参与
 const LAST_CATEGORY_KEY = '@jizhang/lastCategory';
 // 更新入口：扫票依赖原生模块，老安装包拿到新 JS 时引导用户去下载最新 APK
-const APP_UPDATE_URL = 'https://187.127.125.136/downloads/';
+const APP_UPDATE_URL = 'https://187.127.125.136/downloads/latest.apk';
 // TASK-022：每个类型的网格固定格（本次选过的类别置顶格）持久化，重启后网格原样恢复
 // 值形如 { expense?: string[], income?: string[] }
 const SESSION_PICKED_KEY = '@jizhang/sessionPickedCategories';
