@@ -44,7 +44,7 @@ interface Row {
   top: number;
   height: number;
   /** 行内片段（按 left 升序）；没有坐标时只有一个片段 */
-  cells: { text: string; left: number; width: number; centerY: number }[];
+  cells: { text: string; left: number; width: number; centerY: number; height: number }[];
 }
 
 const CURRENCY_CODES = ['MYR', 'SGD', 'CNY', 'RMB', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'TWD', 'KRW', 'THB', 'VND', 'PHP', 'IDR', 'INR', 'AUD', 'NZD', 'CAD'];
@@ -131,7 +131,7 @@ function buildRows(lines: OcrLine[]): Row[] {
     return lines
       .map((l) => l.text.trim())
       .filter(Boolean)
-      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0, width: text.length * 8, centerY: i }] }));
+      .map((text, i) => ({ text, top: i, height: 1, cells: [{ text, left: 0, width: text.length * 8, centerY: i, height: 1 }] }));
   }
 
   const items = lines
@@ -163,7 +163,7 @@ function buildRows(lines: OcrLine[]): Row[] {
     .map((r) => {
       const cells = [...r.cells]
         .sort((a, b) => a.left - b.left)
-        .map((c) => ({ text: c.text, left: c.left, width: c.width, centerY: c.top + c.height / 2 }));
+        .map((c) => ({ text: c.text, left: c.left, width: c.width, centerY: c.top + c.height / 2, height: c.height }));
       return { text: cells.map((c) => c.text).join(' '), top: r.top, height: r.height, cells };
     });
 }
@@ -295,6 +295,50 @@ interface AmountResult {
  * 证据强度低于标签配对，所以 confidence 只有 0.5，界面会提示「金额为推断，请核对」。
  * 有多笔不同金额（有歧义）一律返回 null —— 宁可留空也不填错。
  */
+/**
+ * 「大字金额」：把整页文字按行高（≈字号）排序，取明显大于其它文字的那一行。
+ * 依据：钱包详情页与多数小票都把**实付金额**印成最大字号（微信/支付宝/TnG 全都如此）。
+ * 只有当：
+ *   - 该行（或紧邻的大字行）能解析出金额
+ *   - 且它是全票**唯一**的超大字号金额
+ * 才采用，confidence 0.7。
+ */
+function extractLargestTextAmount(rows: Row[]): AmountResult | null {
+  const cells = rows.flatMap((r) => r.cells.map((c) => ({ ...c, row: r })));
+  const heights = cells.filter((c) => c.text.trim().length > 0).map((c) => c.height).sort((a, b) => a - b);
+  if (heights.length < 3) return null;
+  const median = heights[Math.floor(heights.length / 2)];
+  if (median <= 0) return null;
+
+  const big = cells.filter((c) => c.height >= median * 1.5);
+  if (big.length === 0) return null;
+
+  const values: { value: number; label: string; row: Row }[] = [];
+  for (let i = 0; i < big.length; i += 1) {
+    const cell = big[i];
+    const v = moneyCellValue(cell.text);
+    if (v !== null && v > 0 && v < 1e6) {
+      values.push({ value: v, label: cell.text, row: cell.row });
+      continue;
+    }
+    // 大字被拆成「−RM」+「14.90」两块：
+    if (CURRENCY_ONLY.test(cell.text.trim())) {
+      const next = big[i + 1];
+      if (next && Math.abs(next.centerY - cell.centerY) < cell.height * 1.2) {
+        const nv = moneyCellValue(next.text);
+        if (nv !== null && nv > 0 && nv < 1e6) {
+          values.push({ value: nv, label: cell.text + ' ' + next.text, row: cell.row });
+        }
+      }
+    }
+  }
+  const distinct = [...new Set(values.map((v) => v.value))];
+  if (distinct.length !== 1) return null;   // 有多个大字金额 → 不猜
+  const hit = values[0];
+  const currency = rowCurrency(hit.row) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
+  return { amount: hit.value, currency, confidence: 0.7, label: hit.label };
+}
+
 function extractUniqueMoney(rows: Row[]): AmountResult | null {
   const values = new Map<number, string>();   // 值 → 首次出现的行文本
   for (const row of rows) {
@@ -404,6 +448,10 @@ function extractAmount(rows: Row[]): AmountResult {
   if (signedHit) return signedHit;
   const columnHit = extractAmountColumn(rows);
   if (columnHit) return columnHit;
+
+  // 大字金额：整页字号最大的那一行（钱包详情页/大字合计）
+  const largeHit = extractLargestTextAmount(rows);
+  if (largeHit) return largeHit;
 
   // 最后一档：全票只有唯一一个非噪声金额（置信度低，界面会要求核对）
   const uniqueHit = extractUniqueMoney(rows);

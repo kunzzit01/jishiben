@@ -221,5 +221,34 @@ const r21 = parseReceiptLines(splitAmount);
 eq('[21] amount', r21.amount, 14.9);
 eq('[21] merchant', r21.merchant, 'Apple Services');
 
+console.log('\n[22] 钱包详情页：金额字号远大于正文（40 vs 20），据此取金额');
+const wallet = [
+  { text: 'Details', top: 60, left: 200, width: 120, height: 20 },
+  { text: '−RM14.90', top: 110, left: 30, width: 220, height: 44 },
+  { text: '+14 points', top: 118, left: 430, width: 90, height: 18 },
+  { text: 'Transaction Type', top: 200, left: 30, width: 160, height: 20 },
+  { text: 'Payment', top: 200, left: 400, width: 100, height: 20 },
+  { text: 'Merchant', top: 260, left: 30, width: 100, height: 20 },
+  { text: 'Apple Services', top: 260, left: 380, width: 140, height: 20 },
+  { text: 'Payment Method', top: 320, left: 30, width: 150, height: 20 },
+  { text: 'eWallet Balance', top: 320, left: 360, width: 160, height: 20 },
+  { text: 'Date/Time', top: 380, left: 30, width: 90, height: 20 },
+  { text: '02/11/2026 22:27:08', top: 380, left: 330, width: 210, height: 20 },
+  { text: 'Transaction No.', top: 500, left: 30, width: 140, height: 20 },
+  { text: 'MLJWVFKHD6a0', top: 500, left: 380, width: 150, height: 20 },
+];
+const r22 = parseReceiptOcr(wallet);
+eq('[22] amount', r22.amount, 14.9);
+eq('[22] currency', r22.currency, 'MYR');
+eq('[22] merchant', r22.merchant, 'Apple Services');
+
+console.log('\n[23] 大字是店名（没有金额特征）→ 不能当金额');
+const bigName = [
+  { text: 'CHEE YU STATIONERY', top: 60, left: 40, width: 400, height: 48 },
+  { text: 'Rounded Total (RM):', top: 200, left: 30, width: 230, height: 20 },
+  { text: '15.00', top: 200, left: 420, width: 60, height: 20 },
+];
+eq('[23] amount', parseReceiptOcr(bigName).amount, 15);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);
