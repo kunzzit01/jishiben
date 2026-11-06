@@ -1728,7 +1728,7 @@ function fxAmountText(raw: string, live: string | null): string {
   // ---------- 扫描小票 ----------
   // 纯云端模式：统一走云端 OCR 解析（本地 AICore 模块已移除，ML Kit GenAI 依赖在
   // EAS 上无法解析——公开仓库不含该 artifact，恢复本地模式时从 Zcode 备份取回）
-  const runScan = async (_base64: string, uri: string) => {
+  const runScan = async (base64: string, uri: string) => {
     // 本地 OCR 需要新安装包：老 APK 拿到新 JS 时给出更新入口（不再依赖任何 AI 密钥）
     if (!isLocalOcrAvailable()) {
       dialog.alert({
@@ -1743,7 +1743,7 @@ function fxAmountText(raw: string, live: string | null): string {
     }
     setScanning(true);
     try {
-      const result = await scanReceipt(uri);
+      const result = await scanReceipt(uri, base64);
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;

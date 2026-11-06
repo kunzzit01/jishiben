@@ -37,7 +37,7 @@ function toReadableMessage(code: string, detail?: string): string {
     case 'unsupported-platform':
       return '网页版不支持小票识别，请在 App 内使用';
     case 'ocr-failed':
-      return '识别失败，请重试或手动填写';
+      return detail ? `识别失败：${detail}` : '识别失败，请重试或手动填写';
     default:
       return detail || '识别失败，请手动填写';
   }
@@ -47,11 +47,11 @@ function toReadableMessage(code: string, detail?: string): string {
  * 小票识别（离线）：图片在设备上用 ML Kit（中文模型）读字，再用本地规则解析金额/日期/分类。
  * 不上传图片、不调用第三方、无按次费用 —— 取代了原来的 AI(OpenRouter) 方案。
  */
-export async function scanReceipt(imageUri: string): Promise<ScannedReceipt> {
+export async function scanReceipt(imageUri: string, imageBase64?: string): Promise<ScannedReceipt> {
   const { scanReceiptLocally, ReceiptOcrError } = await import('./receiptOcr');
   const { checkReceiptDuplicate } = await import('./receiptDedupe');
   try {
-    const parsed = await scanReceiptLocally(imageUri);
+    const parsed = await scanReceiptLocally(imageUri, imageBase64);
     // 查重（本地指纹，不联网）：只提示，不阻止用户记账
     let duplicate = false;
     let duplicateDaysAgo: number | undefined;

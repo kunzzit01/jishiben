@@ -61,14 +61,41 @@ function getRecognizer(): Recognizer {
 }
 
 /** 识别一张本地图片 → 记账字段。失败抛 ReceiptOcrError（界面据此提示或让用户手填）。 */
-export async function scanReceiptLocally(uri: string): Promise<ParsedReceipt> {
+export async function scanReceiptLocally(uri: string, base64?: string): Promise<ParsedReceipt> {
   const recognize = getRecognizer();
-  let lines: string[];
-  try {
-    lines = await recognize(uri);
-  } catch (e) {
-    if (e instanceof ReceiptOcrError) throw e;
-    throw new ReceiptOcrError('ocr-failed', String((e as Error)?.message ?? e));
+  let lines: string[] = [];
+  const errors: string[] = [];
+
+  // 依次尝试：原 URI → 去掉 file:// 的路径 → 用 base64 写临时文件
+  const attempts: string[] = [];
+  if (uri) {
+    attempts.push(uri);
+    if (uri.startsWith('file://')) attempts.push(uri.replace('file://', ''));
+  }
+  for (const candidate of attempts) {
+    try {
+      lines = await recognize(candidate);
+      break;
+    } catch (e) {
+      errors.push(String((e as Error)?.message ?? e));
+    }
+  }
+
+  if (lines.length === 0 && base64) {
+    try {
+      const FileSystem = require('expo-file-system');
+      const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      const tmp = dir + 'receipt-' + Date.now() + '.jpg';
+      await FileSystem.writeAsStringAsync(tmp, base64, { encoding: 'base64' });
+      lines = await recognize(tmp);
+    } catch (e) {
+      errors.push(String((e as Error)?.message ?? e));
+    }
+  }
+
+  if (lines.length === 0 && errors.length > 0) {
+    // 把原生错误原文带出去一层，便于界面/反馈里定位（截断避免刷屏）
+    throw new ReceiptOcrError('ocr-failed', errors[0].slice(0, 160));
   }
   if (lines.length === 0) {
     throw new ReceiptOcrError('no-text', '这张图里没有识别到文字');
