@@ -193,6 +193,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawTextPreview).catch(() => undefined);
     void AsyncStorage.setItem(LAST_AI_DIAG_KEY, 'stage=recognized lines=' + lines.length).catch(() => undefined);
     const parsed = parseReceiptOcr(lines, { learnedLabels });
+    const { isWeakAmountTier } = await import('./receiptParse');
 
     // 本地已经「有把握」（金额非空且置信度 ≥ 0.6）就不再打扰任何兜底
     let amount = parsed.amount;
@@ -210,14 +211,21 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let aiReason = '';
     let ocrSource: 'local' | 'server' | 'local-after-server-failed' = 'local';
 
-    const localIsConfident = parsed.amount !== null && parsed.confidence >= 0.6;
+    // 弱档（金额列/唯一金额/付款行/无符号大字）即使 confidence 看起来不低也要送服务端复核
+    const localIsConfident =
+      parsed.amount !== null && parsed.confidence >= 0.6 && !isWeakAmountTier(parsed.amountTier);
     if (localIsConfident) {
       aiReason = '本地解析已够用（amount ≠ null 且 confidence ≥ 0.6）';
     } else {
       // a) 服务端 OCR 兜底：开关打开 + 有密钥才会上传；熔断冷却期内直接跳过（不付任何等待）
       const remote = await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels);
-      const active = remote.parsed ?? parsed;
-      if (remote.parsed) ocrSource = 'server';
+      // 先算采用与否，再决定用哪份数据（避免「服务端更差也覆盖本地」）
+      const adoptPre = !!remote.parsed && remote.parsed.amount !== null && true;
+      // 采用规则：服务端更自信，或本地本来就来自弱档 → 用服务端结果
+      const localWeak = isWeakAmountTier(parsed.amountTier);
+      const adoptServer = adoptPre && (remote.parsed!.confidence > parsed.confidence || localWeak);
+      const active = adoptServer ? remote.parsed! : parsed;
+      if (remote.parsed && adoptServer) ocrSource = 'server';
       else if (remote.attempted) ocrSource = 'local-after-server-failed';
       // 采用「最终采用的那份解析」的字段（服务端更好时就是服务端那份，否则仍是本地那份）
       amount = active.amount;

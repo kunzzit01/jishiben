@@ -639,6 +639,13 @@ const CATEGORY_KEYWORDS: Array<[string, RegExp]> = [
   ['工资', /(工资|薪水|salary|payroll|bonus)/i],
 ];
 
+/** 这些档位即使 confidence 不低也不算可靠 —— 有服务端时应让它复核 */
+export const WEAK_AMOUNT_TIERS = ['column', 'unique', 'cashline', 'signed', 'label-no-amount', 'none'];
+
+export function isWeakAmountTier(tier: string | null | undefined): boolean {
+  return !tier || WEAK_AMOUNT_TIERS.includes(tier);
+}
+
 /** 主入口（带坐标）：优先用版面坐标配对标签与金额 */
 export interface ParseOptions {
   /** 用户此前确认过的金额标签（本机学习），命中即按最终应付处理 */
