@@ -136,6 +136,9 @@ async function fetchRemoteLines(
   imageBase64: string | undefined,
 ): Promise<RemoteLinesAttempt> {
   try {
+    // 先把图复制到 App 私有目录再上传：相册返回的 content:// 在 RN 的 FormData 里并不可靠
+    const { persistReceiptImage } = await import('./receiptStore');
+    const uploadUri = await persistReceiptImage(imageUri).catch(() => imageUri);
     const { hydrateServerOcrSettings, getServerOcrSettings, isServerOcrUsable } = await import('./scanSettings');
     await hydrateServerOcrSettings();
     const settings = getServerOcrSettings();
@@ -156,7 +159,7 @@ async function fetchRemoteLines(
         reason: 'server-cooldown（上次失败：' + getRemoteOcrBlockReason() + '）',
       };
     }
-    const lines = await recognizeReceiptLinesRemote(imageUri, imageBase64, settings);
+    const lines = await recognizeReceiptLinesRemote(uploadUri, imageBase64, settings);
     return { lines, attempted: true, reason: 'server-lines=' + lines.length };
   } catch (e) {
     return {
