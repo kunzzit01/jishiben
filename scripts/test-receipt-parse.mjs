@@ -258,5 +258,17 @@ const paper = parseReceiptLines(['Tax Invoice', 'Reprnt Receipt --', 'CHEE YU ST
 check('[24b] 纸质小票 merchantConfident', paper.merchantConfident === false, String(paper.merchantConfident));
 eq('[24b] merchant（仍识别，但不给建议）', paper.merchant, 'CHEE YU STATIONERY');
 
+console.log('\n[25] 「CASH」与上一行金额并进同一版面行（透视）→ 仍取最大付款额');
+const mergedCash = [
+  { text: 'MAMAK BISTRO', top: 12, left: 173, width: 188, height: 40 },
+  { text: '1x 16.50', top: 200, left: 90, width: 100, height: 27 },
+  { text: 'RM16.50', top: 200, left: 254, width: 90, height: 30 },
+  { text: 'RM2.50', top: 477, left: 246, width: 80, height: 32 },
+  { text: 'CASH', top: 490, left: 81, width: 60, height: 28 },
+  { text: 'RM42.40', top: 503, left: 183, width: 120, height: 34 },
+];
+const r25 = parseReceiptOcr(mergedCash);
+eq('[25] amount', r25.amount, 42.4);
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

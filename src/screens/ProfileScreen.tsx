@@ -40,6 +40,7 @@ import { useApp } from '../context/AppContext';
 import { useLanguage, LangMode } from '../i18n/LanguageContext';
 import { useT } from '../i18n/LanguageContext';
 import { hapticSelection, hapticSuccess } from '../utils/haptics';
+import { setServerOcrSettings, useServerOcrSettings } from '../utils/scanSettings';
 import {
   AppText,
   Badge,
@@ -81,6 +82,70 @@ export default function ProfileScreen({ navigation }: any) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   // ── 数据分组：清空所有数据。数量文案与清空动作都走 AppContext（不在这里自己拼 state）──
   const { ledgers, assets, transactions, budgets, paymentPlans, clearAllData } = useApp();
+
+  // ── 扫票识别（服务端 OCR 兜底）：开关与密钥的唯一来源是 scanSettings（默认关闭 + 空密钥＝永不上传）──
+  const serverOcr = useServerOcrSettings();
+  // 密钥输入用本地草稿：逐字落盘会把 AsyncStorage 变成键盘打击乐器，防抖 400ms 再写
+  const [serverKeyDraft, setServerKeyDraft] = useState(serverOcr.key);
+  const keyCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 服务状态探测结果（只读一行；idle＝开关关/无密钥，不探测）
+  const [serverOcrProbe, setServerOcrProbe] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
+
+  // store 里的密钥变了（首次水合完成 / 其它入口改过）→ 同步进输入框
+  useEffect(() => {
+    setServerKeyDraft(serverOcr.key);
+  }, [serverOcr.key]);
+
+  // 卸载时清掉还没触发的防抖句柄（已经排队的写入由 onChange 负责，这里只回收 timer）
+  useEffect(
+    () => () => {
+      if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current);
+    },
+    []
+  );
+
+  const commitServerKey = (text: string) => {
+    void setServerOcrSettings({ key: text });
+  };
+  const onChangeServerKey = (text: string) => {
+    setServerKeyDraft(text);
+    if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current);
+    keyCommitTimer.current = setTimeout(() => commitServerKey(text), 400);
+  };
+
+  // 服务状态：开关打开且已填密钥时探测一次 GET /ocr/health（6s 超时）。
+  // 这里**不受扫票时的 10 分钟熔断限制** —— 用户点开设置就是想看现在通不通；探测成功会复位熔断。
+  useEffect(() => {
+    if (!serverOcr.enabled || !serverOcr.key) {
+      setServerOcrProbe('idle');
+      return;
+    }
+    let cancelled = false;
+    const probeKey = serverOcr.key;
+    setServerOcrProbe('checking');
+    const timer = setTimeout(() => {
+      void (async () => {
+        const { checkRemoteOcrHealth } = await import('../utils/receiptOcrRemote');
+        const health = await checkRemoteOcrHealth({ enabled: true, key: probeKey });
+        if (!cancelled) setServerOcrProbe(health.ok ? 'ok' : 'fail');
+      })();
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [serverOcr.enabled, serverOcr.key]);
+
+  // 状态行文案：关 → 已关闭；无密钥 → 未填写密钥；否则看探测结果
+  const serverOcrStatus = !serverOcr.enabled
+    ? tr('scanOcr.statusOff')
+    : !serverOcr.key
+      ? tr('scanOcr.statusNoKey')
+      : serverOcrProbe === 'ok'
+        ? tr('scanOcr.statusOk')
+        : serverOcrProbe === 'fail'
+          ? tr('scanOcr.statusFail')
+          : tr('scanOcr.statusChecking');
 
   // 同步状态一句话：同步中 / 上次同步时间 / 尚未同步 / 失败
   // (错误文案 authErrorText 与 退出登录/立即同步 都已搬进"我的账户"账号页 AuthScreen)
@@ -372,7 +437,7 @@ export default function ProfileScreen({ navigation }: any) {
 
         {/* 外观分组：只放深色模式（语言不属于外观，见下「通用」分组） */}
         <ListSection title={tr('profile.appearance')} style={styles.section} testID="profile-appearance">
-          <AppearanceRow label={tr('profile.darkMode')}>
+          <FieldRow icon="moon-outline" label={tr('profile.darkMode')}>
             <FullWidthSegments
               options={[
                 { label: tr('theme.segSystem'), value: 'system' },
@@ -384,7 +449,7 @@ export default function ProfileScreen({ navigation }: any) {
               onSelect={(v) => setThemeMode(v as ThemeMode)}
               testID="profile-theme-segments"
             />
-          </AppearanceRow>
+          </FieldRow>
         </ListSection>
 
         {/* 通用分组：语言（中 / EN 分段在行右侧）+ 财务规划 › + 订阅（灰 + 即将推出） */}
@@ -472,6 +537,46 @@ export default function ProfileScreen({ navigation }: any) {
             chevron
             onPress={() => navigation.navigate(ROUTES.CALCULATOR)}
             testID="profile-calculators-row"
+          />
+        </ListSection>
+
+        {/* 扫票识别分组（服务端 OCR 兜底）：默认关闭 —— 开关打开 + 填了密钥，才会在本地识别不准时上传原图。
+            隐私口径写进副标题（图片发到你自己的服务器），状态行只读、失败显示「未连接」 */}
+        <ListSection title={tr('scanOcr.title')} style={styles.section} testID="profile-scan-ocr">
+          <SwitchRow
+            icon="cloud-upload-outline"
+            title={tr('scanOcr.serverOcr')}
+            subtitle={tr('scanOcr.serverOcrHint')}
+            value={serverOcr.enabled}
+            onValueChange={(v) => {
+              void setServerOcrSettings({ enabled: v });
+            }}
+            testID="profile-server-ocr-switch"
+          />
+          <FieldRow icon="key-outline" label={tr('scanOcr.serverKey')}>
+            <TextInput
+              style={[styles.fieldInput, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
+              value={serverKeyDraft}
+              onChangeText={onChangeServerKey}
+              onBlur={() => commitServerKey(serverKeyDraft)}
+              onSubmitEditing={() => commitServerKey(serverKeyDraft)}
+              placeholder={tr('scanOcr.serverKeyPlaceholder')}
+              placeholderTextColor={semantic.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              testID="profile-server-ocr-key"
+            />
+            <AppText variant="footnote" color={semantic.textSecondary} style={styles.fieldHint}>
+              {tr('scanOcr.serverKeyHint')}
+            </AppText>
+          </FieldRow>
+          <ListRow
+            leading={<RowIcon icon="pulse-outline" />}
+            title={tr('scanOcr.serverStatus')}
+            value={serverOcrStatus}
+            disabled
+            testID="profile-server-ocr-status"
           />
         </ListSection>
 
@@ -902,11 +1007,19 @@ function LanguageSegments({
 }
 
 /**
- * 外观行（页内自建 —— ListRow 表达不了这里的**两行结构**：标签一行 + 控件另起一行占满整行）。
+ * 两行字段行（页内自建 —— ListRow 表达不了这种**两行结构**：标签一行 + 控件另起一行占满整行）。
  * 行规格与 ListRow 逐项对齐：左右内衬 layout.card、上下 spacing.md、行首同一颗 38 圆图标块；
- * 标签与控件之间 spacing.sm。
+ * 标签与控件之间 spacing.sm。深色模式分段与服务器密钥输入共用它（图标由调用方给）。
  */
-function AppearanceRow({ label, children }: { label: string; children: React.ReactNode }) {
+function FieldRow({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  children: React.ReactNode;
+}) {
   const { spacing, layout } = useTheme();
   return (
     <View style={{ paddingHorizontal: layout.card, paddingVertical: spacing.md }}>
@@ -918,7 +1031,7 @@ function AppearanceRow({ label, children }: { label: string; children: React.Rea
           paddingBottom: spacing.sm,
         }}
       >
-        <RowIcon icon="moon-outline" tone="accent" />
+        <RowIcon icon={icon} tone="accent" />
         <AppText variant="subhead" weight="500">
           {label}
         </AppText>
@@ -1001,6 +1114,10 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout) 
       columnGap: spacing.md,
     },
     switchRowText: { flex: 1, minWidth: 0 },
+
+    // 扫票识别：密钥输入框（沿用删除账号输入框的 46 高 / 圆角 / 正文 16 规格）+ 输入框下说明
+    fieldInput: { height: 46, borderRadius: 12, paddingHorizontal: 14, fontSize: 16 },
+    fieldHint: { marginTop: spacing.xs },
 
     // 页脚版本号：caption 档、居中
     footer: { marginTop: spacing.xxl },

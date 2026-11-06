@@ -26,6 +26,8 @@ export interface ParsedReceipt {
   suggestedCategory: string | null;
   /** 0–1，**只反映金额**的可信度（日期/商户成功不会抬高它） */
   confidence: number;
+  /** 金额由哪一档得出（诊断：final/subtotal/signed/large/cashline/column/unique/none） */
+  amountTier?: string | null;
   /** 产生金额的那一行原文（用于本机学习「哪种标签是实付」） */
   amountLabel?: string | null;
   rawText: string;
@@ -221,14 +223,18 @@ function amountInRowAfterLabel(row: Row): number | null {
 
 /** 把「-RM17.90 / S$ 12.30 / ¥128.00 / 15.00」这类单元解析成数字；不是纯金额就返回 null */
 function moneyCellValue(text: string): number | null {
-  const cleaned = text
+  // 先把「42. 40」「42 .40」这类 OCR 空格拼回去，再看是不是纯金额
+  const spaced = text.replace(/(\d)\s*\.\s*(\d)/g, '$1.$2');
+  const cleaned = spaced
     .replace(/[¥￥$€£]/g, '')
     // 注意：不能要求词边界 —— "RM17.90" 里 RM 与数字之间没有边界
     .replace(/(RM|MYR|SGD|USD|TWD|HKD|THB|IDR|PHP|VND|CNY|RMB)(?=\s*\d)/gi, '')
     // 数字前可能出现的各种减号/破折号（U+2212 / en dash / em dash / 全角）都要能吃
     .replace(/^[+\-−–—－﹣]\s*/, '')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    // 马来小票的写法：88/= 表示 88.00
+    .replace(/\/=$/, '');
   if (!/^[\d.,]+$/.test(cleaned)) return null;
   const nums = numbersIn(cleaned);
   return nums.length === 1 ? nums[0] : null;
@@ -263,14 +269,14 @@ function extractSignedTopAmount(rows: Row[]): AmountResult | null {
       const v = moneyCellValue(next);
       if (v === null || v <= 0 || v >= 1e6) continue;
       const currency = rowCurrency(rows[i]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
-      return { amount: v, currency, confidence: 0.7, label: rows[i].text + ' ' + next };
+      return { amount: v, currency, confidence: 0.7, label: rows[i].text + ' ' + next, tier: 'signed' };
     }
   }
   if (hits.length !== 1) return null;
   const currency = rowCurrency(rows[hits[0].idx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
   const hitRow = rows[hits[0].idx];
   const hasSign = /^\s*[+\-−–—－﹣]/.test(hitRow.text.trim());
-  return { amount: hits[0].value, currency, confidence: hasSign ? 0.75 : 0.55, label: hitRow.text };
+  return { amount: hits[0].value, currency, confidence: hasSign ? 0.75 : 0.55, label: hitRow.text, tier: 'signed' };
 }
 
 function isMoneyShaped(text: string): boolean {
@@ -282,6 +288,8 @@ interface AmountResult {
   currency: string | null;
   /** 命中标签所在行原文 */
   label?: string | null;
+  /** 哪一档得出的金额（诊断用：final/subtotal/signed/large/cashline/column/unique/none） */
+  tier?: string;
   /** 0–1：只反映金额可信度 */
   confidence: number;
 }
@@ -339,7 +347,7 @@ function extractLargestTextAmount(rows: Row[]): AmountResult | null {
   if (distinct.length !== 1) return null;   // 有多个大字金额 → 不猜
   const hit = values[0];
   const currency = rowCurrency(hit.row) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
-  return { amount: hit.value, currency, confidence: 0.7, label: hit.label };
+  return { amount: hit.value, currency, confidence: 0.7, label: hit.label, tier: 'large' };
 }
 
 function extractUniqueMoney(rows: Row[]): AmountResult | null {
@@ -361,7 +369,52 @@ function extractUniqueMoney(rows: Row[]): AmountResult | null {
   const hasDate = /(20\d{2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/.test(text);
   if (!hasCurrency && !hasDate) return null;
   const [value, rowText] = [...values.entries()][0];
-  return { amount: value, currency: rowCurrency({ text: rowText, top: 0, height: 1, cells: [] }) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null, confidence: 0.5, label: rowText };
+  return {
+    amount: value,
+    currency: rowCurrency({ text: rowText, top: 0, height: 1, cells: [] }) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null,
+    confidence: 0.5,
+    label: rowText,
+    tier: 'unique',
+  };
+}
+
+/**
+ * 无合计标签时：付款行（CASH / TUNAI / BAYAR / TENDERED / CARD）上的货币金额往往就是实付。
+ * 例：马来自助小票只印「CASH RM42. 40」，没有 TOTAL。
+ * 安全条件（缺一不可）：
+ *   - 该行带货币标记（RM/…），且不是「找零」行
+ *   - 它的值 ≥ 票面上其它所有货币金额（付款额不会是部分金额）
+ *   - 这样的付款行只有一处
+ */
+function extractCashLineTotal(rows: Row[]): AmountResult | null {
+  const PAY_LINE = /(\bcash\b|tunai|bayar|tendered|\bcard\b|credit|debit|nets|paywave)/i;
+  const CHANGE = /(change|baki|kembali|找零)/i;
+  const moneyRows: { row: Row; value: number }[] = [];
+  for (const row of rows) {
+    if (CHANGE.test(row.text)) continue;
+    if (!rowCurrency(row)) continue;                       // 只要带货币标记的行
+    for (const cell of row.cells) {
+      const v = moneyCellValue(cell.text);
+      if (v !== null && v > 0 && v < 1e6) moneyRows.push({ row, value: v });
+    }
+  }
+  if (moneyRows.length === 0) return null;
+  const rowIndex = new Map(rows.map((r, i) => [r, i]));
+  const prevLooksPaid = (row: Row): boolean => {
+    const idx = rowIndex.get(row) ?? -1;
+    if (idx <= 0) return false;
+    const prev = rows[idx - 1];
+    const gap = row.top - (prev.top + prev.height);
+    return gap <= Math.max(row.height, prev.height) * 1.6 && PAY_LINE.test(prev.text) && !CHANGE.test(prev.text);
+  };
+  const payRows = moneyRows.filter((m) => PAY_LINE.test(m.row.text) || prevLooksPaid(m.row));
+  if (payRows.length === 0) return null;
+  // 版面行可能把「CASH」与上一行的金额并在一起（透视/行高重叠），
+  // 所以候选可能不止一个 —— 取其中**最大**的作为付款额，并要求它不小于票面其它金额。
+  const pay = payRows.reduce((a, b) => (b.value > a.value ? b : a));
+  const maxOther = Math.max(...moneyRows.map((m) => m.value));
+  if (pay.value < maxOther) return null;
+  return { amount: pay.value, currency: rowCurrency(pay.row), confidence: 0.55, label: pay.row.text, tier: 'cashline' };
 }
 
 function extractAmountColumn(rows: Row[]): AmountResult | null {
@@ -399,7 +452,7 @@ function extractAmountColumn(rows: Row[]): AmountResult | null {
   if (pool.length === 0) return null;
   const chosen = pool[pool.length - 1];
   const currency = rowCurrency(rows[chosen.rowIdx]) ?? rows.map(rowCurrency).filter(Boolean)[0] ?? null;
-  return { amount: chosen.value, currency, confidence: 0.55 };
+  return { amount: chosen.value, currency, confidence: 0.55, tier: 'column' };
 }
 
 function extractAmount(rows: Row[]): AmountResult {
@@ -427,10 +480,10 @@ function extractAmount(rows: Row[]): AmountResult {
         }
       }
     }
-    if (amount === null) return { amount: null, currency: rowCurrency(row), confidence: 0.2 };
+    if (amount === null) return { amount: null, currency: rowCurrency(row), confidence: 0.2, tier: 'label-no-amount' };
     if (amount >= 1000000) return { amount: null, currency: rowCurrency(row), confidence: 0.1 };
     const currency = rowCurrency(row) ?? rows.slice(0, Math.max(idx + 1, 1)).map(rowCurrency).filter(Boolean)[0] ?? null;
-    return { amount, currency, confidence, label: row.text };
+    return { amount, currency, confidence, label: row.text, tier: 'final' };
   };
 
   /** 这个数字在「找零/现金/单号/电话」行里也出现 → 说明很可能配错了 */
@@ -443,18 +496,22 @@ function extractAmount(rows: Row[]): AmountResult {
     // 与找零/现金同值 → 不可信，继续往下（小计 → 顶部符号金额 → 金额列 → null）
   }
 
-  const subtotalHit = tryLabels(SUBTOTAL_LABELS, 0.6);
+  const subtotalHitRaw = tryLabels(SUBTOTAL_LABELS, 0.6);
+  const subtotalHit = subtotalHitRaw ? { ...subtotalHitRaw, tier: 'subtotal' } : null;
   if (subtotalHit && subtotalHit.amount !== null) return subtotalHit;
 
   // 没有任何标签：电子钱包账单（顶部 -RM17.90 这种）优先，其次右对齐金额列
   const signedHit = extractSignedTopAmount(rows);
   if (signedHit) return signedHit;
+  // 大字金额（钱包页/把小票把实付印得最大）优先于「右对齐列」—— 对齐在透视下很不可靠
+  const largeHitEarly = extractLargestTextAmount(rows);
+  if (largeHitEarly) return largeHitEarly;
+
+  const cashLineHit = extractCashLineTotal(rows);
+  if (cashLineHit) return cashLineHit;
+
   const columnHit = extractAmountColumn(rows);
   if (columnHit) return columnHit;
-
-  // 大字金额：整页字号最大的那一行（钱包详情页/大字合计）
-  const largeHit = extractLargestTextAmount(rows);
-  if (largeHit) return largeHit;
 
   // 最后一档：全票只有唯一一个非噪声金额（置信度低，界面会要求核对）
   const uniqueHit = extractUniqueMoney(rows);
@@ -462,7 +519,7 @@ function extractAmount(rows: Row[]): AmountResult {
 
   // 没有任何应付标签 → 金额留空（裸数字不可信：可能是单号/电话/数量）
   const fallbackCurrency = rows.map(rowCurrency).filter(Boolean)[0] ?? null;
-  return { amount: null, currency: fallbackCurrency, confidence: finalHit ? 0.2 : 0 };
+  return { amount: null, currency: fallbackCurrency, confidence: finalHit ? 0.2 : 0, tier: 'none' };
 }
 
 function normaliseDate(y: number, m: number, d: number): string | null {
@@ -636,6 +693,7 @@ export function parseReceiptOcr(lines: OcrLine[], options: ParseOptions = {}): P
     merchantConfident: merchantHit.confident,
     confidence: Math.round(confidence * 100) / 100,
     amountLabel: best.label ?? null,
+    amountTier: best.tier ?? null,
     rawText: text,
   };
 }

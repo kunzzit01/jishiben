@@ -891,6 +891,21 @@ export const en = {
     // Footer version line (Chinese reads「版本 1.0.0」)
     version: 'Version %{version}',
   },
+  // Receipt scan (server-side OCR fallback): settings 'Receipt scanning' group + status row
+  scanOcr: {
+    title: 'Receipt scanning',
+    serverOcr: 'Upload the photo when scanning is unsure',
+    serverOcrHint: 'The photo is sent to your own server to improve recognition',
+    serverKey: 'Server key',
+    serverKeyPlaceholder: 'Paste the shared server key',
+    serverKeyHint: 'Uploads only happen with a key — leave it empty to stay fully on-device',
+    serverStatus: 'Service status',
+    statusOk: 'Connected',
+    statusFail: 'Not connected',
+    statusChecking: 'Checking…',
+    statusNoKey: 'No key',
+    statusOff: 'Off',
+  },
   // Clear all data (Settings -> Data section): confirmation dialog + PIN sheet copy
   data: {
     clearTitle: 'Clear all data?',

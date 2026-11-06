@@ -904,6 +904,21 @@ export const zh = {
     // 页脚版本号（中文按用户定版写「版本 1.0.0」）
     version: '版本 %{version}',
   },
+  // 扫票识别（服务端 OCR 兜底）：设置页「扫票识别」分组 + 状态行
+  scanOcr: {
+    title: '扫票识别',
+    serverOcr: '识别不准时上传图片到服务器',
+    serverOcrHint: '图片会发到你自己的服务器，用于提高识别率',
+    serverKey: '服务器密钥',
+    serverKeyPlaceholder: '粘贴服务端共享密钥',
+    serverKeyHint: '填了密钥才会上传；不填永远只在本机识别',
+    serverStatus: '服务状态',
+    statusOk: '已连接',
+    statusFail: '未连接',
+    statusChecking: '检测中…',
+    statusNoKey: '未填写密钥',
+    statusOff: '已关闭',
+  },
   // 清空所有数据（设置页 → 数据分组）：确认框 + PIN 验证两处文案
   data: {
     clearTitle: '清空所有数据？',
