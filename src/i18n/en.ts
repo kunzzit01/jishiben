@@ -162,6 +162,7 @@ export const en = {
     other: 'Other',
   },
   addTx: {
+    receiptLastOcrRow: 'Last OCR text',
     receiptAiMissingHint: 'This build does not include the on-device AI module yet. The APK should be 73,776,339 bytes — if smaller, install the latest build. Receipt scanning works regardless.',
     receiptAiDownloadableHint: 'This phone supports on-device AI but the model is not downloaded yet. Get it in system settings → Google → on-device models (AICore) to improve hard receipts. Scanning works without it.',
     // About: on-device AI diagnostics

@@ -173,3 +173,13 @@ export async function getReceiptAiStatus(): Promise<string> {
     return 'error:' + String((e as Error)?.message ?? e).slice(0, 60);
   }
 }
+
+/** 把原始 FeatureStatus 翻译成人话（保留原始值，便于排查） */
+export function describeReceiptAiStatus(raw: string): string {
+  if (raw === 'AVAILABLE') return 'AVAILABLE（可用）';
+  if (raw === 'DOWNLOADABLE') return 'DOWNLOADABLE（本机支持，模型未下载）';
+  if (raw === 'DOWNLOADING') return 'DOWNLOADING（模型下载中）';
+  if (raw === 'UNAVAILABLE') return 'UNAVAILABLE（本机系统未开放端侧模型）';
+  if (raw.startsWith('module-missing')) return raw;
+  return raw;
+}
