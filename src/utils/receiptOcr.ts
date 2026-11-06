@@ -1,7 +1,7 @@
 // receiptOcr.ts —— 用设备本地的 ML Kit 文本识别（中文模型）读小票，再交给纯规则解析。
 // 完全离线：不调用任何 AI API、不需要 key、不产生费用、不把图片上传到服务器。
 import { Platform } from 'react-native';
-import { parseReceiptLines, type ParsedReceipt } from './receiptParse';
+import { parseReceiptOcr, type OcrLine, type ParsedReceipt } from './receiptParse';
 
 export class ReceiptOcrError extends Error {
   readonly code: string;
@@ -12,7 +12,7 @@ export class ReceiptOcrError extends Error {
   }
 }
 
-type Recognizer = (uri: string) => Promise<string[]>;
+type Recognizer = (uri: string) => Promise<OcrLine[]>;
 
 /** 当前安装包是否带本地识别模块（老 APK 走 OTA 拿到新 JS 时会是 false）。 */
 export function isLocalOcrAvailable(): boolean {
@@ -74,13 +74,24 @@ function getRecognizer(): Recognizer {
   }
   recognizer = async (uri: string) => {
     const result = await TextRecognition.recognize(uri, Script?.CHINESE);
-    const lines: string[] = [];
+    const lines: OcrLine[] = [];
     for (const block of result?.blocks ?? []) {
       for (const line of block?.lines ?? []) {
-        if (line?.text) lines.push(String(line.text));
+        if (!line?.text) continue;
+        // 保留版面坐标：解析时要靠它把「标签」和右侧「金额」配成一行
+        const frame = line.frame ?? line.cornerPoints?.[0];
+        lines.push({
+          text: String(line.text),
+          top: typeof frame?.top === 'number' ? frame.top : undefined,
+          left: typeof frame?.left === 'number' ? frame.left : undefined,
+          width: typeof frame?.width === 'number' ? frame.width : undefined,
+          height: typeof frame?.height === 'number' ? frame.height : undefined,
+        });
       }
     }
-    if (lines.length === 0 && result?.text) lines.push(...String(result.text).split('\n'));
+    if (lines.length === 0 && result?.text) {
+      lines.push(...String(result.text).split('\n').map((text) => ({ text })));
+    }
     return lines;
   };
   return recognizer;
@@ -89,7 +100,7 @@ function getRecognizer(): Recognizer {
 /** 识别一张本地图片 → 记账字段。失败抛 ReceiptOcrError（界面据此提示或让用户手填）。 */
 export async function scanReceiptLocally(uri: string, base64?: string): Promise<ParsedReceipt> {
   const recognize = getRecognizer();
-  let lines: string[] = [];
+  let lines: OcrLine[] = [];
   const errors: string[] = [];
 
   // 依次尝试：原 URI → 去掉 file:// 的路径 → 用 base64 写临时文件
@@ -126,5 +137,5 @@ export async function scanReceiptLocally(uri: string, base64?: string): Promise<
   if (lines.length === 0) {
     throw new ReceiptOcrError('no-text', '这张图里没有识别到文字');
   }
-  return parseReceiptLines(lines);
+  return parseReceiptOcr(lines);
 }

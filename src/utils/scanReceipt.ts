@@ -6,6 +6,8 @@ export interface ScannedReceipt {
   date: string | null; // YYYY-MM-DD
   type: 'expense' | 'income'; // 识别不准默认 expense
   suggestedCategory: string | null; // 中文分类名，例如"餐饮"或"工资"
+  /** 识别到的币种（RM→MYR 等）；界面需与账户币种比对 */
+  currency?: string | null;
   /** 0–1 规则置信度：偏低时界面提示用户核对金额 */
   confidence?: number;
   /** OCR 全文（查重用，界面不要展示） */
@@ -71,6 +73,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       date: parsed.date,
       type: parsed.type,
       suggestedCategory: parsed.suggestedCategory,
+      currency: parsed.currency,
       confidence: parsed.confidence,
       rawText: parsed.rawText,
       duplicate,
