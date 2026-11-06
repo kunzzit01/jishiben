@@ -64,6 +64,8 @@ fi
 # 5) Gradle SDK pointer + release signing wiring (both idempotent)
 printf 'sdk.dir=%s\n' "$(printf '%s' "$SDK" | tr '\\' '/')" > "$SHADOW/android/local.properties"
 ( cd "$SHADOW" && node scripts/patch-android-signing.mjs )
+# R8 + 资源压缩（android/ 每次 prebuild 会被重建，所以每次都要补丁）
+( cd "$SHADOW" && node scripts/patch-android-minify.mjs )
 
 # 6) Build
 ( cd "$SHADOW/android" && ./gradlew.bat assembleRelease -PreactNativeArchitectures="$RN_ARCHS" )
