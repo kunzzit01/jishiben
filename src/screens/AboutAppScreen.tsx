@@ -57,9 +57,8 @@ export default function AboutAppScreen({ navigation }: any) {
     void hydrateServerOcrSettings().then(() => {
       if (!alive) return;
       const st = getServerOcrSettings();
-      const on = st.enabled ? '开' : '关';
-      const hasKey = st.key.trim() ? '已填密钥' : '未填密钥';
-      setServerOcrState(on + ' · ' + hasKey + (isServerOcrUsable(st) ? ' · 可用' : ' · 不会上传'));
+      // 现在没有开关：密钥内置，扫票时自动使用（仅本地拿不准时才上传）
+      setServerOcrState(isServerOcrUsable(st) ? '自动 · 内置密钥 · 可用' : '未配置');
     }).catch(() => undefined);
     void AsyncStorage.getItem('@jizhang/lastScanText')
       .then((v) => { if (alive) setLastOcrText(v && v.trim() ? v.replace(/\s+/g, ' ').slice(0, 220) : '-'); })

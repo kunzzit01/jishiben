@@ -10,6 +10,7 @@
 // 3) 只有本地识别拿不准时才可能用到它（判定在 scanReceipt 里，不在这里）。
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
+import { SERVER_OCR_ENABLED, SERVER_OCR_KEY } from '../config/ocrConfig';
 
 /** 持久化键（v1：结构变化换版本号，不做跨版本迁移 —— 默认值就是「不上传」） */
 export const SERVER_OCR_STORAGE_KEY = '@jizhang/scan.serverOcr.v1';
@@ -22,7 +23,8 @@ export interface ServerOcrSettings {
 }
 
 /** 默认值：关闭 + 空密钥（= 不上传）。不要改成 true。 */
-const DEFAULTS: ServerOcrSettings = { enabled: false, key: '' };
+// 内置默认：开 + 我们自己的密钥（用户不需要任何设置）
+const DEFAULTS: ServerOcrSettings = { enabled: SERVER_OCR_ENABLED, key: SERVER_OCR_KEY };
 
 let snapshot: ServerOcrSettings = DEFAULTS;
 const listeners = new Set<() => void>();
