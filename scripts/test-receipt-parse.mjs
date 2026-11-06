@@ -250,5 +250,13 @@ const bigName = [
 ];
 eq('[23] amount', parseReceiptOcr(bigName).amount, 15);
 
+console.log('\n[24] 商户置信度：只有明确 Merchant 标签才算高置信（决定是否给备注建议）');
+const walletMerchant = parseReceiptLines(['Details', '−RM14.90', 'Merchant  Apple Services', 'Payment Method  eWallet Balance']);
+check('[24a] 钱包账单 merchantConfident', walletMerchant.merchantConfident === true, String(walletMerchant.merchantConfident));
+eq('[24a] merchant', walletMerchant.merchant, 'Apple Services');
+const paper = parseReceiptLines(['Tax Invoice', 'Reprnt Receipt --', 'CHEE YU STATIONERY', 'Rounded Total (RM): 15.00']);
+check('[24b] 纸质小票 merchantConfident', paper.merchantConfident === false, String(paper.merchantConfident));
+eq('[24b] merchant（仍识别，但不给建议）', paper.merchant, 'CHEE YU STATIONERY');
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 process.exit(failed === 0 ? 0 : 1);

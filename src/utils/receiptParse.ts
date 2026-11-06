@@ -19,6 +19,9 @@ export interface ParsedReceipt {
   type: 'expense' | 'income';
   /** 商户名（识别不出就是 null，界面可留空） */
   merchant: string | null;
+  /** 商户名是否**高置信**：只有当票据里有明确的 Merchant/商户 标签时为 true。
+   *  纸质小票的抬头猜测一律为 false —— 只用于提示，不能自动写进备注。 */
+  merchantConfident?: boolean;
   /** 分类中文名建议（与 App 现有分类同名，未知则 null） */
   suggestedCategory: string | null;
   /** 0–1，**只反映金额**的可信度（日期/商户成功不会抬高它） */
@@ -528,14 +531,14 @@ function merchantScore(text: string): number {
   return score;
 }
 
-function extractMerchant(rows: Row[], amountRowIndex: number): string | null {
+function extractMerchant(rows: Row[], amountRowIndex: number): { text: string | null; confident: boolean } {
   // ① 标签式：Merchant / 商户 / 商家 —— 同行的值或下一行（电子钱包账单都走这条）
   for (let i = 0; i < rows.length; i += 1) {
     const m = /^(merchant|商户|商家|店铺|收款方)\b[:：]?\s*/i.exec(rows[i].text.trim());
     if (!m) continue;
     const inline = rows[i].text.trim().slice(m[0].length).trim();
     for (const candidate of [inline, rows[i + 1]?.text ?? '']) {
-      if (looksLikeMerchant(candidate)) return cleanMerchantText(candidate);
+      if (looksLikeMerchant(candidate)) return { text: cleanMerchantText(candidate), confident: true };
     }
   }
   // ② 抬头打分：金额行之前的所有候选里选分最高的（同分取更靠前的）
@@ -547,7 +550,8 @@ function extractMerchant(rows: Row[], amountRowIndex: number): string | null {
     const score = merchantScore(s);
     if (!best || score > best.score) best = { text: s, score };
   }
-  return best ? best.text : null;
+  // 抬头猜测：**不算高置信**（纸质小票一律不给建议）
+  return { text: best ? best.text : null, confident: false };
 }
 
 const INCOME_WORDS = /(收款|收入|转入|入账|到账|已收款|工资|salary|refund|退款|received)/i;
@@ -598,7 +602,8 @@ export function parseReceiptOcr(lines: OcrLine[], options: ParseOptions = {}): P
   const { amount, currency, confidence } = best;
 
   const amountRowIndex = rows.findIndex((r) => FINAL_TOTAL_LABELS.some((re) => re.test(r.text)));
-  const merchant = extractMerchant(rows, amountRowIndex);
+  const merchantHit = extractMerchant(rows, amountRowIndex);
+  const merchant = merchantHit.text;
   const date = extractDate(text);
 
   let type: 'expense' | 'income' = 'expense';
@@ -628,6 +633,7 @@ export function parseReceiptOcr(lines: OcrLine[], options: ParseOptions = {}): P
     type,
     merchant,
     suggestedCategory,
+    merchantConfident: merchantHit.confident,
     confidence: Math.round(confidence * 100) / 100,
     amountLabel: best.label ?? null,
     rawText: text,

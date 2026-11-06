@@ -8,6 +8,8 @@ export interface ScannedReceipt {
   date: string | null; // YYYY-MM-DD
   type: 'expense' | 'income'; // 识别不准默认 expense
   suggestedCategory: string | null; // 中文分类名，例如"餐饮"或"工资"
+  /** 商户名是否高置信（仅当票据里有明确 Merchant 标签）；只有高置信才作为备注建议 */
+  merchantConfident?: boolean;
   /** 产生金额的那一行原文（保存成功后写入本机学习库） */
   amountLabel?: string | null;
   /** 本机学到的商户→分类（分类 id）；界面优先用它 */

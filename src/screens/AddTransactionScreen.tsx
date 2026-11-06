@@ -473,7 +473,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 本次扫票的 OCR 原文：保存成功后写进本地查重库
   const lastScanRawTextRef = useRef<string | undefined>(undefined);
   // 本次扫描的商户与「产生金额的标签行」：保存成功后写入本机学习库
-  const lastScanMetaRef = useRef<{ merchant?: string | null; amountLabel?: string | null }>({});
+  const lastScanMetaRef = useRef<{ merchant?: string | null; merchantConfident?: boolean; amountLabel?: string | null }>({});
 
   // 普通收支专用：可选的资产账户（这笔钱从/到哪个账户）——没有编辑数据时，用"资产"页设的默认账户
   const [assetId, setAssetId] = useState<string | null>(editTransaction?.assetId ?? preferredAssetId);
@@ -1443,7 +1443,10 @@ function fxAmountText(raw: string, live: string | null): string {
     void rememberReceiptRawText(lastScanRawTextRef.current);
     // 本机学习：这张票的实付标签 + 这个商户用的分类（下次直接命中）
     void rememberAmountLabel(lastScanMetaRef.current.amountLabel);
-    void rememberMerchantCategory(lastScanMetaRef.current.merchant, categoryId);
+    // 商户→分类只在高置信商户上学习，避免把抬头猜测写进记忆
+    if (lastScanMetaRef.current.merchantConfident) {
+      void rememberMerchantCategory(lastScanMetaRef.current.merchant, categoryId);
+    }
 
     // 自动月结：开关打开（默认关，手动开）时，把这笔账同步建成一条「每月同日自动入账」的
     // 财务规划——之后每个月由补账引擎自动 ±账目。防重复：同名称+同金额+同周期+同账户的计划已存在则跳过
@@ -1756,7 +1759,11 @@ function fxAmountText(raw: string, live: string | null): string {
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
-      lastScanMetaRef.current = { merchant: result.merchant, amountLabel: result.amountLabel };
+      lastScanMetaRef.current = {
+        merchant: result.merchant,
+        merchantConfident: result.merchantConfident,
+        amountLabel: result.amountLabel,
+      };
       if (result.duplicate) {
         dialog.alert({
           title: t('addTx.receiptDuplicateTitle'),
@@ -1786,7 +1793,8 @@ function fxAmountText(raw: string, live: string | null): string {
       }
       if (result.date) setDate(result.date);
       // 备注不再自动填充（OCR 商户名常抓错字眼）；只存成建议，由用户点备注框时决定
-      setScanMerchant(result.merchant ?? null);
+      // 方案 B：只有票据里有明确 Merchant 标签（钱包账单）才给备注建议；纸质小票一律不给
+      setScanMerchant(result.merchantConfident ? result.merchant ?? null : null);
       // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
       // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
       setReceiptUri(await persistReceiptImage(uri));
