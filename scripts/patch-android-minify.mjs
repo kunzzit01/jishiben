@@ -63,6 +63,10 @@ const KEEP = [
   '-keep class com.facebook.react.** { *; }',
   '-keep class com.facebook.hermes.** { *; }',
   '-keep class com.reactnativegooglesignin.** { *; }',
+  // 原生 OCR 桥（@react-native-ml-kit/text-recognition）：类与 @ReactMethod 都必须保留
+  '-keep class com.rnmlkit.** { *; }',
+  '-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }',
+  '-keep @com.facebook.react.bridge.ReactModuleSpec class * { *; }',
   '-keep class expo.modules.** { *; }',
   '-keep class com.google.mlkit.** { *; }',
   '-keepattributes *Annotation*, InnerClasses, Signature, Exceptions',
@@ -80,6 +84,13 @@ if (existsSync(proguard)) {
   const cur = readFileSync(proguard, 'utf8');
   if (!cur.includes('jishiben: R8 keep rules')) {
     writeFileSync(proguard, cur + KEEP);
+  } else if (!cur.includes('com.rnmlkit.**')) {
+    const EXTRA_OCR = [
+      '-keep class com.rnmlkit.** { *; }',
+      '-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }',
+      ''
+    ].join('\n');
+    writeFileSync(proguard, cur + EXTRA_OCR);
   } else if (!cur.includes('devanagari.**')) {
     // 曾经注入过旧版规则：补上后来新增的 dontwarn（排除掉的三套 MLKit 模型仍被模块引用）
     const EXTRA = [

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
-import { isLocalOcrAvailable } from '../utils/receiptOcr';
+import { describeLocalOcr, isLocalOcrAvailable } from '../utils/receiptOcr';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
 /**
@@ -194,7 +194,7 @@ export default function AboutAppScreen({ navigation }: any) {
           {/* 本地扫票依赖原生模块：这行用于确认当前安装包是否包含它 */}
           <Row
             label={t('addTx.localOcr')}
-            value={isLocalOcrAvailable() ? t('addTx.localOcrReady') : t('addTx.localOcrMissing')}
+            value={describeLocalOcr()}
             muted={semantic.textSecondary}
           />
           {/* 真机性能诊断（用户截图用）：数值来自最近一次打开「类别管理」页 */}
