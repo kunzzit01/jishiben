@@ -1,0 +1,10 @@
+# Optional production credentials overlay. Supply the file locally; never commit it.
+# docker compose -f docker-compose.yml -f docker-compose.billing-google.yml ...
+services:
+  api:
+    environment:
+      BILLING_MODE: GOOGLE_PLAY
+      BILLING_SANDBOX_ALLOWED: "false"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-play.json
+    volumes:
+      - ./secrets/google-play-service-account.json:/run/secrets/google-play.json:ro

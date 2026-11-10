@@ -77,6 +77,7 @@ export function isNetworkError(e: unknown): boolean {
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface RequestOptions {
+  headers?: Record<string, string>;
   /** 请求体（自动 JSON 序列化） */
   body?: unknown;
   /** 查询参数；值为 undefined/null/'' 的项会被丢弃 */
@@ -114,7 +115,7 @@ async function rawFetch(
 ): Promise<RawResponse> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeout = setTimeout(() => controller?.abort(), options.timeoutMs ?? API_TIMEOUT_MS);
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  const headers: Record<string, string> = { Accept: 'application/json', ...options.headers };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = 'Bearer ' + token;
 
@@ -224,7 +225,7 @@ export function refreshAccessToken(): Promise<string> {
 
 // ────────────────────────────── 带认证的请求 ──────────────────────────────
 
-async function authorizedRequest<T>(
+export async function authorizedRequest<T>(
   method: Method,
   path: string,
   options: RequestOptions = {}
@@ -799,7 +800,7 @@ export const api = {
   unregisterPushToken: (token: string) =>
     authorizedRequest<unknown>('DELETE', '/api/push-tokens', { body: { token } }),
 
-  // premium（桩：只读状态，内购未实现）
+  // Legacy authenticated status subset; guest and store flows use premiumApi.
   premiumStatus: () =>
     authorizedRequest<{ active: boolean; implemented: boolean }>('GET', '/api/premium/status'),
 };

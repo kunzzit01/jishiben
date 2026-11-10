@@ -279,3 +279,9 @@ docker compose -f deploy/docker-compose.yml up -d mysql
 docker compose -f deploy/docker-compose.yml logs -f mysql     # 等 healthy
 curl -sf http://localhost/api/health                          # 经 nginx 探活
 ```
+
+## 订阅开发补充 · V13
+
+V13 新增 billing_subjects（匿名／注册／关联身份）、billing_settings（管理员全局开关）、billing_subscriptions（模拟与 Google 授权）及 billing_events（事件幂等与审计）。详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)。Google token 加密保存，另存摘要作为唯一键；游客凭证仅存摘要。用户外键删除时解除个人账号关联，保留的去标识化购买记录须纳入隐私与保留策略。
+
+本次仅在 H2 MySQL 兼容模式验证新 JDBC 流程，V13 仍需真实 MySQL 8 迁移验收。

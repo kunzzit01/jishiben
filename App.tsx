@@ -26,6 +26,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { AppProvider, useApp } from './src/context/AppContext';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { PremiumProvider } from './src/context/PremiumContext';
+import { PremiumScreenHost } from './src/screens/PremiumScreen';
 import { AppLockProvider, AppLockOverlay } from './src/context/AppLockContext';
 import { AppDialogProvider } from './src/components/AppDialog';
 import { useSyncManager } from './src/hooks/useSyncManager';
@@ -759,6 +761,7 @@ export default function App() {
               {/* Bio Lock：登录后可开启，开 App / 切后台回来时要求生物识别解锁 */}
               <AppLockProvider>
                 <AppDialogProvider>
+                  <PremiumProvider>
                   <AppProvider>
                     {/* ⚠ 组件预览页（后续批次回归测试用，T32 清理时删）：
                         只在 __DEV__ + web + URL 带 ?gallery=1 时替换真实 App，不进正式导航。 */}
@@ -769,6 +772,8 @@ export default function App() {
                     {/* 全局主题化弹窗 Host 已内置于 AppDialogProvider：
                         <AppDialog /> 的 DialogHost 随 Provider 渲染 */}
                   </AppProvider>
+                  <PremiumScreenHost />
+                  </PremiumProvider>
                 </AppDialogProvider>
               </AppLockProvider>
             </AuthProvider>

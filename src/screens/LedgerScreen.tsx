@@ -1,3 +1,4 @@
+import { usePremium } from '../context/PremiumContext';
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, View, Keyboard } from 'react-native';
 
@@ -36,6 +37,7 @@ function GlassBackHeader({ title, onBack }: { title: string; onBack: () => void 
 }
 
 export default function LedgerScreen() {
+  const premium = usePremium();
     const { ledgers, addLedger } = useApp();
   const { semantic, gradients, isDark, spacing } = useTheme();
   // 玻璃卡上的次要字色（§4 硬指标）：夜间玻璃在 web 上被 BlurView 的白底洗亮
@@ -57,7 +59,7 @@ export default function LedgerScreen() {
       dialog.alert({ title: t('ledger.dupName') });
       return;
     }
-    await addLedger(name.trim(), icon, color);
+    try { await addLedger(name.trim(), icon, color); } catch (error) { premium.showError(error); return; }
     setNewName('');
     setNewColor(LEDGER_COLOR_OPTIONS[0]);
     // 用户定版：创建成功后给明确的交互反馈——主题化成功弹窗，按钮直接回到

@@ -1,32 +1,31 @@
 package com.jishiben.api.premium;
 
 import com.jishiben.api.common.ApiException;
-import java.util.Map;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.*;
 
-/**
- * Premium is a deliberate stub. The app only ever showed a greyed-out "coming soon" row, so there is
- * no entitlement logic, no in-app purchase, and no RevenueCat webhook. Both endpoints exist so the
- * client can keep its feature flag wiring; the purchase endpoint answers 501 instead of pretending.
- */
 @RestController
 @RequestMapping("/api/premium")
 public class PremiumController {
-
-    @GetMapping("/status")
-    public Map<String, Object> status() {
-        return Map.of(
-                "active", false,
-                "implemented", false,
-                "source", "STUB",
-                "message", "Premium is not implemented yet; no entitlement is granted.");
+    private final PremiumService premium;
+    public PremiumController(PremiumService premium) { this.premium = premium; }
+    @PostMapping("/guest") public PremiumDtos.Guest guest() { return premium.createGuest(); }
+    @GetMapping("/status") public PremiumDtos.Status status(
+            @RequestHeader(value="X-Premium-Guest-Token", required=false) String token) { return premium.status(token); }
+    @PostMapping("/claim") public void claim(@Valid @RequestBody PremiumDtos.Guest request) { premium.claimGuest(request.token()); }
+    @PostMapping("/sandbox/apply") public PremiumDtos.Status apply(
+            @RequestHeader(value="X-Premium-Guest-Token", required=false) String token,
+            @Valid @RequestBody PremiumDtos.Application request) { return premium.apply(token, request); }
+    @PostMapping("/sandbox/{id}/cancel") public PremiumDtos.Status cancel(
+            @RequestHeader(value="X-Premium-Guest-Token", required=false) String token, @PathVariable String id,
+            @Valid @RequestBody PremiumDtos.Event request) { return premium.cancelSandbox(token, id, request); }
+    @GetMapping("/access/scan")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void scanAccess(@RequestHeader(value="X-Premium-Guest-Token", required=false) String token) {
+        if (premium.settings().gatesEnabled() && !premium.status(token).capabilities().get("scan"))
+            throw ApiException.forbidden("PREMIUM_REQUIRED:scan");
     }
-
-    @PostMapping("/purchase")
-    public void purchase() {
-        throw ApiException.notImplemented("Premium purchase is not implemented");
+    @PostMapping("/purchase") public void legacyPurchase() {
+        throw ApiException.badRequest("Use the configured provider; client claims do not grant membership");
     }
 }

@@ -32,7 +32,7 @@ class LedgerServiceTest {
     private PaymentPlanRepository paymentPlans;
 
     private LedgerService service() {
-        return new LedgerService(ledgers, assets, transactions, paymentPlans);
+        return new LedgerService(ledgers, assets, transactions, paymentPlans, org.mockito.Mockito.mock(com.jishiben.api.premium.PremiumService.class));
     }
 
     @Test

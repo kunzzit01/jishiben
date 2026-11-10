@@ -119,7 +119,22 @@ server {
     # ocr 容器比本容器晚起来也不会让 nginx 因 "host not found in upstream" 起不来。
     # proxy_pass 不带 URI：原样转发 /ocr/xxx，前缀由 ocr 服务自己处理。
     # X-OCR-Key 等请求头默认透传，这里不要改写 / 不要清空，否则服务端一律 401。
+    # Health reveals no receipt content and remains available without membership.
+    location = /ocr/health {
+        resolver 127.0.0.11 ipv6=off valid=10s;
+        set $ocr_health_upstream http://ocr:8090;
+        proxy_pass $ocr_health_upstream;
+    }
+    location = /_premium_scan_check {
+        internal;
+        proxy_pass http://jishiben_api/api/premium/access/scan;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Premium-Guest-Token $http_x_premium_guest_token;
+    }
     location /ocr/ {
+        auth_request /_premium_scan_check;
         resolver 127.0.0.11 ipv6=off valid=10s;
         set $ocr_upstream http://ocr:8090;
         # 服务端上限 8MB，留出 multipart 边界与表单头的余量

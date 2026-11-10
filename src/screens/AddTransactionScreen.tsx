@@ -1,3 +1,4 @@
+import { usePremium, PremiumRequired } from '../context/PremiumContext';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
@@ -384,6 +385,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const { langMode } = useLanguage();
   // 主题化弹窗（替代系统 Alert）
   const dialog = useDialog();
+  const premium = usePremium();
   const tabClearance = useTabClearance();
   // 底部系统栏（手势条 / 三键导航）实际高度：键盘面板、底部弹层都要让出它，见 keypadBottomPad
   const bottomInset = useBottomSystemInset();
@@ -1445,6 +1447,9 @@ function fxAmountText(raw: string, live: string | null): string {
       dialog.alert({ title: t('addTx.selectAssetAlert') });
       return false;
     }
+    if (!isEditing && autoMonthly) {
+      try { await premium.requireFeature('financialPlan'); } catch (error) { premium.showError(error); return false; }
+    }
     if (isEditing && editTransaction) {
       await updateTransaction(editTransaction.id, {
         amount: value,
@@ -1490,7 +1495,7 @@ function fxAmountText(raw: string, live: string | null): string {
         (p) => p.cycle === 'monthly' && p.amount === value && p.name === planName && p.assetId === (assetId ?? undefined)
       );
       if (!alreadyPlanned) {
-        void addPaymentPlan({
+        await addPaymentPlan({
           ledgerId: activeLedgerId,
           name: planName,
           amount: value,
@@ -1562,6 +1567,7 @@ function fxAmountText(raw: string, live: string | null): string {
         });
       }
     } catch (err) {
+      if (err instanceof PremiumRequired) return;
       console.error('保存失败:', err);
       dialog.alert({ title: t('addTx.saveFailed'), message: err instanceof Error ? err.message : String(err) });
     }
@@ -1581,6 +1587,7 @@ function fxAmountText(raw: string, live: string | null): string {
         });
       }
     } catch (err) {
+      if (err instanceof PremiumRequired) return;
       console.error('保存失败:', err);
       dialog.alert({ title: t('addTx.saveFailed'), message: err instanceof Error ? err.message : String(err) });
     }
@@ -1665,6 +1672,7 @@ function fxAmountText(raw: string, live: string | null): string {
       // 写回 state 了，保留着不用回滚，用户能看到刚打的数字，去把没填的部分填完再点一次就行
       void ok;
     } catch (err) {
+      if (err instanceof PremiumRequired) return;
       console.error('保存失败:', err);
       dialog.alert({ title: t('addTx.saveFailed'), message: err instanceof Error ? err.message : String(err) });
     }
@@ -1684,6 +1692,7 @@ function fxAmountText(raw: string, live: string | null): string {
         }
       );
     } catch (err) {
+      if (err instanceof PremiumRequired) return;
       console.error('保存失败:', err);
       dialog.alert({ title: t('addTx.saveFailed'), message: err instanceof Error ? err.message : String(err) });
     }
@@ -1718,6 +1727,11 @@ function fxAmountText(raw: string, live: string | null): string {
     // 余额、详情页、统计都按这一套算，不用跟着改。
     const rate = !showRateField ? 1 : rateMode === 'div' ? 1 / typedRate : typedRate;
     const feeValue = options?.feeOverride ?? (parseFloat(fee) || 0);
+    const changedExchange = !editTransfer || editTransfer.fromAssetId !== fromAssetId || editTransfer.toAssetId !== toAssetId
+      || editTransfer.amount !== value || editTransfer.exchangeRate !== rate || (editTransfer.fee ?? 0) !== feeValue || editTransfer.date !== date;
+    if (changedExchange && assets.find(a => a.id === fromAssetId)?.currency !== assets.find(a => a.id === toAssetId)?.currency) {
+      try { await premium.requireFeature('exchange'); } catch (error) { premium.showError(error); return; }
+    }
     // 备注同下面这行一起搬进了键盘面板，小票(收据)现在转账/兑换也能附了——
     // 如果 addTransfer 的类型定义里还没有 receiptUri 字段，需要先在那边补上
     if (editTransfer) {
@@ -1770,11 +1784,12 @@ function fxAmountText(raw: string, live: string | null): string {
     return true;
   };
 
-  const handleSaveTransfer = () => handleSaveTransferWithAmount();
+  const handleSaveTransfer = () => handleSaveTransferWithAmount().catch(error => { premium.showError(error); });
 
   // ---------- 扫描小票 ----------
   // 完全本地：设备端 ML Kit（中文模型）读字 → 本地规则解析 → 本地查重；不调用任何服务端/AI 接口。
   const runScan = async (base64: string, uri: string) => {
+    try { await premium.requireFeature('scan'); } catch (error) { premium.showError(error); return; }
     // 每次扫票先复位日期：否则扫描失败时会留下上一张票的日期（真机出现过 1月15日 残留）
     setDate(todayStr());
     // 本地 OCR 需要新安装包：老 APK 拿到新 JS 时给出更新入口（不再依赖任何 AI 密钥）
@@ -1869,7 +1884,8 @@ function fxAmountText(raw: string, live: string | null): string {
   // 两个入口共用同一个相机页面，用这个字段区分拍完之后要干嘛
   const [cameraMode, setCameraMode] = useState<'scan' | 'receipt' | null>(null);
 
-  const handleScanPress = () => {
+  const handleScanPress = async () => {
+    try { await premium.requireFeature('scan'); } catch (error) { premium.showError(error); return; }
     // 本地识别模块缺失时不必开相机（拍了也解析不了）——直接给更新入口
     if (!isLocalOcrAvailable()) {
       dialog.alert({

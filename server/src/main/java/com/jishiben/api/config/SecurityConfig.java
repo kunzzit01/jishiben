@@ -23,8 +23,8 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
- * Stateless JWT security. Only health probes and the three token-minting endpoints are public;
- * everything else requires a valid access token, and the tenant boundary is enforced per query by
+ * Stateless JWT security. Health, token-minting, and narrowly scoped billing endpoints are public;
+ * guest billing validates its own bearer proof and Pub/Sub validates Google OIDC. Other data requires a valid access token. The tenant boundary is enforced per query by
  * filtering on the account id taken from that token.
  */
 @Configuration
@@ -51,6 +51,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login",
                                 "/api/auth/refresh", "/api/auth/google")
                         .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/premium/status", "/api/premium/access/scan").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/premium/guest", "/api/premium/sandbox/apply",
+                                "/api/premium/sandbox/*/cancel", "/api/premium/google/verify",
+                                "/api/premium/google/restore", "/api/premium/google/notifications").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // 凭证图片：GET 允许匿名（随机 UUID 文件名，RN 的 <Image> 带不了 Authorization 头）；
                         // POST 上传仍走下面的 authenticated

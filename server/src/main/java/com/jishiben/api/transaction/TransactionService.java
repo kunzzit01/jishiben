@@ -3,6 +3,7 @@ package com.jishiben.api.transaction;
 import com.jishiben.api.asset.Asset;
 import com.jishiben.api.asset.AssetRepository;
 import com.jishiben.api.common.ApiException;
+import com.jishiben.api.premium.PremiumService;
 import com.jishiben.api.common.Checks;
 import com.jishiben.api.common.Money;
 import com.jishiben.api.common.PageResponse;
@@ -35,13 +36,15 @@ public class TransactionService {
     static final Set<String> TYPES = Set.of("expense", "income", "transfer");
     private static final int MAX_PAGE_SIZE = 100;
 
+    private final PremiumService premium;
     private final TransactionRepository transactions;
     private final AssetRepository assets;
     private final ReferenceResolver references;
     private final ProfileService profiles;
 
     public TransactionService(TransactionRepository transactions, AssetRepository assets,
-                              ReferenceResolver references, ProfileService profiles) {
+                              ReferenceResolver references, ProfileService profiles, PremiumService premium) {
+        this.premium = premium;
         this.transactions = transactions;
         this.assets = assets;
         this.references = references;
@@ -109,6 +112,8 @@ public class TransactionService {
         String uid = Texts.requireNonBlank(request.clientUid(), "clientUid");
         Texts.limit(uid, 64, "clientUid");
         Transaction row = transactions.findByOwnerIdAndClientUid(ownerId, uid).orElse(null);
+        Object beforeTerms = row == null ? null : terms(row);
+        boolean wasExchange = row != null && isExchange(ownerId, row);
         if (row == null) {
             row = new Transaction();
             row.setOwnerId(ownerId);
@@ -131,12 +136,16 @@ public class TransactionService {
         row.setDisplayName(Texts.trimToNull(request.displayName()));
         row.setReceiptPath(Texts.trimToNull(request.receiptPath()));
         normalise(ownerId, row);
+        if ((wasExchange || isExchange(ownerId, row)) && !java.util.Objects.equals(beforeTerms, terms(row)))
+            premium.requireFeature(ownerId, "exchange");
         return toResponse(transactions.save(row), references.loadMaps(ownerId));
     }
 
     @Transactional
     public TransactionDtos.Response patch(long ownerId, String clientUid, TransactionDtos.PatchRequest request) {
         Transaction row = require(ownerId, clientUid);
+        Object beforeTerms = terms(row);
+        boolean wasExchange = isExchange(ownerId, row);
         if (request.ledgerUid() != null) {
             row.setLedgerId(references.requiredLedger(ownerId, request.ledgerUid()));
         }
@@ -184,6 +193,8 @@ public class TransactionService {
             row.setReceiptPath(Texts.trimToNull(request.receiptPath()));
         }
         normalise(ownerId, row);
+        if ((wasExchange || isExchange(ownerId, row)) && !java.util.Objects.equals(beforeTerms, terms(row)))
+            premium.requireFeature(ownerId, "exchange");
         return toResponse(transactions.save(row), references.loadMaps(ownerId));
     }
 
@@ -203,6 +214,20 @@ public class TransactionService {
      * transfer). Such a row still counts in the currency report, but it belongs to no account, so it
      * contributes to no account balance — exactly what the app's own getAssetBalance does.
      */
+    private boolean isExchange(long ownerId, Transaction row) {
+        if (!"transfer".equals(row.getType())) return false;
+        Asset from = row.getFromAssetId() == null ? null : assets.findById(row.getFromAssetId()).orElse(null);
+        Asset to = row.getToAssetId() == null ? null : assets.findById(row.getToAssetId()).orElse(null);
+        return from != null && to != null && from.getOwnerId() == ownerId && to.getOwnerId() == ownerId
+                && !java.util.Objects.equals(from.getCurrency(), to.getCurrency());
+    }
+    private static Object terms(Transaction p) {
+        return java.util.Arrays.asList(p.getLedgerId(), p.getFromAssetId(), p.getToAssetId(), p.getType(),
+                normalized(p.getAmount()), p.getCurrency(), normalized(p.getExchangeRate()),
+                normalized(p.getConvertedAmount()), normalized(p.getFee()), p.getOccurredOn());
+    }
+    private static BigDecimal normalized(BigDecimal value) { return value == null ? null : value.stripTrailingZeros(); }
+
     private void normalise(long ownerId, Transaction row) {
         switch (row.getType()) {
             case "transfer" -> {

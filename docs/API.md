@@ -196,12 +196,25 @@
 > **已下线（2026-11-06）**：扫票改为设备端 ML Kit 本地识别 + 本地规则解析，不再需要该接口与任何 AI API key。
 > 请统一使用 §3.16；旧路径现在返回 404。
 
-### 3.15 premium — 会员（**桩**，不实现内购）
+### 3.15 premium — 订阅与管理员模拟
+
+2026-11-10 加入订阅开发实现，详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)。默认不开放申请／模拟，不锁定既有功能。提醒保持免费。
 
 | 方法 | 路径 | 鉴权 | 作用 |
-|---|---|---|---|
-| GET | `/api/premium/status` | Bearer | 恒返回 `active=false, implemented=false` |
-| POST | `/api/premium/purchase` | Bearer | 恒返回 501 `NOT_IMPLEMENTED` |
+| --- | --- | --- | --- |
+| POST | `/api/premium/guest` | 公共 | 创建匿名订阅身份，不创建记账账号 |
+| GET | `/api/premium/status` | Bearer 或 X-Premium-Guest-Token | 会员状态、权益、服务端开关 |
+| POST | `/api/premium/claim` | Bearer + 游客凭证证明 | 主动绑定游客订阅 |
+| POST | `/api/premium/sandbox/apply` | Bearer 或游客凭证 | 模拟申请，初始 PENDING |
+| POST | `/api/premium/sandbox/{id}/cancel` | 同一身份 | 取消模拟续费 |
+| POST | `/api/premium/google/verify`、`/restore` | Bearer 或游客凭证 | 真实 Google 验单／恢复 |
+| POST | `/api/premium/google/notifications` | Google OIDC | Pub/Sub 通知，重新查询 Google |
+| GET | `/api/premium/access/scan` | 开启锁定时需有效会员身份 | nginx OCR 鉴权子请求，成功 204 |
+| GET | `/api/admin/premium` | 服务端验证管理员 | 最近订阅与设置 |
+| PUT | `/api/admin/premium/settings` | 同上 | 申请、模拟和功能锁定开关 |
+| POST | `/api/admin/premium/{id}/events` | 同上 | 幂等模拟事件，校验 revision |
+
+旧 `/api/premium/purchase` 不接受客户端自报开通会员，返回 400 指引使用配置的 provider。正式购买只认服务端验证后的状态。`FORBIDDEN` 的 `PREMIUM_REQUIRED:功能名` 表示付费操作被限制。
 
 ---
 
@@ -446,7 +459,7 @@
 | `NOT_FOUND` | 404 | uid 不存在（或属于别人）、路径不存在 |
 | `CONFLICT` | 409 | 邮箱已注册、大类重名、账本仍有子数据且未 `force`、唯一键冲突 |
 | `PAYLOAD_TOO_LARGE` | 413 | 收据图片超过上限 |
-| `NOT_IMPLEMENTED` | 501 | 会员购买（桩） |
+| `NOT_IMPLEMENTED` | 501 | 预留未实现能力 |
 | `UPSTREAM_ERROR` | 502 | 上游汇率/AI 服务异常 |
 | `INTERNAL_ERROR` | 500 | 未预期异常（日志有堆栈，响应只有一句话） |
 
@@ -475,7 +488,7 @@
    `scripts/api-smoke.mjs` 55 项断言全绿；本文标「实测」的取值都来自该环境。
 2. `GET /api/exchange-rates` 与 `POST /api/receipts/extract` 的外网调用未在真实网络下验证（单测只覆盖缺密钥/超限/非法入参路径）。
 3. 没有实现：定时抓汇率（cron）、推送发送（Expo Push 批量）、小票文件上传（Storage）、
-   计划付款自动入账（引擎仍在 App 本地）、会员权益与内购校验。
+   计划付款自动入账（引擎仍在 App 本地）。订阅已有开发实现，真实 Play 验收仍待执行。
 4. 汇率只做展示缓存；真正参与计算的汇率落在 `transactions.exchange_rate`。
 
 ---

@@ -74,6 +74,15 @@ management:
         enabled: true
 
 app:
+  billing:
+    admin-email: ${BILLING_ADMIN_EMAIL:mingsoon249@gmail.com}
+    mode: ${BILLING_MODE:SANDBOX}
+    sandbox-allowed: ${BILLING_SANDBOX_ALLOWED:false}
+    package-name: ${BILLING_PACKAGE_NAME:com.kylim0103.jizhangapp}
+    product-id: ${BILLING_PRODUCT_ID:premium}
+    token-encryption-key: ${BILLING_TOKEN_ENCRYPTION_KEY:}
+    push-audience: ${BILLING_PUSH_AUDIENCE:}
+    push-email: ${BILLING_PUSH_EMAIL:}
   receipts:
     # 凭证图片落盘目录。compose 里挂到宿主机 ./data/receipts，重建容器不丢图。
     dir: ${RECEIPTS_DIR:/data/receipts}

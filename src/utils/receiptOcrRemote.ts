@@ -11,9 +11,12 @@
 //
 // 为什么不复用 apiClient.uploadMultipart：它固定注入 Authorization Bearer，且没有
 // 自定义请求头的入口（X-OCR-Key 无处可放）；同时 /ocr/* 属于独立的 OCR 服务，
-// 与 /api/* 的 Spring 后端不是同一个地址。这里用 fetch + FormData 自己拼，
+// 与 /api/* 的 Spring 后端可能不是同一个地址。同源代理额外校验订阅；独立服务不接收 App 凭证。
+// 这里用 fetch + FormData 自己拼，
 // 超时 / 取消 / JSON 解析的写法与 apiClient 保持一致。
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAccessToken } from '../services/sessionStore';
+import { guestToken } from '../services/premiumApi';
 import { API_BASE_URL } from '../config/apiConfig';
 import type { OcrLine } from './receiptParse';
 import type { ServerOcrSettings } from './scanSettings';
@@ -133,9 +136,23 @@ async function ocrFetch(
   const timer = setTimeout(() => controller?.abort(), timeoutMs);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (key) headers['X-OCR-Key'] = key;
+  // Never send application credentials to an independently configured third-party OCR origin.
+  const base = resolveOcrBaseUrl();
+  const sameOrigin = base === API_BASE_URL || (() => {
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
+      return new URL(base || '/', origin).origin === new URL(API_BASE_URL || '/', origin).origin;
+    } catch { return false; }
+  })();
+
 
   let response: Response;
   try {
+  if (sameOrigin) {
+    const accessToken = getAccessToken();
+    if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
+    else headers['X-Premium-Guest-Token'] = (await guestToken()) ?? '';
+  }
     response = await fetch(resolveOcrBaseUrl() + path, {
       method,
       headers,

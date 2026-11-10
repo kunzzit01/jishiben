@@ -1,3 +1,4 @@
+import { usePremium } from './PremiumContext';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { forgetAmountCategory, rememberAmountCategory } from '../utils/amountCategory';
@@ -321,6 +322,7 @@ function genId() {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const premium = usePremium();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   // state 的镜像 ref：delete/update 回调里要读「当前」账目（state 闭包会过期）
   const transactionsRef = useRef<Transaction[]>([]);
@@ -750,6 +752,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getCategoryById = useCallback((id: string) => categories.find((c) => c.id === id), [categories]);
 
   const addLedger: AppContextValue['addLedger'] = async (name, icon, color) => {
+    if (ledgersRef.current.length > 0) await premium.requireFeature('addLedger');
     setLedgers((prev) => [...prev, { id: genId(), name, icon, color: color ?? LEDGER_DEFAULT_COLOR, createdAt: Date.now() }]);
   };
 
@@ -964,6 +967,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     note,
     receiptUri,
   }) => {
+    const fromCurrency = assets.find(a => a.id === fromAssetId)?.currency;
+    const toCurrency = assets.find(a => a.id === toAssetId)?.currency;
+    if (fromCurrency && toCurrency && fromCurrency !== toCurrency) await premium.requireFeature('exchange');
     const convertedAmount = amount * exchangeRate;
     const transferTx: Transaction = {
       id: genId(),
@@ -1012,6 +1018,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     note,
     receiptUri,
   }) => {
+    const before = transactionsRef.current.find(t => t.id === id);
+    const currencies = (from?: string, to?: string) => {
+      const a = assets.find(asset => asset.id === from)?.currency;
+      const b = assets.find(asset => asset.id === to)?.currency;
+      return Boolean(a && b && a !== b);
+    };
+    const financialChange = !before || before.fromAssetId !== fromAssetId || before.toAssetId !== toAssetId
+      || before.amount !== amount || before.exchangeRate !== exchangeRate || (before.fee ?? 0) !== fee || before.date !== date;
+    if (financialChange && (currencies(fromAssetId, toAssetId) || currencies(before?.fromAssetId, before?.toAssetId)))
+      await premium.requireFeature('exchange');
     const convertedAmount = amount * exchangeRate;
     setTransactions((prev) => {
       const target = prev.find((t) => t.id === id);
@@ -1056,11 +1072,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ── 财务规划:计划付款 CRUD ──
   const addPaymentPlan: AppContextValue['addPaymentPlan'] = async (p) => {
+    await premium.requireFeature('financialPlan');
     const plan: PaymentPlan = { ...p, id: genId(), createdAt: Date.now() };
     setPaymentPlans((prev) => [...prev, plan]);
   };
 
   const updatePaymentPlan: AppContextValue['updatePaymentPlan'] = async (id, updates) => {
+    const before = paymentPlans.find(p => p.id === id);
+    const safe = new Set(['lastProcessedDate', 'reminderEnabled']);
+    const changed = Object.keys(updates).some(raw => {
+      const key = raw as keyof typeof updates;
+      return !safe.has(key) && !(key === 'active' && updates[key] === false)
+        && updates[key] !== before?.[key];
+    });
+    if (changed) await premium.requireFeature('financialPlan');
     setPaymentPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
   };
 

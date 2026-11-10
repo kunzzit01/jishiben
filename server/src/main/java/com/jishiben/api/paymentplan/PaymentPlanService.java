@@ -1,6 +1,7 @@
 package com.jishiben.api.paymentplan;
 
 import com.jishiben.api.common.ApiException;
+import com.jishiben.api.premium.PremiumService;
 import com.jishiben.api.common.Checks;
 import com.jishiben.api.common.Money;
 import com.jishiben.api.common.Texts;
@@ -19,10 +20,12 @@ public class PaymentPlanService {
     static final Set<String> TYPES = Set.of("expense", "income");
     static final Set<String> CYCLES = Set.of("weekly", "monthly", "yearly");
 
+    private final PremiumService premium;
     private final PaymentPlanRepository plans;
     private final ReferenceResolver references;
 
-    public PaymentPlanService(PaymentPlanRepository plans, ReferenceResolver references) {
+    public PaymentPlanService(PaymentPlanRepository plans, ReferenceResolver references, PremiumService premium) {
+        this.premium = premium;
         this.plans = plans;
         this.references = references;
     }
@@ -46,6 +49,9 @@ public class PaymentPlanService {
         String uid = Texts.requireNonBlank(request.clientUid(), "clientUid");
         Texts.limit(uid, 64, "clientUid");
         PaymentPlan plan = plans.findByOwnerIdAndClientUid(ownerId, uid).orElse(null);
+        Object beforeTerms = plan == null ? null : terms(plan);
+        boolean wasActive = plan != null && plan.isActive();
+        boolean wasArchived = plan != null && plan.getArchivedAt() != null;
         if (plan == null) {
             plan = new PaymentPlan();
             plan.setOwnerId(ownerId);
@@ -69,6 +75,8 @@ public class PaymentPlanService {
         plan.setActive(request.active() == null || request.active());
         plan.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         applyArchived(plan, request.archived());
+        if (!java.util.Objects.equals(beforeTerms, terms(plan)) || (!wasActive && plan.isActive())
+                || (wasArchived && plan.getArchivedAt() == null)) premium.requireFeature(ownerId, "financialPlan");
         validateRange(plan);
         return toResponse(plans.save(plan), references.loadMaps(ownerId));
     }
@@ -76,6 +84,9 @@ public class PaymentPlanService {
     @Transactional
     public PaymentPlanDtos.Response patch(long ownerId, String clientUid, PaymentPlanDtos.PatchRequest request) {
         PaymentPlan plan = require(ownerId, clientUid);
+        Object beforeTerms = terms(plan);
+        boolean wasActive = plan.isActive();
+        boolean wasArchived = plan.getArchivedAt() != null;
         if (request.ledgerUid() != null) {
             plan.setLedgerId(references.requiredLedger(ownerId, request.ledgerUid()));
         }
@@ -128,6 +139,8 @@ public class PaymentPlanService {
             plan.setSortOrder(request.sortOrder());
         }
         applyArchived(plan, request.archived());
+        if (!java.util.Objects.equals(beforeTerms, terms(plan)) || (!wasActive && plan.isActive())
+                || (wasArchived && plan.getArchivedAt() == null)) premium.requireFeature(ownerId, "financialPlan");
         validateRange(plan);
         return toResponse(plans.save(plan), references.loadMaps(ownerId));
     }
@@ -135,6 +148,13 @@ public class PaymentPlanService {
     @Transactional
     public void delete(long ownerId, String clientUid) {
         plans.delete(require(ownerId, clientUid));
+    }
+
+    private static Object terms(PaymentPlan p) {
+        return java.util.Arrays.asList(p.getLedgerId(), p.getCategoryId(), p.getAssetId(), p.getName(),
+                p.getAmount() == null ? null : p.getAmount().stripTrailingZeros(), p.getType(), p.getCycle(),
+                p.getDayOfWeek(), p.getDayOfMonth(), p.getMonthOfYear(), p.getDay(), p.getStartDate(),
+                p.getEndDate(), p.isAutoDeduct());
     }
 
     private static void validateRange(PaymentPlan plan) {
