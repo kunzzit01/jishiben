@@ -611,7 +611,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 用 keyboardDidShow 事件给的真实高度，不能套用面板的常量——两个高度并不一样。
     // 自绘面板整体（含 iOS 键盘上抬量）都算遮挡；系统键盘用事件给的真实高度。
     const occludedHeight = amountKeypadOpen
-      ? keypadPanelH + keypadBottomPad + keypadKeyboardLift
+      ? keypadPanelH + keypadBottomPad + keypadKeyboardLift + androidKbLift
       : keyboardVisible
         ? keyboardHeight
         : 0;
@@ -1178,6 +1178,16 @@ function fxAmountText(raw: string, live: string | null): string {
   // 自绘面板共存的场景，keyboardDidShow 时不能把面板收掉（否则备注框随面板卸载、
   // 系统键盘跟着掉下来、面板又被 keyboardDidHide 弹回来，两套键盘互相卡死）
   const noteFocusRef = useRef(false);
+  // 安卓键盘避让（实测量取）：edge-to-edge 下窗口不一定随 adjustResize 缩小，搜狗等输入法会直接
+  // 盖住底部面板里的备注框。不假设「窗口缩没缩」，而是键盘弹出后量面板实际底边与键盘上沿的重叠量，
+  // 重叠多少就上抬多少（窗口已缩的机型量出来是 0，不会重复上抬）。
+  const footerRef = useRef<View>(null);
+  const [androidKbLift, setAndroidKbLift] = useState(0);
+  const androidKbLiftRef = useRef(0);
+  const setAndroidLift = (v: number) => {
+    androidKbLiftRef.current = v;
+    setAndroidKbLift(v);
+  };
   // 「点击填入：X」的 X：优先商品/类别建议，没有则退回高置信商户名（原有行为）
   // 备注框获得焦点：备注为空且用户没手动改过 → 填入建议（填进去的只是草稿，可改可删）
   // 手动改过备注（只有用户输入会走到这里，程序填入走 setNote）→ 本次票据不再自动覆盖建议
@@ -1187,9 +1197,21 @@ function fxAmountText(raw: string, live: string | null): string {
       setKeyboardHeight(e?.endCoordinates?.height ?? 0);
       // 系统键盘弹出 → 自绘面板收起让位；但备注框聚焦的共存场景例外
       if (isFocused && !noteFocusRef.current) setAmountKeypadOpen(false);
+      if (Platform.OS === 'android' && isFocused && noteFocusRef.current) {
+        const kbTop = e?.endCoordinates?.screenY;
+        // 等键盘动画/窗口缩放落定再量；量的是「当前已上抬量」折回去之前的原始底边
+        setTimeout(() => {
+          footerRef.current?.measureInWindow((_x, y, _w, h) => {
+            if (kbTop == null || !h) return;
+            const rawBottom = y + h + androidKbLiftRef.current;
+            setAndroidLift(Math.max(0, Math.round(rawBottom - kbTop)));
+          });
+        }, 120);
+      }
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
+      setAndroidLift(0);
       // 系统键盘收起 → 自绘面板重新出现（含 Android 返回键收起键盘的情况）
       if (isFocused && !noteFocusRef.current) setAmountKeypadOpen(true);
     });
@@ -2402,7 +2424,7 @@ function fxAmountText(raw: string, live: string | null): string {
             底部留白收紧(insets-32)：edge-to-edge 下根视图已延伸到导航条后面，
             再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
         {amountKeypadOpen && (
-          <View style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }]}>
+          <View ref={footerRef} style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}>
             <AmountCalculatorKeypad
               onPressKey={handleExprKey}
               onPressToday={() => setDatePickerOpen(true)}
@@ -2800,7 +2822,8 @@ function fxAmountText(raw: string, live: string | null): string {
           再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
       {amountKeypadOpen && (
         <View
-          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }]}
+          ref={footerRef}
+          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => setAmountCursor(amountExpr.pressKeyAt(key, amountCursor))}
