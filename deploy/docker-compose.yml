@@ -167,6 +167,11 @@ services:
     environment:
       # 客户端必须带同名请求头 X-OCR-Key；不填则 compose 直接报错，不放行
       OCR_SHARED_KEY: ${OCR_SHARED_KEY:?OCR_SHARED_KEY is required}
+      # 深度识别（第三层兜底）：默认关闭。开启时调用宿主机上的 Ollama（不占容器资源）
+      OCR_DEEP_ENABLED: ${OCR_DEEP_ENABLED:-0}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:7b}
+      OCR_DEEP_TIMEOUT_MS: ${OCR_DEEP_TIMEOUT_MS:-120000}
       TZ: UTC
     # 仅内网可达：只写 expose，不写 ports（宿主机无法直连 8090）
     expose:

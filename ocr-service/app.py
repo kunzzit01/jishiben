@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
 import io
 import logging
@@ -546,6 +547,95 @@ async def ocr_lines(
     )
     return payload
 
+
+# ── 深度识别（第三层兜底，默认关闭，仅测试用）────────────
+# 约束：默认关闭（OCR_DEEP_ENABLED!=1 一律 503）、单并发、严格超时、
+#      只回结构化字段，不落盘、不打印图片或回答内容。
+DEEP_ENABLED = os.environ.get("OCR_DEEP_ENABLED", "0").strip() == "1"
+DEEP_URL = os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
+DEEP_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
+DEEP_TIMEOUT_MS = _env_int("OCR_DEEP_TIMEOUT_MS", 120000)
+_DEEP_SEM = asyncio.Semaphore(1)
+
+DEEP_PROMPT = (
+    "这是一张收据或账单的照片。请只输出两行，不要任何解释："
+    "第一行：票面最终的应付金额（纯数字，不要货币符号；看不清就写 unknown）；"
+    "第二行：货币代码（RM 写 MYR，S$ 写 SGD，其他按票面）。"
+)
+
+
+def _parse_deep_answer(text):
+    """从模型回答里抠出金额与币种；抠不出返回 (None, None)，绝不瞎猜。"""
+    if not text:
+        return None, None
+    amount = None
+    currency = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip("`*_ ")
+        if not line:
+            continue
+        if amount is None:
+            m = re.search(r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)", line)
+            if m and not re.fullmatch(r"20\d{2}", m.group(1)):
+                try:
+                    amount = float(m.group(1).replace(",", ""))
+                except ValueError:
+                    amount = None
+                if amount is not None:
+                    continue
+        if currency is None:
+            m2 = re.search(r"(MYR|RM|SGD|CNY|RMB|USD|HKD|TWD|THB|IDR|PHP|VND|JPY)", line, re.I)
+            if m2:
+                tok = m2.group(1).upper()
+                currency = {"RM": "MYR", "RMB": "CNY"}.get(tok, tok)
+    return amount, currency
+
+
+@router.post("/deep")
+async def ocr_deep(file: UploadFile = File(...), _: None = Depends(require_key)) -> dict:
+    if not DEEP_ENABLED:
+        raise OCRError("DEEP_DISABLED", "深度识别未启用（OCR_DEEP_ENABLED=0）")
+
+    started = time.monotonic()
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in LAX_MIME:
+        raise OCRError("BAD_IMAGE", "不支持的 Content-Type: " + (content_type or "empty"))
+    raw = await _read_limited(file)
+    b64 = base64.b64encode(raw).decode("ascii")
+
+    body = {
+        "model": DEEP_MODEL,
+        "prompt": DEEP_PROMPT,
+        "images": [b64],
+        "stream": False,
+        "options": {"temperature": 0, "num_predict": 48},
+    }
+
+    async with _DEEP_SEM:
+        try:
+            async with httpx.AsyncClient(timeout=DEEP_TIMEOUT_MS / 1000.0) as client:
+                resp = await client.post(DEEP_URL + "/api/generate", json=body)
+        except httpx.TimeoutException:
+            raise OCRError("DEEP_TIMEOUT", "深度识别超时（%dms）" % DEEP_TIMEOUT_MS)
+        except Exception as exc:
+            raise OCRError("DEEP_UNAVAILABLE", "连不上推理服务：" + type(exc).__name__)
+
+    if resp.status_code != 200:
+        raise OCRError("DEEP_ERROR", "推理服务返回 %d" % resp.status_code)
+
+    data = resp.json()
+    answer = str(data.get("response") or "")
+    amount, currency = _parse_deep_answer(answer)
+    elapsed = int((time.monotonic() - started) * 1000)
+    logger.info("ocr deep bytes=%d model=%s elapsedMs=%d amount=%s", len(raw), DEEP_MODEL, elapsed, amount)
+    return {
+        "model": DEEP_MODEL,
+        "answer": answer.strip()[:400],
+        "amount": amount,
+        "currency": currency,
+        "elapsedMs": elapsed,
+        "loadMs": int((data.get("load_duration") or 0) / 1e6),
+    }
 
 # ── 应用装配 ────────────────────────────────────────────────────────────────
 @asynccontextmanager
