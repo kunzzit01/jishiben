@@ -24,6 +24,17 @@
         "ORG_GRADLE_PROJECT_openiapStore": "google"
       }
     },
+    "staging": {
+      "distribution": "internal",
+      "channel": "staging",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136/staging",
+        "ORG_GRADLE_PROJECT_openiapStore": "google"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production",

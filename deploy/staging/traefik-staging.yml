@@ -1,0 +1,24 @@
+# Traefik 动态配置（未启用）：把 https://<IP>/staging/* 去掉前缀后转给 staging 的 nginx。
+# 启用：复制到 Traefik 的 file provider 目录（与 deploy/traefik-dynamic/*.yml 同一目录）。
+# 回滚：删除复制过去的文件即可，不影响正式路由（正式 router priority=100，这里更高且只匹配 /staging）。
+#
+# 注意：staging 只用于 App（API 基址 https://<IP>/staging）。Web 页面导出时用的是根路径，
+# 放在 /staging 前缀下不能直接当网页使用；网页端模拟测试请在本地起 compose。
+http:
+  routers:
+    jishiben-staging:
+      rule: "Host(`187.127.125.136`) && PathPrefix(`/staging/`)"
+      entryPoints: [websecure]
+      priority: 500
+      tls: {}
+      middlewares: [jishiben-staging-strip]
+      service: jishiben-staging-web
+  middlewares:
+    jishiben-staging-strip:
+      stripPrefix:
+        prefixes: ["/staging"]
+  services:
+    jishiben-staging-web:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8089"

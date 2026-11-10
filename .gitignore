@@ -26,6 +26,7 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+!.env.staging.example
 *.keystore
 *.jks
 
@@ -76,3 +77,4 @@ android/app/google-services.json
 
 # Google Play server credentials (mounted read-only, never committed)
 /deploy/secrets/
+/deploy/staging-data/
