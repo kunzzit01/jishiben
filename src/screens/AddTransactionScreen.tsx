@@ -2544,12 +2544,14 @@ function fxAmountText(raw: string, live: string | null): string {
   }
 
   // ---------- 支出/收入：选分类 ----------
-  if (step === 'category') {
+  // 选类别 = 盖在详情页上的整屏浮层（详情页不卸载）：点「管理类别」不用拆掉整个记一笔页，
+  // 返回时也不用重建它——只挂 / 卸类别页自己，两个方向都明显更轻。
+  const categoryOverlay = step === 'category' ? (
     // 与「财务规划 → 类别分类」同一份页面（components/category/CategoryPage）：
     // 玻璃组卡 + 玻璃返回钮 + 3 列网格 + 可拖 / 可删 / 可增全在共享页里，这里只做参数适配。
     // ⚠ onBack 必须回本屏的表单步骤：类别是同一屏的 step、不是独立路由，
     //   写成 navigation.goBack() 会多弹一层。
-    return (
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: semantic.bg }]}>
       <EdgeBackSwipe onBack={edgeBackHome}>
         <CategoryPage
           selectMode
@@ -2569,11 +2571,12 @@ function fxAmountText(raw: string, live: string | null): string {
           }}
         />
       </EdgeBackSwipe>
-    );
-  }
+    </View>
+  ) : null;
 
   // ---------- 支出/收入：填详情（金额为主视觉的新版排版） ----------
   return (
+    <View style={{ flex: 1 }}>
     <EdgeBackSwipe onBack={edgeBackHome}>
     <SafeAreaView style={styles.container} edges={['top']}
       onTouchStart={() => { Keyboard.dismiss(); }}>
@@ -2945,6 +2948,8 @@ function fxAmountText(raw: string, live: string | null): string {
       {saveFlash && <SaveSuccessFlash />}
     </SafeAreaView>
     </EdgeBackSwipe>
+    {categoryOverlay}
+    </View>
   );
 }
 

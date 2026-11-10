@@ -32,7 +32,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { useApp } from '../../context/AppContext';
 import { useDialog } from '../AppDialog';
@@ -1240,6 +1240,8 @@ export default function CategoryPage({
                     </AppText>
                   )}
                   {sectionIndex < mountedSections ? (
+                  // 分批挂载的网格淡入：图标不再「啪」地蹦出来（UI 线程动画，不占 JS）
+                  <Animated.View entering={FadeIn.duration(280)}>
                   <CategoryGridEditor
                     items={items}
                     columns={columns}
@@ -1254,6 +1256,7 @@ export default function CategoryPage({
                     onPick={selectMode ? handlePickCategory : undefined}
                     onToggleAdd={getEditorCbs(group).onToggleAdd}
                   />
+                  </Animated.View>
                   ) : (
                     /* 还没轮到挂载：按「行数 × 格高」预留精确高度，避免内容长出来时版面跳动 */
                     <View style={{ height: Math.ceil(items.length / columns) * GRID_SLOT_H }} />
