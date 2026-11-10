@@ -85,8 +85,16 @@
         }
       ],
       "expo-splash-screen",
-      ["expo-iap", { "android": { "store": "google" } }],
-      "@react-native-google-signin/google-signin"
+      [
+        "expo-iap",
+        {
+          "android": {
+            "store": "google"
+          }
+        }
+      ],
+      "@react-native-google-signin/google-signin",
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

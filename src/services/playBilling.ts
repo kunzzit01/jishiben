@@ -47,6 +47,8 @@ export async function storePlans(): Promise<StorePlan[]> {
   return result;
 }
 export async function buyStore(plan: StorePlan, account: string): Promise<void> {
+  // obfuscatedAccountId 只能是服务端给的 64 位摘要（不含个人信息）；缺失时不发起购买
+  if (!/^[0-9a-f]{64}$/.test(account)) throw new Error('STORE_UNAVAILABLE');
   const iap = await sdk();
   // Query the account's existing purchases before purchase; avoid duplicate subscriptions.
   const existing = await iap.getAvailablePurchases();
@@ -61,7 +63,9 @@ export async function restoreStore(verify: (token: string) => Promise<void>): Pr
   const purchases = await iap.getAvailablePurchases();
   let restored = 0;
   for (const purchase of purchases) {
-    if (purchase.productId === PRODUCT && purchase.purchaseToken && purchase.purchaseState === 'purchased') {
+    // 待付款也交给服务端记录（不会开通）；付款完成后服务端补查会自动开通并确认
+    if (purchase.productId === PRODUCT && purchase.purchaseToken
+        && (purchase.purchaseState === 'purchased' || purchase.purchaseState === 'pending')) {
       await verify(purchase.purchaseToken); restored++;
     }
   }

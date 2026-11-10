@@ -91,6 +91,8 @@ function syncErrorText(code: string | undefined, tr: (k: string) => string): str
       return tr('sync.errAuth');
     case 'constraint':
       return tr('sync.errConstraint');
+    case 'premium':
+      return tr('sync.errPremium');
     case 'server':
       return tr('sync.errServer');
     case 'schema':

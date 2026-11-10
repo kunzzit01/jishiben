@@ -78,6 +78,8 @@ export default function ProfileScreen({ navigation }: any) {
   // ── 账号与同步 ──
   const { user, authInitializing, syncStatus, lastSyncAt, deleteAccount } = useAuth();
   const premium = usePremium();
+  const ps = premium.status;
+  const showMembership = Boolean(ps && (ps.enrollmentOpen || ps.administrator || ps.active || ps.subscriptions.length > 0));
   // 删除账号：内联确认区（输入密码 / 邮箱）
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteSecret, setDeleteSecret] = useState('');
@@ -415,15 +417,18 @@ export default function ProfileScreen({ navigation }: any) {
             onPress={() => navigation.navigate(ROUTES.FINANCE_PLAN)}
             testID="profile-finance-row"
           />
-          {/* 会员中心同时支持游客和已登录账号。 */}
-          <ListRow
-            leading={<RowIcon icon="star-outline" />}
-            title={tr('profile.subscribe')}
-            trailing={<Badge label={tr(premium.status?.active ? 'membership.active' : 'membership.free')} />}
-            onPress={premium.open}
-            chevron
-            testID="profile-subscribe-row"
-          />
+          {/* 会员中心（游客与账号共用）。入口由管理员开关控制：未开放时只对管理员、
+              已有订阅记录的用户显示（他们仍需查看 / 管理 / 恢复自己的订阅）。 */}
+          {showMembership ? (
+            <ListRow
+              leading={<RowIcon icon="star-outline" />}
+              title={tr('profile.subscribe')}
+              trailing={<Badge label={tr(premium.status?.active ? 'membership.active' : 'membership.free')} />}
+              onPress={premium.open}
+              chevron
+              testID="profile-subscribe-row"
+            />
+          ) : null}
         </ListSection>
 
         {/* 数据分组：清空所有数据。夹在「通用」与「功能」之间 —— 它既不是界面配置也不是能力入口，
