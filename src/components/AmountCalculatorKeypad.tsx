@@ -74,6 +74,8 @@ interface AmountCalculatorKeypadProps {
   selectedDate?: string;
   /** 隐藏日期键（添加资产这类没有日期概念的页面）：完成键随之占满右侧三行 */
   hideDateKey?: boolean;
+  /** 只显示备注行、收起数字键：安卓备注聚焦时用，让备注框单独贴在系统键盘上方（而不是整块计算器被顶上去） */
+  noteOnly?: boolean;
 }
 
 export function AmountCalculatorKeypad({
@@ -94,6 +96,7 @@ export function AmountCalculatorKeypad({
   onNoteBlur,
   selectedDate,
   hideDateKey,
+  noteOnly,
 }: AmountCalculatorKeypadProps) {
   const { semantic, gradients } = useTheme();
   const t = useT();
@@ -178,6 +181,9 @@ export function AmountCalculatorKeypad({
               onChangeText={onNoteChange}
               onFocus={onNoteFocus}
               onBlur={onNoteBlur}
+              // 回车=写完：收起系统键盘（失焦 → 数字键回来）
+              blurOnSubmit
+              returnKeyType="done"
               placeholder={notePlaceholder ?? t('addTx.keypadNotePlaceholder')}
               placeholderTextColor={semantic.textTertiary}
             />
@@ -220,6 +226,7 @@ export function AmountCalculatorKeypad({
         </View>
       )}
 
+      {!noteOnly && (
       <View style={styles.container}>
         {/* 左侧 3 列 × 4 行：数字键 + C + 0 + 小数点，每个键是独立圆角块 */}
         <View style={styles.leftGrid}>
@@ -311,6 +318,7 @@ export function AmountCalculatorKeypad({
           </View>
         </View>
       </View>
+      )}
     </View>
   );
 }

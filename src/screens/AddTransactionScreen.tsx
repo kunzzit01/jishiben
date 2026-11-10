@@ -1183,6 +1183,9 @@ function fxAmountText(raw: string, live: string | null): string {
   // 重叠多少就上抬多少（窗口已缩的机型量出来是 0，不会重复上抬）。
   const footerRef = useRef<View>(null);
   const [androidKbLift, setAndroidKbLift] = useState(0);
+  // 安卓备注聚焦中：只留备注行贴在键盘上方，数字键收起（不整块计算器顶上去）
+  const [noteEditing, setNoteEditing] = useState(false);
+  const noteOnly = Platform.OS === 'android' && noteEditing;
   const androidKbLiftRef = useRef(0);
   const setAndroidLift = (v: number) => {
     androidKbLiftRef.current = v;
@@ -1212,6 +1215,12 @@ function fxAmountText(raw: string, live: string | null): string {
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
       setAndroidLift(0);
+      // 安卓返回键收起键盘时输入框可能仍保持聚焦：主动失焦并还原数字键，避免面板卡在「只剩备注行」
+      if (Platform.OS === 'android' && noteFocusRef.current) {
+        noteFocusRef.current = false;
+        setNoteEditing(false);
+        noteInputRef.current?.blur();
+      }
       // 系统键盘收起 → 自绘面板重新出现（含 Android 返回键收起键盘的情况）
       if (isFocused && !noteFocusRef.current) setAmountKeypadOpen(true);
     });
@@ -2444,8 +2453,9 @@ function fxAmountText(raw: string, live: string | null): string {
               onRemoveReceipt={() => setReceiptUri(null)}
               onPreviewReceipt={() => setReceiptPreviewOpen(true)}
               noteInputRef={noteInputRef}
-              onNoteFocus={() => { noteFocusRef.current = true; }}
-              onNoteBlur={() => { noteFocusRef.current = false; }}
+              onNoteFocus={() => { noteFocusRef.current = true; setNoteEditing(true); }}
+              onNoteBlur={() => { noteFocusRef.current = false; setNoteEditing(false); }}
+              noteOnly={noteOnly}
             />
           </View>
         )}
@@ -2839,8 +2849,9 @@ function fxAmountText(raw: string, live: string | null): string {
             onRemoveReceipt={() => setReceiptUri(null)}
             onPreviewReceipt={() => setReceiptPreviewOpen(true)}
             noteInputRef={noteInputRef}
-            onNoteFocus={() => { noteFocusRef.current = true; }}
-            onNoteBlur={() => { noteFocusRef.current = false; }}
+            onNoteFocus={() => { noteFocusRef.current = true; setNoteEditing(true); }}
+            onNoteBlur={() => { noteFocusRef.current = false; setNoteEditing(false); }}
+              noteOnly={noteOnly}
           />
         </View>
       )}
