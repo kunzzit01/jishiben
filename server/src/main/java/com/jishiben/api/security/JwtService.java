@@ -24,6 +24,8 @@ public class JwtService {
     public static final String CLAIM_ROLE = "rol";
     public static final String CLAIM_VERSION = "ver";
     public static final String CLAIM_TYPE = "typ";
+    /** How the session was established: "pwd" or "google". Refresh keeps the original method. */
+    public static final String CLAIM_AUTH_METHOD = "amr";
     public static final String TYPE_ACCESS = "access";
     public static final String TYPE_REFRESH = "refresh";
 
@@ -67,6 +69,7 @@ public class JwtService {
                 .claim(CLAIM_EMAIL, principal.email())
                 .claim(CLAIM_ROLE, principal.role())
                 .claim(CLAIM_VERSION, principal.tokenVersion())
+                .claim(CLAIM_AUTH_METHOD, principal.authMethod())
                 .claim(CLAIM_TYPE, type)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(ttl)))
@@ -104,7 +107,8 @@ public class JwtService {
         Integer version = claims.get(CLAIM_VERSION, Integer.class);
         String role = claims.get(CLAIM_ROLE, String.class);
         String email = claims.get(CLAIM_EMAIL, String.class);
+        String method = claims.get(CLAIM_AUTH_METHOD, String.class);
         return new AuthPrincipal(id.longValue(), email, role == null ? "USER" : role,
-                version == null ? 0 : version);
+                version == null ? 0 : version, method);
     }
 }

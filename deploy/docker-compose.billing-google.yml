@@ -3,8 +3,7 @@
 services:
   api:
     environment:
-      BILLING_MODE: GOOGLE_PLAY
-      BILLING_SANDBOX_ALLOWED: "false"
+      BILLING_GOOGLE_ENABLED: "true"
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-play.json
     volumes:
       - ./secrets/google-play-service-account.json:/run/secrets/google-play.json:ro

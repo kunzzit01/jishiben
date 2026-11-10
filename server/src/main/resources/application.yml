@@ -75,9 +75,14 @@ management:
 
 app:
   billing:
-    admin-email: ${BILLING_ADMIN_EMAIL:mingsoon249@gmail.com}
-    mode: ${BILLING_MODE:SANDBOX}
+    # staging = 模拟测试环境（独立数据库），production = 正式环境（不允许模拟，启动时校验）
+    environment: ${BILLING_ENV:production}
     sandbox-allowed: ${BILLING_SANDBOX_ALLOWED:false}
+    google-enabled: ${BILLING_GOOGLE_ENABLED:false}
+    # 管理员只认 Google 登录会话；首次用该邮箱 Google 登录时固定其 Google sub
+    admin-email: ${BILLING_ADMIN_EMAIL:}
+    admin-google-sub: ${BILLING_ADMIN_GOOGLE_SUB:}
+    sync-grace-days: ${BILLING_SYNC_GRACE_DAYS:7}
     package-name: ${BILLING_PACKAGE_NAME:com.kylim0103.jizhangapp}
     product-id: ${BILLING_PRODUCT_ID:premium}
     token-encryption-key: ${BILLING_TOKEN_ENCRYPTION_KEY:}

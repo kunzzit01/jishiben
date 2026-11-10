@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,6 +71,42 @@ class AuthServiceGoogleTest {
 
         assertThat(res).isNotNull();
         assertThat(res.user().email()).isEqualTo("new@x.com");
+        // The session is marked as Google-established (billing administration depends on it).
+        org.mockito.ArgumentCaptor<com.jishiben.api.security.AuthPrincipal> issued =
+                org.mockito.ArgumentCaptor.forClass(com.jishiben.api.security.AuthPrincipal.class);
+        verify(jwt).issue(issued.capture());
+        assertThat(issued.getValue().googleSession()).isTrue();
+    }
+
+    @Test
+    void googleSignInNotifiesListenersAndPasswordLoginIsNeverAGoogleSession() {
+        var listener = mock(GoogleSignInListener.class);
+        service = new AuthService(users, encoder, jwt, profiles, verifier, jdbc, java.util.List.of(listener));
+        when(verifier.verify("t")).thenReturn(identity("sub-1", "new@x.com"));
+        when(users.findByGoogleSub("sub-1")).thenReturn(Optional.empty());
+        User saved = mock(User.class);
+        when(saved.getId()).thenReturn(1L);
+        when(saved.getEmail()).thenReturn("new@x.com");
+        when(saved.getPasswordHash()).thenReturn(encoder.encode("secret-pass"));
+        when(users.save(any(User.class))).thenReturn(saved);
+        when(users.findByEmailIgnoreCase("new@x.com")).thenReturn(Optional.empty(), Optional.of(saved));
+        when(jwt.issue(any())).thenReturn(new JwtService.TokenPair("access", "refresh", 86400L));
+        service.loginWithGoogle(new AuthDtos.GoogleLoginRequest("t"));
+        verify(listener).onGoogleSignIn(any(), any());
+
+        // Even with a Google session in the security context, a password login issues a password session.
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        new com.jishiben.api.security.AuthPrincipal(1L, "new@x.com", "USER", 0, "google"), null, java.util.List.of()));
+        try {
+            service.login(new AuthDtos.LoginRequest("new@x.com", "secret-pass"));
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+        org.mockito.ArgumentCaptor<com.jishiben.api.security.AuthPrincipal> issued =
+                org.mockito.ArgumentCaptor.forClass(com.jishiben.api.security.AuthPrincipal.class);
+        verify(jwt, times(2)).issue(issued.capture());
+        assertThat(issued.getAllValues().get(1).googleSession()).isFalse();
     }
 
     @Test

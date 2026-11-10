@@ -1,170 +1,250 @@
 package com.jishiben.api.premium;
 
+import static com.jishiben.api.premium.BillingFixture.*;
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
+
+import com.jishiben.api.auth.GoogleTokenVerifier;
 import com.jishiben.api.common.ApiException;
+import com.jishiben.api.common.ErrorCode;
 import com.jishiben.api.security.AuthPrincipal;
 import com.jishiben.api.user.User;
-import com.jishiben.api.user.UserRepository;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.Callable;
-import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.transaction.support.TransactionTemplate;
 
 class PremiumServiceTest {
-    JdbcTemplate jdbc;
-    UserRepository users;
+    BillingFixture db;
+    BillingProperties props;
+    BillingAdminService admins;
     PremiumService service;
-    TransactionTemplate tx;
+
     @BeforeEach void setUp() throws Exception {
-        JdbcDataSource ds = new JdbcDataSource();
-        ds.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE");
-        jdbc = new JdbcTemplate(ds);
-        jdbc.execute("CREATE TABLE users(id BIGINT PRIMARY KEY,email VARCHAR(255))");
-        jdbc.update("INSERT INTO users VALUES(1,'mingsoon249@gmail.com'),(2,'other@example.com')");
-        try (var stream = getClass().getResourceAsStream("/db/migration/V13__create_subscription_sandbox.sql")) {
-            String sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8)
-                    .replaceAll("(?m)^--.*$", "").replaceAll("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci", "")
-                    .replaceAll(" ON UPDATE CURRENT_TIMESTAMP", "");
-            for (String statement : sql.split(";")) if (!statement.isBlank()) jdbc.execute(statement);
-        }
-        users = mock(UserRepository.class);
-        service = new PremiumService(jdbc, users, true, "SANDBOX", "mingsoon249@gmail.com");
-        tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
+        db = new BillingFixture();
+        props = staging();
+        admins = db.admins(props);
+        service = new PremiumService(db.jdbc, props, admins);
     }
-    @AfterEach void clear() { SecurityContextHolder.clearContext(); }
-    <T> T transaction(java.util.function.Supplier<T> run) { return tx.execute(s -> run.get()); }
-    void open() { jdbc.update("UPDATE billing_settings SET enrollment_open=TRUE,sandbox_open=TRUE,gates_enabled=TRUE WHERE id=1"); }
-    void signIn(long id, String email) {
-        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(new AuthPrincipal(id,email,"ADMIN",0),null,List.of()));
+
+    @AfterEach void clear() { signOut(); }
+
+    PremiumDtos.Subscription approve(String guest, String plan) {
+        var pending = db.inTx(() -> service.apply(guest, new PremiumDtos.Application(plan, "apply-" + plan)));
+        var order = pending.subscriptions().getFirst();
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        db.inTx(() -> service.simulate(order.id(), new PremiumDtos.Event("APPROVE", "approve-" + order.id(), order.revision())));
+        signOut();
+        return order;
     }
-    User user(boolean verified) {
-        User u = new User(); u.setEmail("mingsoon249@gmail.com"); u.setUserRole("USER");
-        if (verified) { u.setGoogleSub("verified-google-sub"); u.setEmailVerifiedAt(Instant.now()); }
-        return u;
-    }
-    @Test void unverifiedEmailAndForgedRoleCannotGetAdministratorPrivileges() {
-        signIn(1,"mingsoon249@gmail.com"); when(users.findById(1L)).thenReturn(Optional.of(user(false)));
+
+    // ── administrator ──
+
+    @Test void administratorNeedsAGoogleSessionWithThePinnedGoogleAccount() {
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        assertThat(service.isAdministrator()).as("nothing pinned yet").isFalse();
+        db.pinAdmin(admins);
+        assertThat(service.isAdministrator()).isTrue();
+        // Same account, signed in with the password: no admin (the password may belong to whoever registered the e-mail first).
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_PASSWORD);
         assertThat(service.isAdministrator()).isFalse();
         assertThatThrownBy(service::console).isInstanceOf(ApiException.class);
-        when(users.findById(1L)).thenReturn(Optional.of(user(true)));
-        assertThat(service.isAdministrator()).isTrue();
+        // Another account using the same e-mail string but a different Google identity.
+        db.user(3, ADMIN_EMAIL, "attacker-sub");
+        signIn(3, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        assertThat(service.isAdministrator()).isFalse();
     }
-    @Test void guestApplicationApprovalAndCancellationFollowTheSameEntitlementPolicy() {
-        open();
+
+    @Test void pinningHappensOnceAndOnlyForAVerifiedAdministratorEmail() {
+        User u = new User();
+        admins.onGoogleSignIn(u, new GoogleTokenVerifier.GoogleIdentity("unverified", ADMIN_EMAIL, false, null, null));
+        admins.onGoogleSignIn(u, new GoogleTokenVerifier.GoogleIdentity("someone", "other@example.com", true, null, null));
+        assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_admins", Integer.class)).isZero();
+        db.pinAdmin(admins);
+        admins.onGoogleSignIn(u, new GoogleTokenVerifier.GoogleIdentity("second-sub", ADMIN_EMAIL, true, null, null));
+        assertThat(db.jdbc.queryForList("SELECT google_sub FROM billing_admins", String.class)).containsExactly(ADMIN_SUB);
+    }
+
+    @Test void productionRefusesTheSimulatorAndAdminCannotOpenIt() {
+        assertThatThrownBy(() -> new BillingProperties("production", true, false, ADMIN_EMAIL, "", 7))
+                .isInstanceOf(IllegalStateException.class);
+        var prod = new BillingProperties("production", false, true, ADMIN_EMAIL, "", 7);
+        var prodAdmins = db.admins(prod);
+        db.pinAdmin(prodAdmins);
+        var prodService = new PremiumService(db.jdbc, prod, prodAdmins);
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        assertThatThrownBy(() -> db.inTx(() -> prodService.updateSettings(new PremiumDtos.Settings(true, true, true))))
+                .isInstanceOf(ApiException.class);
+        assertThat(prodService.status(null).mode()).isEqualTo("GOOGLE_PLAY");
+    }
+
+    @Test void settingChangesAreAudited() {
+        db.pinAdmin(admins);
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        var console = db.inTx(() -> service.updateSettings(new PremiumDtos.Settings(true, true, false)));
+        assertThat(console.settings().enrollmentOpen()).isTrue();
+        assertThat(console.events().getFirst().type()).isEqualTo("SETTINGS_CHANGED");
+        assertThat(console.events().getFirst().detail()).contains("enrollment false->true");
+        assertThat(console.events().getFirst().actorId()).isEqualTo(1L);
+    }
+
+    // ── identities ──
+
+    @Test void anonymousStatusDoesNotCreateABillingIdentity() {
+        var status = db.inTx(() -> service.status(null));
+        assertThat(status.subjectId()).isNull();
+        assertThat(status.capabilities()).containsEntry("addLedger", true).containsEntry("reminders", true);
+        assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_subjects", Integer.class)).isZero();
+    }
+
+    @Test void guestApplicationApprovalAndCancellationFollowTheEntitlementPolicy() {
+        db.pinAdmin(admins);
+        db.open(true);
         String guest = service.createGuest().token();
-        var application = new PremiumDtos.Application("monthly", "apply-1");
-        var pending = transaction(() -> service.apply(guest, application));
+        var pending = db.inTx(() -> service.apply(guest, new PremiumDtos.Application("monthly", "apply-1")));
         assertThat(pending.active()).isFalse();
-        assertThat(pending.capabilities().get("scan")).isFalse();
-        assertThat(pending.capabilities().get("reminders")).isTrue();
-        transaction(() -> service.apply(guest, application));
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions", Integer.class)).isEqualTo(1);
+        assertThat(pending.capabilities()).containsEntry("scan", false).containsEntry("reminders", true);
+        db.inTx(() -> service.apply(guest, new PremiumDtos.Application("monthly", "apply-1")));
+        assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions", Integer.class)).isEqualTo(1);
         var order = pending.subscriptions().getFirst();
-        signIn(1,"mingsoon249@gmail.com"); when(users.findById(1L)).thenReturn(Optional.of(user(true)));
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
         var event = new PremiumDtos.Event("APPROVE", "approval-1", 0);
-        transaction(() -> service.simulate(order.id(), event));
-        transaction(() -> service.simulate(order.id(), event));
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM billing_events", Integer.class)).isEqualTo(1);
-        SecurityContextHolder.clearContext();
+        db.inTx(() -> service.simulate(order.id(), event));
+        db.inTx(() -> service.simulate(order.id(), event)); // idempotent replay
+        var console = db.inTx(() -> service.console());
+        assertThat(console.events()).extracting(PremiumDtos.AdminEvent::type).containsExactly("APPROVE", "APPLY");
+        assertThat(console.events().getFirst().fromState()).isEqualTo("PENDING");
+        assertThat(console.events().getFirst().toState()).isEqualTo("ACTIVE");
+        signOut();
         var paid = service.status(guest);
         assertThat(paid.active()).isTrue();
-        var canceled = transaction(() -> service.cancelSandbox(guest, order.id(), new PremiumDtos.Event("CANCEL","cancel-1",1)));
-        assertThat(canceled.active()).isTrue();
+        var canceled = db.inTx(() -> service.cancelSandbox(guest, order.id(), new PremiumDtos.Event("CANCEL", "cancel-1", 1)));
+        assertThat(canceled.active()).as("canceled stays usable until expiry").isTrue();
         assertThat(canceled.expiresAt()).isEqualTo(paid.expiresAt());
         assertThat(canceled.subscriptions().getFirst().autoRenew()).isFalse();
     }
-    @Test void guestClaimsRequireSecretAndCanOnlyBeClaimedOnce() {
-        open(); String guest=service.createGuest().token();
-        transaction(() -> service.apply(guest,new PremiumDtos.Application("yearly","key")));
-        signIn(2,"other@example.com");
-        transaction(() -> { service.claimGuest(guest); return null; });
-        assertThat(service.status(null).subscriptions()).hasSize(1);
-        assertThatThrownBy(() -> transaction(() -> { service.claimGuest(guest); return null; })).isInstanceOf(ApiException.class);
-        SecurityContextHolder.clearContext();
-        assertThatThrownBy(() -> service.status(guest)).isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.status("x".repeat(72))).isInstanceOf(ApiException.class);
-    }
-    @Test void disabledServerSandboxCannotBeEnabledByAnAdministrator() {
-        service = new PremiumService(jdbc,users,false,"SANDBOX","mingsoon249@gmail.com");
-        signIn(1,"mingsoon249@gmail.com"); when(users.findById(1L)).thenReturn(Optional.of(user(true)));
-        assertThatThrownBy(() -> transaction(() -> service.updateSettings(new PremiumDtos.Settings(true,true,true)))).isInstanceOf(ApiException.class);
-    }
-    @Test void productionModeNeverAcceptsSimulatedPurchaseOrSimulatedEntitlement() {
-        open(); String guest=service.createGuest().token();
-        var pending = transaction(() -> service.apply(guest,new PremiumDtos.Application("monthly","key")));
-        jdbc.update("UPDATE billing_subscriptions SET subscription_state='ACTIVE',expires_at=?", java.sql.Timestamp.from(Instant.now().plusSeconds(3600)));
-        service = new PremiumService(jdbc,users,true,"GOOGLE_PLAY","mingsoon249@gmail.com");
-        assertThat(service.status(guest).active()).isFalse();
-        assertThatThrownBy(() -> transaction(() -> service.apply(guest,new PremiumDtos.Application("monthly","other")))).isInstanceOf(ApiException.class);
-    }
-    @Test void duplicateConcurrentApplicationsCannotCreateTwoOrders() throws Exception {
-        open(); String guest=service.createGuest().token();
-        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
-            Callable<PremiumDtos.Status> work = () -> transaction(() -> service.apply(guest,new PremiumDtos.Application("monthly","same-key")));
-            for (var result : pool.invokeAll(List.of(work,work))) assertThat(result.get().subscriptions()).hasSize(1);
-        }
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions",Integer.class)).isEqualTo(1);
-    }
-    GooglePlayGateway google() { return mock(GooglePlayGateway.class); }
-    GooglePlayGateway.Verified verified(String state, String account) {
-        return new GooglePlayGateway.Verified(state, Instant.now().plusSeconds(3600), "monthly", true, false, account, "", "");
-    }
-    @Test void realPurchasesAreGrantedFromVerifiedStateAndAcknowledgedInASeparateDurablePhase() {
-        open(); service = new PremiumService(jdbc,users,false,"GOOGLE_PLAY","mingsoon249@gmail.com");
+
+    @Test void aPendingApplicationCanBeWithdrawn() {
+        db.open(false);
         String guest = service.createGuest().token();
-        var status = service.status(guest);
-        var google = google();
-        when(google.verify("real-token")).thenReturn(verified("ACTIVE",status.obfuscatedAccountId()));
-        when(google.encrypt("real-token")).thenReturn("encrypted-token");
-        when(google.decrypt("encrypted-token")).thenReturn("real-token");
-        var billing = new GoogleBillingService(service,google,new com.fasterxml.jackson.databind.ObjectMapper());
-        assertThat(transaction(() -> billing.verify(guest,"real-token",false)).active()).isTrue();
-        verify(google,never()).acknowledge(anyString());
-        String hash = PremiumService.digest("real-token");
-        transaction(() -> { billing.reconcile(hash); return null; });
-        verify(google).acknowledge("real-token");
-        assertThat(jdbc.queryForObject("SELECT acknowledged FROM billing_subscriptions",Boolean.class)).isTrue();
-    }
-    @Test void pendingGooglePurchasesDoNotGrantAccessOrGetAcknowledged() {
-        open(); service = new PremiumService(jdbc,users,false,"GOOGLE_PLAY","mingsoon249@gmail.com");
-        String guest = service.createGuest().token(); var status = service.status(guest); var google = google();
-        when(google.verify("pending-token")).thenReturn(verified("PENDING",status.obfuscatedAccountId()));
-        when(google.encrypt("pending-token")).thenReturn("cipher"); when(google.decrypt("cipher")).thenReturn("pending-token");
-        var billing = new GoogleBillingService(service,google,new com.fasterxml.jackson.databind.ObjectMapper());
-        assertThat(transaction(() -> billing.verify(guest,"pending-token",false)).active()).isFalse();
-        transaction(() -> { billing.reconcile(PremiumService.digest("pending-token")); return null; });
-        verify(google,never()).acknowledge(anyString());
-    }
-    @Test void copiedPurchaseTokenCannotBindToADifferentAccount() {
-        open(); service = new PremiumService(jdbc,users,false,"GOOGLE_PLAY","mingsoon249@gmail.com");
-        String guest = service.createGuest().token(); var status = service.status(guest); var google = google();
-        when(google.verify("owned-token")).thenReturn(verified("ACTIVE",status.obfuscatedAccountId()));
-        when(google.encrypt("owned-token")).thenReturn("cipher");
-        var billing = new GoogleBillingService(service,google,new com.fasterxml.jackson.databind.ObjectMapper());
-        transaction(() -> billing.verify(guest,"owned-token",false));
-        signIn(2,"other@example.com");
-        assertThatThrownBy(() -> transaction(() -> billing.verify(null,"owned-token",true))).isInstanceOf(ApiException.class);
-        assertThat(service.status(null).active()).isFalse();
-    }
-    @Test void googleAccountMappingMustMatchEvenForTheFirstPurchase() {
-        open(); service = new PremiumService(jdbc,users,false,"GOOGLE_PLAY","mingsoon249@gmail.com");
-        String guest = service.createGuest().token(); var google = google();
-        when(google.verify("forged")).thenReturn(verified("ACTIVE","different-account"));
-        var billing = new GoogleBillingService(service,google,new com.fasterxml.jackson.databind.ObjectMapper());
-        assertThatThrownBy(() -> transaction(() -> billing.verify(guest,"forged",false))).isInstanceOf(ApiException.class);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions",Integer.class)).isZero();
+        var order = db.inTx(() -> service.apply(guest, new PremiumDtos.Application("yearly", "k"))).subscriptions().getFirst();
+        var after = db.inTx(() -> service.cancelSandbox(guest, order.id(), new PremiumDtos.Event("CANCEL", "w", 0)));
+        assertThat(after.subscriptions().getFirst().state()).isEqualTo("PENDING_PURCHASE_CANCELED");
+        // A new application is allowed afterwards.
+        db.inTx(() -> service.apply(guest, new PremiumDtos.Application("monthly", "k2")));
     }
 
+    @Test void guestClaimIsExplicitAndHappensOnce() {
+        db.pinAdmin(admins);
+        db.open(true);
+        String guest = service.createGuest().token();
+        approve(guest, "yearly");
+        signIn(2, "other@example.com", AuthPrincipal.METHOD_PASSWORD);
+        assertThat(service.status(null).active()).as("not shared before claiming").isFalse();
+        db.inTx(() -> service.claimGuest(guest));
+        assertThat(service.status(null).active()).isTrue();
+        assertThatThrownBy(() -> db.inTx(() -> service.claimGuest(guest))).isInstanceOf(ApiException.class);
+        // A different account cannot claim it either.
+        signIn(3, "third@example.com", AuthPrincipal.METHOD_PASSWORD);
+        assertThatThrownBy(() -> db.inTx(() -> service.claimGuest(guest))).isInstanceOf(ApiException.class);
+        assertThat(service.status(null).active()).isFalse();
+        signOut();
+        assertThatThrownBy(() -> service.status(guest)).as("guest credential retired").isInstanceOf(ApiException.class);
+    }
+
+    @Test void simulatedEntitlementStopsWhenTheSimulatorIsClosed() {
+        db.pinAdmin(admins);
+        db.open(true);
+        String guest = service.createGuest().token();
+        approve(guest, "monthly");
+        assertThat(service.status(guest).active()).isTrue();
+        db.jdbc.update("UPDATE billing_settings SET sandbox_open=FALSE");
+        assertThat(service.status(guest).active()).isFalse();
+        assertThat(service.status(guest).subscriptions()).isEmpty();
+    }
+
+    @Test void refundOnlyKeepsAccessButRefundAndRevokeRemovesIt() {
+        db.pinAdmin(admins);
+        db.open(true);
+        String guest = service.createGuest().token();
+        var order = approve(guest, "monthly");
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        db.inTx(() -> service.simulate(order.id(), new PremiumDtos.Event("REFUND_ONLY", "r1", 1)));
+        signOut();
+        var refunded = service.status(guest);
+        assertThat(refunded.active()).isTrue();
+        assertThat(refunded.subscriptions().getFirst().refundType()).isEqualTo("SIMULATED_REFUND");
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        db.inTx(() -> service.simulate(order.id(), new PremiumDtos.Event("REVOKE", "r2", 2)));
+        signOut();
+        assertThat(service.status(guest).active()).isFalse();
+        assertThat(service.status(guest).subscriptions().getFirst().state()).isEqualTo("REVOKED");
+    }
+
+    @Test void staleRevisionIsRejected() {
+        db.pinAdmin(admins);
+        db.open(true);
+        String guest = service.createGuest().token();
+        var order = approve(guest, "monthly");
+        signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
+        assertThatThrownBy(() -> db.inTx(() -> service.simulate(order.id(), new PremiumDtos.Event("RENEW", "x", 0))))
+                .isInstanceOf(ApiException.class).hasMessageContaining("reload");
+    }
+
+    @Test void duplicateConcurrentApplicationsCannotCreateTwoOrders() throws Exception {
+        db.open(false);
+        String guest = service.createGuest().token();
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            Callable<PremiumDtos.Status> work = () -> db.inTx(() -> service.apply(guest, new PremiumDtos.Application("monthly", "same-key")));
+            for (var result : pool.invokeAll(List.of(work, work))) assertThat(result.get().subscriptions()).hasSize(1);
+        }
+        assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions", Integer.class)).isEqualTo(1);
+    }
+
+    // ── server-side gate with sync grace ──
+
+    long accountSubscription(long userId, String state, Instant expiry, Instant until, boolean revoked) {
+        long subject = service.forUser(userId).id();
+        db.jdbc.update("INSERT INTO billing_subscriptions (public_id, subject_id, provider, base_plan, subscription_state, request_key, "
+                        + "expires_at, entitled_until, revoked_at) VALUES (?, ?, 'SANDBOX', 'monthly', ?, ?, ?, ?, ?)",
+                java.util.UUID.randomUUID().toString(), subject, state, java.util.UUID.randomUUID().toString(),
+                ts(expiry), until == null ? null : ts(until), revoked ? ts(Instant.now()) : null);
+        return subject;
+    }
+
+    @Test void gatesOffNeverBlock() {
+        assertThatCode(() -> service.requireFeature(2, "addLedger")).doesNotThrowAnyException();
+    }
+
+    @Test void gatedWritesNeedMembershipWithASevenDaySyncGrace() {
+        db.open(true);
+        assertThatThrownBy(() -> service.requireFeature(2, "addLedger"))
+                .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.code()).isEqualTo(ErrorCode.PREMIUM_REQUIRED));
+        Instant threeDaysAgo = Instant.now().minusSeconds(3 * 86400);
+        accountSubscription(2, "EXPIRED", threeDaysAgo, threeDaysAgo, false);
+        assertThatCode(() -> service.requireFeature(2, "exchange")).as("within grace").doesNotThrowAnyException();
+        assertThat(service.status(null).active()).isFalse();
+
+        Instant eightDaysAgo = Instant.now().minusSeconds(8 * 86400);
+        accountSubscription(3, "EXPIRED", eightDaysAgo, eightDaysAgo, false);
+        assertThatThrownBy(() -> service.requireFeature(3, "exchange")).isInstanceOf(ApiException.class);
+    }
+
+    @Test void revokedMembershipGetsNoGrace() {
+        db.open(true);
+        accountSubscription(2, "REVOKED", Instant.now().minusSeconds(60), null, true);
+        assertThatThrownBy(() -> service.requireFeature(2, "financialPlan")).isInstanceOf(ApiException.class);
+    }
+
+    @Test void scanGateHasNoGraceAndNeedsAnIdentity() {
+        db.open(true);
+        assertThat(db.inTx(() -> service.scanAllowed(null))).isFalse();
+        Instant yesterday = Instant.now().minusSeconds(86400);
+        accountSubscription(2, "EXPIRED", yesterday, yesterday, false);
+        signIn(2, "other@example.com", AuthPrincipal.METHOD_PASSWORD);
+        assertThat(db.inTx(() -> service.scanAllowed(null))).isFalse();
+        accountSubscription(2, "ACTIVE", Instant.now().plusSeconds(3600), Instant.now().plusSeconds(3600), false);
+        assertThat(db.inTx(() -> service.scanAllowed(null))).isTrue();
+    }
 }

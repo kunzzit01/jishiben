@@ -19,6 +19,11 @@ class GooglePlayGatewayTest {
         assertThat(v.state()).isEqualTo("CANCELED"); assertThat(v.plan()).isEqualTo("monthly");
         assertThat(v.expiry()).isEqualTo(Instant.parse("2026-12-01T00:00:00Z"));
         assertThat(v.autoRenew()).isFalse(); assertThat(v.acknowledged()).isTrue(); assertThat(v.linkedToken()).isEqualTo("old");
+        assertThat(v.testPurchase()).isFalse();
+        assertThat(gateway.parse(json.readTree("""
+            {"subscriptionState":"SUBSCRIPTION_STATE_PENDING","testPurchase":{},
+             "lineItems":[{"productId":"premium","offerDetails":{"basePlanId":"yearly"}}]}
+            """)).testPurchase()).isTrue();
     }
     @Test void outOfAppResubscriptionsRetainTheOriginalIdentity() throws Exception {
         var v = gateway.parse(json.readTree("""
@@ -26,7 +31,7 @@ class GooglePlayGatewayTest {
              "outOfAppPurchaseContext":{"expiredExternalAccountIdentifiers":{"obfuscatedExternalAccountId":"original"},"expiredPurchaseToken":"expired"},
              "lineItems":[{"productId":"premium","expiryTime":"2026-12-01T00:00:00Z","offerDetails":{"basePlanId":"yearly"}}]}
             """));
-        assertThat(v.accountId()).isEqualTo("original"); assertThat(v.expiredToken()).isEqualTo("expired");
+        assertThat(v.accountId()).isEmpty(); assertThat(v.expiredAccountId()).isEqualTo("original"); assertThat(v.expiredToken()).isEqualTo("expired");
     }
     @Test void unexpectedProductsAndUnknownStatesFailClosed() throws Exception {
         assertThatThrownBy(() -> gateway.parse(json.readTree("""

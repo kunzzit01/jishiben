@@ -43,12 +43,17 @@ class PremiumSecurityTest {
         verify(google).notification(eq("Bearer google-oidc-token"),any());
     }
     @Test void scansRemainOpenBeforeEnforcementIsEnabled() throws Exception {
-        when(premium.settings()).thenReturn(new PremiumDtos.Settings(false,false,false));
+        when(premium.scanAllowed(isNull())).thenReturn(true);
         mvc.perform(get("/api/premium/access/scan")).andExpect(status().isNoContent());
     }
-    @Test void gatedScanCannotBeUsedWithoutABillingIdentity() throws Exception {
-        when(premium.settings()).thenReturn(new PremiumDtos.Settings(true,true,true));
-        when(premium.status(isNull())).thenThrow(ApiException.unauthorized("Billing identity required"));
-        mvc.perform(get("/api/premium/access/scan")).andExpect(status().isUnauthorized());
+    @Test void gatedScanIsRefusedWithAStableErrorCode() throws Exception {
+        when(premium.scanAllowed(isNull())).thenReturn(false);
+        mvc.perform(get("/api/premium/access/scan")).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PREMIUM_REQUIRED"));
+    }
+    @Test void anonymousStatusIsPublicButAdministrationIsNot() throws Exception {
+        mvc.perform(get("/api/premium/status")).andExpect(status().isOk());
+        mvc.perform(put("/api/admin/premium/settings").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 }

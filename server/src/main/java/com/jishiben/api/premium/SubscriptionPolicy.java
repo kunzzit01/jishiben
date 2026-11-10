@@ -45,6 +45,9 @@ public final class SubscriptionPolicy {
                 yield new Change("ACTIVE", nextExpiry(plan, expiry), true);
             }
             case "CANCEL" -> {
+                // A pending payment can be withdrawn; an active subscription stops renewing but
+                // stays usable until the paid period ends.
+                if ("PENDING".equals(state)) yield new Change("PENDING_PURCHASE_CANCELED", null, false);
                 require(valid);
                 yield new Change("CANCELED", expiry, false);
             }
@@ -65,7 +68,7 @@ public final class SubscriptionPolicy {
                 yield new Change("ACTIVE", nextExpiry(plan, now), true);
             }
             case "EXPIRE" -> {
-                require(!Set.of("PENDING", "REJECTED", "REVOKED").contains(state));
+                require(!Set.of("PENDING", "REJECTED", "REVOKED", "PENDING_PURCHASE_CANCELED", "EXPIRED").contains(state));
                 yield new Change("EXPIRED", now, false);
             }
             case "REFUND_ONLY" -> {
@@ -73,11 +76,23 @@ public final class SubscriptionPolicy {
                 yield new Change(state, expiry, autoRenew);
             }
             case "REVOKE" -> {
-                require(!"PENDING".equals(state));
+                require(!Set.of("PENDING", "REJECTED", "REVOKED", "PENDING_PURCHASE_CANCELED").contains(state));
                 yield new Change("REVOKED", now, false);
             }
             default -> throw ApiException.validation("Unknown sandbox event");
         };
+    }
+
+    /**
+     * Last instant a row grants membership after a change: its expiry while entitled, "now" when it
+     * just stopped being entitled, unchanged otherwise. Revocation clears it (no sync grace).
+     */
+    public static Instant entitledUntil(String oldState, Instant oldExpiry, Instant oldUntil,
+                                        String newState, Instant newExpiry, boolean revoked, Instant now) {
+        if (revoked) return null;
+        if (entitled(newState, newExpiry, now)) return newExpiry;
+        if (entitled(oldState, oldExpiry, now)) return now;
+        return oldUntil;
     }
 
     private static void require(boolean allowed) {

@@ -26,6 +26,16 @@ class JwtServiceTest {
         assertThat(parsed.email()).isEqualTo("a@b.com");
         assertThat(parsed.tokenVersion()).isEqualTo(3);
         assertThat(pair.expiresInSeconds()).isEqualTo(3600);
+        assertThat(parsed.googleSession()).isFalse();
+    }
+
+    @Test
+    void sessionAuthMethodSurvivesInBothTokens() {
+        JwtService.TokenPair pair = jwt.issue(new AuthPrincipal(7L, "a@b.com", "USER", 0, AuthPrincipal.METHOD_GOOGLE));
+        assertThat(jwt.principal(jwt.parseAccess(pair.accessToken())).googleSession()).isTrue();
+        assertThat(jwt.principal(jwt.parseRefresh(pair.refreshToken())).googleSession()).isTrue();
+        // Unknown values degrade to a password session rather than an elevated one.
+        assertThat(new AuthPrincipal(1L, "x", "USER", 0, "admin").googleSession()).isFalse();
     }
 
     @Test
