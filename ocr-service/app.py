@@ -90,6 +90,11 @@ _STATUS_BY_CODE = {
     "BAD_IMAGE": 400,
     "TOO_LARGE": 413,
     "UNAUTHORIZED": 401,
+    # 深度识别相关：关闭/超时/上游不可用统一用 5xx，让客户端明确"这不是图片问题"
+    "DEEP_DISABLED": 503,
+    "DEEP_TIMEOUT": 504,
+    "DEEP_UNAVAILABLE": 503,
+    "DEEP_ERROR": 502,
     "NOT_FOUND": 404,
     "ENGINE_ERROR": 500,
 }
