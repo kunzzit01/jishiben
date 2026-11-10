@@ -283,7 +283,8 @@ export const zh = {
     selectBothAccounts: '请选择转出和转入账户',
     sameAccount: '转出和转入不能是同一个账户',
     rateInvalid: '请输入正确的汇率',
-    // 汇率来源状态行（兑换 / 跨币种转账）：拉取中 / 实时 / 离线（后端或本地缓存）/ 不可用    scanLimitReached: '云端小票解析次数已达上限',
+    // 汇率来源状态行（兑换 / 跨币种转账）：拉取中 / 实时 / 离线（后端或本地缓存）/ 不可用
+    scanLimitReached: '云端小票解析次数已达上限',
     // 扫票拿不到金额（本地规则与端侧 AI 兜底都没成功）——文案不提 AI，统一引导手填
     scanNoAmount: '没能读出金额，请手动填写',
     addAssetTitle: '添加资产账户',
@@ -711,6 +712,12 @@ export const zh = {
     budgetCategoryModalTitle: '设置「%{name}」额度（%{cur}）',
   },
   report: {
+    yearLabel: '%{y}年',
+    dayLabel: '%{m}月%{d}日',
+    dayCount: '%{n} 天',
+    heroTotalExpense: '共支出',
+    heroTotalIncome: '共收入',
+    clearCustom: '退出自定义范围，回到本月',
     expense: '支出',
     income: '收入',
     totalExpense: '总支出',

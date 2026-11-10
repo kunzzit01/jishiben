@@ -281,7 +281,8 @@ export const en = {
     selectBothAccounts: 'Please select both outgoing and incoming accounts',
     sameAccount: 'Outgoing and incoming accounts cannot be the same',
     rateInvalid: 'Please enter a valid rate',
-    // Rate-source status line (exchange / cross-currency transfer): fetching / live / offline (server or local cache) / unavailable    scanLimitReached: 'Cloud receipt parsing limit reached',
+    // Rate-source status line (exchange / cross-currency transfer): fetching / live / offline (server or local cache) / unavailable
+    scanLimitReached: 'Cloud receipt parsing limit reached',
     // Receipt scan produced no amount (local rules and on-device AI fallback both failed) — keep the copy AI-free
     scanNoAmount: 'Could not read the amount, please fill it in manually',
     addAssetTitle: 'Add Asset Account',
@@ -700,6 +701,12 @@ export const en = {
     budgetCategoryModalTitle: 'Set limit for "%{name}" (%{cur})',
   },
   report: {
+    yearLabel: '%{y}',
+    dayLabel: '%{m}/%{d}',
+    dayCount: '%{n} days',
+    heroTotalExpense: 'Spent',
+    heroTotalIncome: 'Earned',
+    clearCustom: 'Clear custom range and go back to this month',
     expense: 'Expense',
     income: 'Income',
     totalExpense: 'Total Expense',
