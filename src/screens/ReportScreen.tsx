@@ -771,7 +771,7 @@ export default function ReportScreen() {
         </View>
 
         {/* 周期一行（省竖向空间）：左 = ‹ 日期标题 ›（下挂年份 / 天数 / 本期总额小字，点标题开日历），
-            右 = 周 / 月 / 年 三档分段 + 单独的日历钮。选完日期自动成为自定义（三段都不选中、日历钮高亮），
+            右 = 周 / 月 / 年 三档分段 + 单独的日历钮。选完日期自动成为自定义（分段末尾出现选中的「自定义」胶囊），
             自定义时箭头收起、标题换成完整区间；退出自定义 = 直接点周 / 月 / 年 */}
         <View style={[styles.periodRow, { paddingHorizontal: pagePadding }]}>
           <View style={styles.periodLeft}>
@@ -847,21 +847,26 @@ export default function ReportScreen() {
             <SegmentedControl
               compact
               appearance="glass"
-              options={(['week', 'month', 'year'] as const).map((v) => ({
+              // 选完日期成为自定义区间时，末尾多出一段「自定义」并选中（平时只有周 / 月 / 年）；
+              // 点「自定义」本身 = 重新打开日历改范围，点周 / 月 / 年 = 退出自定义
+              options={(rangeType === 'custom'
+                ? (['week', 'month', 'year', 'custom'] as const)
+                : (['week', 'month', 'year'] as const)
+              ).map((v) => ({
                 value: v,
                 label: tr(RANGE_TYPE_KEYS[v]),
               }))}
-              // 自定义区间时三段都不选中（滑块淡出）
               selected={rangeType}
-              onSelect={(v) => selectRangeType(v as Exclude<RangeType, 'custom'>)}
+              onSelect={(v) =>
+                v === 'custom' ? openDatePicker() : selectRangeType(v as Exclude<RangeType, 'custom'>)
+              }
             />
           </View>
-          {/* 日历钮单独一颗：选完日期 → 命中周 / 月 / 年就落到对应档，否则自动成为自定义区间（钮高亮） */}
+          {/* 日历钮单独一颗：选完日期 → 命中周 / 月 / 年就落到对应档，否则自动成为自定义区间（分段里出现「自定义」胶囊） */}
           <GlassRoundButton
             icon="calendar-outline"
             accessibilityLabel={tr('addTx.dateSheetTitle')}
             onPress={openDatePicker}
-            active={rangeType === 'custom'}
             testID="report-calendar"
           />
         </View>
