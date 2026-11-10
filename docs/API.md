@@ -196,25 +196,25 @@
 > **已下线（2026-11-06）**：扫票改为设备端 ML Kit 本地识别 + 本地规则解析，不再需要该接口与任何 AI API key。
 > 请统一使用 §3.16；旧路径现在返回 404。
 
-### 3.15 premium — 订阅与管理员模拟
+### 3.15 premium — 订阅、游客身份与管理员
 
-2026-11-10 加入订阅开发实现，详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)。默认不开放申请／模拟，不锁定既有功能。提醒保持免费。
+详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)。默认不开放申请、不开模拟、不锁定功能；提醒永久免费。
 
 | 方法 | 路径 | 鉴权 | 作用 |
 | --- | --- | --- | --- |
-| POST | `/api/premium/guest` | 公共 | 创建匿名订阅身份，不创建记账账号 |
-| GET | `/api/premium/status` | Bearer 或 X-Premium-Guest-Token | 会员状态、权益、服务端开关 |
-| POST | `/api/premium/claim` | Bearer + 游客凭证证明 | 主动绑定游客订阅 |
-| POST | `/api/premium/sandbox/apply` | Bearer 或游客凭证 | 模拟申请，初始 PENDING |
-| POST | `/api/premium/sandbox/{id}/cancel` | 同一身份 | 取消模拟续费 |
-| POST | `/api/premium/google/verify`、`/restore` | Bearer 或游客凭证 | 真实 Google 验单／恢复 |
-| POST | `/api/premium/google/notifications` | Google OIDC | Pub/Sub 通知，重新查询 Google |
-| GET | `/api/premium/access/scan` | 开启锁定时需有效会员身份 | nginx OCR 鉴权子请求，成功 204 |
-| GET | `/api/admin/premium` | 服务端验证管理员 | 最近订阅与设置 |
-| PUT | `/api/admin/premium/settings` | 同上 | 申请、模拟和功能锁定开关 |
-| POST | `/api/admin/premium/{id}/events` | 同上 | 幂等模拟事件，校验 revision |
+| POST | `/api/premium/guest` | 公共（nginx 限流） | 按需创建游客订阅身份，返回一次性展示的凭证 |
+| GET | `/api/premium/status` | 可匿名；Bearer 或 `X-Premium-Guest-Token` | 会员状态、权益、开关；匿名不创建身份 |
+| POST | `/api/premium/claim` | Bearer + 游客凭证 | 用户主动把本机游客会员绑定到当前账号 |
+| POST | `/api/premium/sandbox/apply` | Bearer 或游客凭证 | 模拟申请（仅 staging），初始 PENDING |
+| POST | `/api/premium/sandbox/{id}/cancel` | 订单所属身份 | 撤回待付款 / 取消模拟续费 |
+| POST | `/api/premium/google/verify`、`/restore` | Bearer 或游客凭证 | Google 验单 / 恢复；body `{purchaseToken, claim}` |
+| POST | `/api/premium/google/notifications` | Google OIDC（不走 App JWT） | Pub/Sub RTDN，触发重新查询 Google |
+| GET | `/api/premium/access/scan` | 同 status | nginx OCR 鉴权子请求：204 允许，403 `PREMIUM_REQUIRED` |
+| GET | `/api/admin/premium` | Google 登录会话 + 固定 sub | 设置、最近订阅、审计记录、告警 |
+| PUT | `/api/admin/premium/settings` | 同上 | 订阅入口、模拟、功能锁定开关 |
+| POST | `/api/admin/premium/{id}/events` | 同上 | 幂等模拟事件，校验 revision（只作用于模拟订单） |
 
-旧 `/api/premium/purchase` 不接受客户端自报开通会员，返回 400 指引使用配置的 provider。正式购买只认服务端验证后的状态。`FORBIDDEN` 的 `PREMIUM_REQUIRED:功能名` 表示付费操作被限制。
+错误码：`PREMIUM_REQUIRED`（403，需要会员；同步时记录留在本机）、`BILLING_OWNED_BY_OTHER`（409，购买属于其他账号）、`BILLING_CLAIM_REQUIRED`（409，需用户确认后绑定游客购买）。旧 `/api/premium/purchase` 返回 400：客户端自报永远不会开通会员。
 
 ---
 

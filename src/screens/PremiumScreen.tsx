@@ -178,7 +178,7 @@ function PremiumScreen() {
         <Card><View style={{ gap: spacing.md }}>
           <AppText variant="title2">{t(s.active ? 'membership.active' : 'membership.free')}</AppText>
           {s.expiresAt && s.active ? <AppText variant="footnote" color={semantic.textSecondary}>{t('membership.expiry')} · {date(s.expiresAt)}</AppText> : null}
-          <AppText variant="subhead">{t(sandbox ? 'membership.sandboxHint' : google ? 'membership.realHint' : 'membership.unavailable')}</AppText>
+          {!sandbox ? <AppText variant="subhead">{t(google ? 'membership.realHint' : 'membership.unavailable')}</AppText> : null}
           {!user ? <AppText variant="footnote" color={semantic.textSecondary}>{t(sandbox ? 'membership.guestHintSandbox' : 'membership.guestHint')}</AppText> : null}
         </View></Card>
         <Card><View style={{ gap: spacing.md }}>
