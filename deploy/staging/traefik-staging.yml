@@ -2,12 +2,12 @@
 # 启用：复制到 Traefik 的 file provider 目录（与 deploy/traefik-dynamic/*.yml 同一目录）。
 # 回滚：删除复制过去的文件即可，不影响正式路由（正式 router priority=100，这里更高且只匹配 /staging）。
 #
-# 注意：staging 只用于 App（API 基址 https://<IP>/staging）。Web 页面导出时用的是根路径，
+# 注意：只转发 /staging/api/ 与 /staging/ocr/。Web 页面导出用的是根路径，放在 /staging 下会去请求正式 API，所以不提供网页。
 # 放在 /staging 前缀下不能直接当网页使用；网页端模拟测试请在本地起 compose。
 http:
   routers:
     jishiben-staging:
-      rule: "Host(`187.127.125.136`) && PathPrefix(`/staging/`)"
+      rule: "Host(`187.127.125.136`) && (PathPrefix(`/staging/api/`) || PathPrefix(`/staging/ocr/`))"
       entryPoints: [websecure]
       priority: 500
       tls: {}
