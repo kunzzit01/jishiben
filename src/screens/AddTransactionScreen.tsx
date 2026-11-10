@@ -2422,6 +2422,7 @@ function fxAmountText(raw: string, live: string | null): string {
               onRemoveReceipt={() => setReceiptUri(null)}
               onPreviewReceipt={() => setReceiptPreviewOpen(true)}
               noteInputRef={noteInputRef}
+              onNoteFocus={() => { noteFocusRef.current = true; }}
               onNoteBlur={() => { noteFocusRef.current = false; }}
             />
           </View>
@@ -2815,6 +2816,7 @@ function fxAmountText(raw: string, live: string | null): string {
             onRemoveReceipt={() => setReceiptUri(null)}
             onPreviewReceipt={() => setReceiptPreviewOpen(true)}
             noteInputRef={noteInputRef}
+            onNoteFocus={() => { noteFocusRef.current = true; }}
             onNoteBlur={() => { noteFocusRef.current = false; }}
           />
         </View>
