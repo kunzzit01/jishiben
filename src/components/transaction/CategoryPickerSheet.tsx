@@ -3,13 +3,14 @@
 //
 // 职责
 // - 记一笔页的类别网格只铺「本次选过 + 最近用过 + 补齐」的快捷格；这一个抽屉负责完整列表：
-//   按大组分节（ListSection，组名 = 大组标签）+ 每行一个类别（ListRow，行首 44 图标方块）；
+//   按大组分节（ListSection，组名 = 大组标签）+ 组内网格（立体球 + 名称），列数随可用宽度伸缩（3 或 4 列）；
 // - 点某个类别 = 走父层同一套 handlePickCategory（写回 + 最近用过 / 固定格持久化 + 收起）；
 // - 组内「新增 / 拖动排序 / 删除」这些管理动作留在原「选择类别页」（T15 换成二级页 ScreenHeader），
 //   抽屉底部给一个「管理类别」入口 —— 既有功能不删除，只是入口收敛到一处。
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { InteractionManager, ScrollView, StyleSheet, View } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/useTheme';
 import { useT } from '../../i18n/LanguageContext';
@@ -17,12 +18,20 @@ import { getCategoryLabel, getGroupLabel } from '../../i18n/categories';
 import type { Category } from '../../types';
 import BottomSheet from '../ui/BottomSheet';
 import Button from '../ui/Button';
-import ListRow from '../ui/ListRow';
+import AppText from '../ui/AppText';
+import PressableScale from '../PressableScale';
 import IconCircle from '../ui/IconCircle';
 import ListSection from '../ui/ListSection';
 import type { Layout, Radius, SemanticColors, Spacing } from '../../theme/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
+
+/** 一格最小宽：放得下 44 球 + 4 个汉字标签。可用宽 ÷ 它 = 列数，夹在 3~4 列之间 */
+const CELL_MIN_WIDTH = 72;
+const MIN_COLUMNS = 3;
+const MAX_COLUMNS = 4;
+/** 网格在卡片里的左右内衬（格子之间不再额外留缝，间距由格宽自然分出） */
+const GRID_PAD_X = 8;
 
 /** 一个大组分节（与记一笔页的 groupedExpenseSections 同形，直接透传，不在抽屉里重复分组逻辑） */
 export interface CategorySection {
@@ -82,6 +91,16 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderedCount, visibleSections.length]);
 
+  // 网格可用宽（实测，卡片内衬内侧）：决定 3 列还是 4 列，格宽 = 可用宽 ÷ 列数（不用百分比 —— RN Web 百分比宽要落在 flex 直接子项上才可靠）
+  const [gridW, setGridW] = useState(0);
+  const onGridLayout = (e: LayoutChangeEvent) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w > 0 && Math.abs(w - gridW) > 1) setGridW(w);
+  };
+  const innerW = Math.max(0, gridW - GRID_PAD_X * 2);
+  const columns = innerW > 0 ? Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.floor(innerW / CELL_MIN_WIDTH))) : MAX_COLUMNS;
+  const cellW = innerW > 0 ? Math.floor(innerW / columns) : undefined;
+
   const shownSections = useMemo(
     () => visibleSections.slice(0, Math.max(2, renderedCount)),
     [visibleSections, renderedCount]
@@ -97,21 +116,39 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
       >
         {shownSections.map(({ group, items }) => (
           <ListSection key={group} title={getGroupLabel(group, t)} style={styles.group}>
-            {items.map((c) => (
-              <ListRow
-                key={c.id}
-                // 与记一笔类别格 / 设置页 / 类别管理页同一套立体球（IconCircle 默认形态）。
-                // 原来是 20dp 扁平图标压在 12% 淡色方底上 —— 上一代写法，与球体不是一套语言。
-                leading={<IconCircle size={36} color={c.color} icon={(c.icon as IconName) ?? 'pricetag-outline'} />}
-                title={getCategoryLabel(c, t)}
-                onPress={() => onPickCategory(c.id)}
-                trailing={
-                  selectedId === c.id ? (
-                    <Ionicons name="checkmark-circle" size={20} color={semantic.accent} />
-                  ) : undefined
-                }
-              />
-            ))}
+            <View style={styles.grid} onLayout={onGridLayout}>
+              {items.map((c) => {
+                const selected = selectedId === c.id;
+                return (
+                  <PressableScale
+                    key={c.id}
+                    onPress={() => onPickCategory(c.id)}
+                    containerStyle={cellW ? { width: cellW } : styles.cellFallback}
+                    style={styles.cell}
+                    accessibilityRole="button"
+                    accessibilityLabel={getCategoryLabel(c, t)}
+                    accessibilityState={{ selected }}
+                  >
+                    {/* 与记一笔类别格同一套立体球 + 选中态（球体浮起 + 外圈），不再用行尾打勾 */}
+                    <IconCircle
+                      size={44}
+                      color={c.color}
+                      icon={(c.icon as IconName) ?? 'pricetag-outline'}
+                      selected={selected}
+                    />
+                    <AppText
+                      variant="caption"
+                      weight={selected ? '600' : '400'}
+                      color={selected ? semantic.accent : semantic.textPrimary}
+                      numberOfLines={2}
+                      style={styles.cellLabel}
+                    >
+                      {getCategoryLabel(c, t)}
+                    </AppText>
+                  </PressableScale>
+                );
+              })}
+            </View>
           </ListSection>
         ))}
       </ScrollView>
@@ -135,6 +172,12 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, radius: Radius, 
     list: { flexShrink: 1 },
     listContent: { paddingHorizontal: layout.page, paddingTop: spacing.sm, paddingBottom: spacing.xs },
     group: { marginBottom: spacing.md },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: GRID_PAD_X, paddingVertical: spacing.sm },
+    // 宽度未测得前的兜底（首帧）：按 4 列估，测得后立即换成实测格宽
+    cellFallback: { width: '25%' },
+    // 顶部留 8：选中态外圈向外溢出 8，要有地方露出来
+    cell: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: 2 },
+    cellLabel: { marginTop: spacing.xs, textAlign: 'center' },
     footer: { paddingHorizontal: layout.page, paddingTop: spacing.sm },
   });
 }
