@@ -22,6 +22,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useTheme } from '../theme/useTheme';
 import { Radius, SemanticColors } from '../theme/theme';
@@ -30,8 +31,11 @@ import AppText from './ui/AppText';
 import GlassView from './ui/GlassView';
 
 export interface SegmentOption {
+  /** 显示文字；给了 icon 时只作读屏名（不显示） */
   label: string;
   value: string;
+  /** 只显示图标的段（如统计页「自定义」= 日历图标） */
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
 }
 
 interface Props {
@@ -172,14 +176,18 @@ export default function SegmentedControl({
                 TouchableOpacity，表现为「点字没反应、点字外围才行」（用户 2026-10-30 反馈）。
                 加 wrapper View 是因为 RNW 的 AppText 不保证把该 prop 透传到 DOM。 */}
             <View pointerEvents="none">
-              <AppText
-                variant="footnote"
-                weight={isActive ? '600' : '400'}
-                color={isActive ? activeTextColor : idleTextColor}
-                numberOfLines={1}
-              >
-                {opt.label}
-              </AppText>
+              {opt.icon ? (
+                <Ionicons name={opt.icon} size={16} color={isActive ? activeTextColor : idleTextColor} />
+              ) : (
+                <AppText
+                  variant="footnote"
+                  weight={isActive ? '600' : '400'}
+                  color={isActive ? activeTextColor : idleTextColor}
+                  numberOfLines={1}
+                >
+                  {opt.label}
+                </AppText>
+              )}
             </View>
           </TouchableOpacity>
         );

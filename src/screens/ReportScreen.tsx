@@ -821,6 +821,8 @@ export default function ReportScreen() {
               options={(['week', 'month', 'year', 'custom'] as const).map((v) => ({
                 value: v,
                 label: tr(RANGE_TYPE_KEYS[v]),
+                // 自定义 = 日历图标（读屏仍念「自定义」）
+                icon: v === 'custom' ? ('calendar-outline' as const) : undefined,
               }))}
               selected={rangeType}
               onSelect={(v) => (v === 'custom' ? openDatePicker() : selectRangeType(v as Exclude<RangeType, 'custom'>))}
