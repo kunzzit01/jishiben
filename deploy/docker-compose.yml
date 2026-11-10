@@ -176,6 +176,9 @@ services:
     # 仅内网可达：只写 expose，不写 ports（宿主机无法直连 8090）
     expose:
       - "8090"
+    # 让容器能访问宿主机上的 Ollama（深度识别用；Linux 必须给 host-gateway）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 单 worker 持有一份 onnx 模型 + 图片解码缓冲；Swarm 下改用 deploy.resources.limits
     mem_limit: 2g
     networks:
