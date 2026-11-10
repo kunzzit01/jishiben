@@ -91,11 +91,10 @@ export default function SegmentedControl({
     );
   };
 
-  const activeIndex = Math.max(
-    0,
-    options.findIndex((o) => o.value === selected)
-  );
-  const active = options[activeIndex];
+  // selected 不在 options 里（如统计页选了自定义区间）= 没有选中段：滑块淡出，而不是错指第一段
+  const matchIndex = options.findIndex((o) => o.value === selected);
+  const hasMatch = matchIndex >= 0;
+  const active = hasMatch ? options[matchIndex] : undefined;
   const activeFrame = active ? segFrames[active.value] : undefined;
 
   const thumbX = useSharedValue(0);
@@ -104,6 +103,12 @@ export default function SegmentedControl({
   const positioned = useRef(false);
 
   useEffect(() => {
+    if (!hasMatch) {
+      // 没有选中段：淡出；下次重新选中时当作首帧直接落位再淡入（不从旧位置滑过去）
+      positioned.current = false;
+      thumbOpacity.value = withTiming(0, { duration: motion.timing.fade, easing: motion.easing.out });
+      return;
+    }
     if (!activeFrame) return;
     // 首帧（几何未测得）：不播动画直接落位，然后淡入 —— 避免滑块从 0 位滑过去盖住第一段
     if (!positioned.current) {
@@ -116,7 +121,7 @@ export default function SegmentedControl({
     thumbX.value = withSpring(activeFrame.x, motion.spring.default);
     thumbWidth.value = withSpring(activeFrame.width, motion.spring.default);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFrame?.x, activeFrame?.width]);
+  }, [hasMatch, activeFrame?.x, activeFrame?.width]);
 
   const thumbStyle = useAnimatedStyle(() => ({
     width: thumbWidth.value,

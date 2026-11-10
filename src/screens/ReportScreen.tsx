@@ -165,15 +165,44 @@ function GlassRoundButton({
   accessibilityLabel,
   onPress,
   disabled,
+  active,
   testID,
 }: {
   icon: IconName;
   accessibilityLabel: string;
   onPress: () => void;
   disabled?: boolean;
+  /** 选中态（统计页日历钮：当前看的是自定义区间）：accent 实底 + 白图标 */
+  active?: boolean;
   testID?: string;
 }) {
   const { semantic, radius } = useTheme();
+  if (active) {
+    return (
+      <PressableScale
+        onPress={onPress}
+        activeScale={0.94}
+        hitSlop={0}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ selected: true }}
+        testID={testID}
+      >
+        <View
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: radius.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: semantic.accent,
+          }}
+        >
+          <Ionicons name={icon} size={16} color={semantic.onAccent} />
+        </View>
+      </PressableScale>
+    );
+  }
   return (
     <PressableScale
       onPress={onPress}
@@ -742,8 +771,8 @@ export default function ReportScreen() {
         </View>
 
         {/* 周期一行（省竖向空间）：左 = ‹ 日期标题 ›（下挂年份 / 天数 / 本期总额小字，点标题开日历），
-            右 = 周 / 月 / 年 / 自定义 四档分段。自定义时箭头收起，标题换成完整区间；
-            退出自定义 = 直接点周 / 月 / 年；再点「自定义」= 重新选范围 */}
+            右 = 周 / 月 / 年 三档分段 + 单独的日历钮。选完日期自动成为自定义（三段都不选中、日历钮高亮），
+            自定义时箭头收起、标题换成完整区间；退出自定义 = 直接点周 / 月 / 年 */}
         <View style={[styles.periodRow, { paddingHorizontal: pagePadding }]}>
           <View style={styles.periodLeft}>
             {rangeType !== 'custom' && (
@@ -818,16 +847,23 @@ export default function ReportScreen() {
             <SegmentedControl
               compact
               appearance="glass"
-              options={(['week', 'month', 'year', 'custom'] as const).map((v) => ({
+              options={(['week', 'month', 'year'] as const).map((v) => ({
                 value: v,
                 label: tr(RANGE_TYPE_KEYS[v]),
-                // 自定义 = 日历图标（读屏仍念「自定义」）
-                icon: v === 'custom' ? ('calendar-outline' as const) : undefined,
               }))}
+              // 自定义区间时三段都不选中（滑块淡出）
               selected={rangeType}
-              onSelect={(v) => (v === 'custom' ? openDatePicker() : selectRangeType(v as Exclude<RangeType, 'custom'>))}
+              onSelect={(v) => selectRangeType(v as Exclude<RangeType, 'custom'>)}
             />
           </View>
+          {/* 日历钮单独一颗：选完日期 → 命中周 / 月 / 年就落到对应档，否则自动成为自定义区间（钮高亮） */}
+          <GlassRoundButton
+            icon="calendar-outline"
+            accessibilityLabel={tr('addTx.dateSheetTitle')}
+            onPress={openDatePicker}
+            active={rangeType === 'custom'}
+            testID="report-calendar"
+          />
         </View>
 
         {/* 多币种切换：这段时间里出现不止一种货币时才显示（排序与行为照旧，只换成标准 Chip） */}
