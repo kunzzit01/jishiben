@@ -56,6 +56,21 @@ class PremiumServiceTest {
         assertThat(service.isAdministrator()).isFalse();
     }
 
+    @Test void databaseGrantedAdminRoleWorksWithPasswordSessionAndIsReadFromTheDatabase() {
+        User owner = new User();
+        owner.setEmail(ADMIN_EMAIL);
+        owner.setUserRole("ADMIN");
+        org.mockito.Mockito.when(db.users.findById(2L)).thenReturn(java.util.Optional.of(owner));
+        signIn(2, ADMIN_EMAIL, AuthPrincipal.METHOD_PASSWORD);
+        assertThat(service.isAdministrator()).isTrue();
+        // A forged role claim in the token alone does not help: the database says USER.
+        db.user(3, "third@example.com", null);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        new AuthPrincipal(3, "third@example.com", "ADMIN", 0, AuthPrincipal.METHOD_PASSWORD), null, List.of()));
+        assertThat(service.isAdministrator()).isFalse();
+    }
+
     @Test void pinningHappensOnceAndOnlyForAVerifiedAdministratorEmail() {
         User u = new User();
         admins.onGoogleSignIn(u, new GoogleTokenVerifier.GoogleIdentity("unverified", ADMIN_EMAIL, false, null, null));

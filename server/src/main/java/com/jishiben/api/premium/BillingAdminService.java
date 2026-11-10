@@ -46,9 +46,14 @@ public class BillingAdminService implements GoogleSignInListener {
 
     public boolean isAdministrator() {
         AuthPrincipal principal = principal();
-        if (principal == null || !principal.googleSession()) return false;
+        if (principal == null) return false;
         User user = users.findById(principal.id()).orElse(null);
-        if (user == null || user.getGoogleSub() == null) return false;
+        if (user == null) return false;
+        // Explicit grant by the operator in the database (users.user_role='ADMIN'): any session of
+        // that account, including password logins (owner decision 2026-11-10). The role is read from
+        // the database on every call, never from the token, so revoking it takes effect immediately.
+        if ("ADMIN".equals(user.getUserRole())) return true;
+        if (!principal.googleSession() || user.getGoogleSub() == null) return false;
         String sub = user.getGoogleSub();
         if (!props.adminGoogleSub().isBlank()) return props.adminGoogleSub().equals(sub);
         Integer match = jdbc.queryForObject(
