@@ -611,7 +611,7 @@ export default function AddTransactionScreen({ navigation, route }: any) {
     // 用 keyboardDidShow 事件给的真实高度，不能套用面板的常量——两个高度并不一样。
     // 自绘面板整体（含 iOS 键盘上抬量）都算遮挡；系统键盘用事件给的真实高度。
     const occludedHeight = amountKeypadOpen
-      ? keypadPanelH + keypadBottomPad + keypadKeyboardLift + androidKbLift
+      ? keypadPanelH + keypadBottomPad + keypadKeyboardLift
       : keyboardVisible
         ? keyboardHeight
         : 0;
@@ -1186,6 +1186,11 @@ function fxAmountText(raw: string, live: string | null): string {
   // 安卓备注聚焦中：只留备注行贴在键盘上方，数字键收起（不整块计算器顶上去）
   const [noteEditing, setNoteEditing] = useState(false);
   const noteOnly = Platform.OS === 'android' && noteEditing;
+  // 备注单独贴键盘：面板脱离文档流（类别网格高度不变、不跟着抖），用 translateY 上抬（不占布局），
+  // 底部只留 6 的小边（键盘本来就盖住了导航条区域，不再垫导航条高度）
+  const noteOnlyFooterStyle = noteOnly
+    ? { position: 'absolute' as const, left: 0, right: 0, bottom: 0, paddingBottom: 6, marginBottom: 0, transform: [{ translateY: -androidKbLift }] }
+    : null;
   const androidKbLiftRef = useRef(0);
   const setAndroidLift = (v: number) => {
     androidKbLiftRef.current = v;
@@ -2433,7 +2438,7 @@ function fxAmountText(raw: string, live: string | null): string {
             底部留白收紧(insets-32)：edge-to-edge 下根视图已延伸到导航条后面，
             再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
         {amountKeypadOpen && (
-          <View ref={footerRef} style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}>
+          <View ref={footerRef} style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }, noteOnlyFooterStyle]}>
             <AmountCalculatorKeypad
               onPressKey={handleExprKey}
               onPressToday={() => setDatePickerOpen(true)}
@@ -2833,7 +2838,7 @@ function fxAmountText(raw: string, live: string | null): string {
       {amountKeypadOpen && (
         <View
           ref={footerRef}
-          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}
+          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift }, noteOnlyFooterStyle]}
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => setAmountCursor(amountExpr.pressKeyAt(key, amountCursor))}
