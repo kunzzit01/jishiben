@@ -5,7 +5,7 @@
 //   深色模式三档、财务规划、帮助反馈、关于的跳转全部照旧；同步文案计算也没动）：
 //   P1 页头换成设计系统的 <ScreenHeader variant="compact">（玻璃返回键 + 居中标题 + 右侧动作）
 //   P2 分组统一 ListSection（surface 卡 + 组内发丝线）+ ListRow 行规格
-//   P3 订阅行保持「不可点 + 即将推出」的后端桩语义，只换 ListRow 视觉
+//   P3 订阅行进入会员中心，状态以服务端为准
 //   P4 页脚版本号 caption 档、居中
 //
 // 只有两行仍在页内自建（不是漏迁移，原因写在各组件注释里）：
@@ -35,6 +35,7 @@ import type { Layout, Radius, SemanticColors, Spacing } from '../theme/theme';
 import PinSheet, { PinSheetMode } from '../components/PinSheet';
 import { useDialog } from '../components/AppDialog';
 import { useAuth } from '../context/AuthContext';
+import { usePremium } from '../context/PremiumContext';
 import { useAppLock } from '../context/AppLockContext';
 import { useApp } from '../context/AppContext';
 import { useLanguage, LangMode } from '../i18n/LanguageContext';
@@ -43,6 +44,7 @@ import { hapticSelection, hapticSuccess } from '../utils/haptics';
 import {
   AppText,
   Badge,
+  Button,
   Card,
   GlassView,
   HeroGradient,
@@ -75,6 +77,9 @@ export default function ProfileScreen({ navigation }: any) {
   const styles = useMemo(() => makeStyles(semantic, spacing, layout), [semantic, spacing, layout]);
   // ── 账号与同步 ──
   const { user, authInitializing, syncStatus, lastSyncAt, deleteAccount } = useAuth();
+  const premium = usePremium();
+  const ps = premium.status;
+  const showMembership = Boolean(ps && (ps.enrollmentOpen || ps.administrator || ps.active || ps.subscriptions.length > 0));
   // 删除账号：内联确认区（输入密码 / 邮箱）
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteSecret, setDeleteSecret] = useState('');
@@ -314,6 +319,8 @@ export default function ProfileScreen({ navigation }: any) {
             <AppText variant="caption" color={semantic.textSecondary}>
               {user.hasPassword ? tr('profile.deleteAskPassword') : tr('profile.deleteAskEmail')}
             </AppText>
+            <AppText variant="footnote" color={semantic.textSecondary}>{tr('membership.deleteNotice')}</AppText>
+            <Button title={tr('membership.title')} variant="ghost" onPress={premium.open} />
             <TextInput
               style={[styles.deleteInput, { backgroundColor: semantic.accentSoft, color: semantic.textPrimary }]}
               value={deleteSecret}
@@ -410,14 +417,18 @@ export default function ProfileScreen({ navigation }: any) {
             onPress={() => navigation.navigate(ROUTES.FINANCE_PLAN)}
             testID="profile-finance-row"
           />
-          {/* 订阅（Premium）：后端还是桩 → 行不可点 + 「即将推出」徽章（语义未变，只换视觉） */}
-          <ListRow
-            leading={<RowIcon icon="star-outline" />}
-            title={tr('profile.subscribe')}
-            trailing={<Badge label={tr('profile.subscribeSub')} />}
-            disabled
-            testID="profile-subscribe-row"
-          />
+          {/* 会员中心（游客与账号共用）。入口由管理员开关控制：未开放时只对管理员、
+              已有订阅记录的用户显示（他们仍需查看 / 管理 / 恢复自己的订阅）。 */}
+          {showMembership ? (
+            <ListRow
+              leading={<RowIcon icon="star-outline" />}
+              title={tr('profile.subscribe')}
+              trailing={<Badge label={tr(premium.status?.active ? 'membership.active' : 'membership.free')} />}
+              onPress={premium.open}
+              chevron
+              testID="profile-subscribe-row"
+            />
+          ) : null}
         </ListSection>
 
         {/* 数据分组：清空所有数据。夹在「通用」与「功能」之间 —— 它既不是界面配置也不是能力入口，

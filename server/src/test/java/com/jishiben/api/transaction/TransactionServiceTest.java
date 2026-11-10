@@ -42,7 +42,7 @@ class TransactionServiceTest {
     private ProfileService profiles;
 
     private TransactionService service() {
-        return new TransactionService(transactions, assets, references, profiles);
+        return new TransactionService(transactions, assets, references, profiles, org.mockito.Mockito.mock(com.jishiben.api.premium.PremiumService.class));
     }
 
     @Test

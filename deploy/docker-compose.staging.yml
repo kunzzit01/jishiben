@@ -1,0 +1,139 @@
+# 订阅模拟测试环境（staging）：与正式环境同一台 VPS，但完全隔离
+#   - 独立 compose project、独立网络、独立 MySQL 数据卷 → 模拟订单永远不会进正式库
+#   - BILLING_ENV=staging：只有这里允许「开发模拟，不会扣款」；正式 compose 强制 production
+#   - 只在 127.0.0.1:${STAGING_HTTP_PORT} 发布 web(nginx)，外部经 Traefik 的 /staging 前缀进入
+#     （deploy/staging/traefik-staging.yml，需手动复制到 Traefik 动态配置目录才生效）
+#
+# 用法（仓库根目录）：
+#   cp deploy/.env.staging.example deploy/.env.staging   # 填写 staging 自己的口令，不提交
+#   docker compose -p jishiben-staging --env-file deploy/.env.staging -f deploy/docker-compose.staging.yml up -d --build
+#
+# App 端：eas build --profile staging（API 基址 https://<IP>/staging），见 eas.json。
+# 资源：API 限 768m，MySQL 限 512m；OCR 服务默认不启动（--profile ocr 才起），节省正式环境的内存。
+name: jishiben-staging
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: jishiben-staging-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --max-connections=50
+      - --innodb-buffer-pool-size=128M
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME is required}
+      MYSQL_USER: ${DB_USER:?DB_USER is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - staging-mysql-data:/var/lib/mysql
+    networks:
+      - staging-net
+    mem_limit: 512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysql --protocol=TCP -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -D "$$MYSQL_DATABASE" -e 'SELECT 1' >/dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    image: jishiben/api:staging
+    container_name: jishiben-staging-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/${DB_NAME}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&rewriteBatchedStatements=true"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_POOL_MAX_SIZE: 5
+      GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
+      BILLING_ENV: staging
+      BILLING_SANDBOX_ALLOWED: "true"
+      # 许可证测试账号做真实 Google Play 测试时才打开（同时需要服务账号与加密密钥）
+      BILLING_GOOGLE_ENABLED: ${BILLING_GOOGLE_ENABLED:-false}
+      BILLING_ADMIN_EMAIL: ${BILLING_ADMIN_EMAIL:-}
+      BILLING_ADMIN_GOOGLE_SUB: ${BILLING_ADMIN_GOOGLE_SUB:-}
+      BILLING_TOKEN_ENCRYPTION_KEY: ${BILLING_TOKEN_ENCRYPTION_KEY:-}
+      BILLING_PUSH_AUDIENCE: ${BILLING_PUSH_AUDIENCE:-}
+      BILLING_PUSH_EMAIL: ${BILLING_PUSH_EMAIL:-}
+      # staging 必须用与正式不同的 JWT 密钥：两个环境的登录令牌互不通用
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: jishiben-api-staging
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      RECEIPTS_DIR: /data/receipts
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+      TZ: UTC
+    volumes:
+      - ./staging-data/receipts:/data/receipts
+    networks:
+      - staging-net
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    image: jishiben/web:staging
+    container_name: jishiben-staging-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${STAGING_HTTP_PORT:-8089}:80"
+    networks:
+      - staging-net
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ocr:
+    profiles: ["ocr"]
+    build:
+      context: ../ocr-service
+      dockerfile: Dockerfile
+    image: jishiben/ocr:0.1.0
+    container_name: jishiben-staging-ocr
+    restart: unless-stopped
+    environment:
+      OCR_SHARED_KEY: ${OCR_SHARED_KEY:-}  # 使用 --profile ocr 时必须在 .env.staging 填写
+      TZ: UTC
+    expose:
+      - "8090"
+    mem_limit: 1g
+    networks:
+      - staging-net
+
+volumes:
+  staging-mysql-data:
+    name: jishiben-staging-mysql-data
+
+networks:
+  staging-net:
+    name: jishiben-staging-net
+    driver: bridge

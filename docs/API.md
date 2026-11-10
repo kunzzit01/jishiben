@@ -196,12 +196,25 @@
 > **已下线（2026-11-06）**：扫票改为设备端 ML Kit 本地识别 + 本地规则解析，不再需要该接口与任何 AI API key。
 > 请统一使用 §3.16；旧路径现在返回 404。
 
-### 3.15 premium — 会员（**桩**，不实现内购）
+### 3.15 premium — 订阅、游客身份与管理员
+
+详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)。默认不开放申请、不开模拟、不锁定功能；提醒永久免费。
 
 | 方法 | 路径 | 鉴权 | 作用 |
-|---|---|---|---|
-| GET | `/api/premium/status` | Bearer | 恒返回 `active=false, implemented=false` |
-| POST | `/api/premium/purchase` | Bearer | 恒返回 501 `NOT_IMPLEMENTED` |
+| --- | --- | --- | --- |
+| POST | `/api/premium/guest` | 公共（nginx 限流） | 按需创建游客订阅身份，返回一次性展示的凭证 |
+| GET | `/api/premium/status` | 可匿名；Bearer 或 `X-Premium-Guest-Token` | 会员状态、权益、开关；匿名不创建身份 |
+| POST | `/api/premium/claim` | Bearer + 游客凭证 | 用户主动把本机游客会员绑定到当前账号 |
+| POST | `/api/premium/sandbox/apply` | Bearer 或游客凭证 | 模拟申请（仅 staging），初始 PENDING |
+| POST | `/api/premium/sandbox/{id}/cancel` | 订单所属身份 | 撤回待付款 / 取消模拟续费 |
+| POST | `/api/premium/google/verify`、`/restore` | Bearer 或游客凭证 | Google 验单 / 恢复；body `{purchaseToken, claim}` |
+| POST | `/api/premium/google/notifications` | Google OIDC（不走 App JWT） | Pub/Sub RTDN，触发重新查询 Google |
+| GET | `/api/premium/access/scan` | 同 status | nginx OCR 鉴权子请求：204 允许，403 `PREMIUM_REQUIRED` |
+| GET | `/api/admin/premium` | Google 登录会话 + 固定 sub | 设置、最近订阅、审计记录、告警 |
+| PUT | `/api/admin/premium/settings` | 同上 | 订阅入口、模拟、功能锁定开关 |
+| POST | `/api/admin/premium/{id}/events` | 同上 | 幂等模拟事件，校验 revision（只作用于模拟订单） |
+
+错误码：`PREMIUM_REQUIRED`（403，需要会员；同步时记录留在本机）、`BILLING_OWNED_BY_OTHER`（409，购买属于其他账号）、`BILLING_CLAIM_REQUIRED`（409，需用户确认后绑定游客购买）。旧 `/api/premium/purchase` 返回 400：客户端自报永远不会开通会员。
 
 ---
 
@@ -446,7 +459,7 @@
 | `NOT_FOUND` | 404 | uid 不存在（或属于别人）、路径不存在 |
 | `CONFLICT` | 409 | 邮箱已注册、大类重名、账本仍有子数据且未 `force`、唯一键冲突 |
 | `PAYLOAD_TOO_LARGE` | 413 | 收据图片超过上限 |
-| `NOT_IMPLEMENTED` | 501 | 会员购买（桩） |
+| `NOT_IMPLEMENTED` | 501 | 预留未实现能力 |
 | `UPSTREAM_ERROR` | 502 | 上游汇率/AI 服务异常 |
 | `INTERNAL_ERROR` | 500 | 未预期异常（日志有堆栈，响应只有一句话） |
 
@@ -475,7 +488,7 @@
    `scripts/api-smoke.mjs` 55 项断言全绿；本文标「实测」的取值都来自该环境。
 2. `GET /api/exchange-rates` 与 `POST /api/receipts/extract` 的外网调用未在真实网络下验证（单测只覆盖缺密钥/超限/非法入参路径）。
 3. 没有实现：定时抓汇率（cron）、推送发送（Expo Push 批量）、小票文件上传（Storage）、
-   计划付款自动入账（引擎仍在 App 本地）、会员权益与内购校验。
+   计划付款自动入账（引擎仍在 App 本地）。订阅已有开发实现，真实 Play 验收仍待执行。
 4. 汇率只做展示缓存；真正参与计算的汇率落在 `transactions.exchange_rate`。
 
 ---

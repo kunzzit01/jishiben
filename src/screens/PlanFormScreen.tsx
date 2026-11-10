@@ -1,3 +1,4 @@
+import { usePremium } from '../context/PremiumContext';
 // 计划付款 新增/编辑 整页表单(路由:财务规划编辑):
 // 与添加资产账户同模式——route.params.planId 有值 = 编辑,无 = 新增。
 // 布局(自上而下):1.类型(固定支出/固定收入) 2.计划名称 3.金额(自绘计算器)+关联账户(底部上拉)
@@ -44,6 +45,7 @@ function fmt(d: Date): string {
 }
 
 export default function PlanFormScreen({ route, navigation }: any) {
+  const premium = usePremium();
   const { addPaymentPlan, updatePaymentPlan, deletePaymentPlan, assets, paymentPlans, activeLedgerId, categories, currency, decimalPlaces } = useApp();
   const { semantic, spacing, radius, typography } = useTheme();
   const { pagePadding } = useLayout();
@@ -210,7 +212,7 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
 
   // amountOverride：自绘键盘「完成」直接保存时传入刚求值的金额——setAmountValue 是异步的，
   // 不传的话 handleSave 同步读到的还是旧 state
-  const handleSave = (amountOverride?: number) => {
+  const handleSave = async (amountOverride?: number) => {
     const finalAmount = amountOverride ?? amountValue;
     if (!name.trim()) {
       dialog.alert({ title: tr('finance.planNameRequired') });
@@ -235,11 +237,10 @@ const [type, setType] = useState<'expense' | 'income'>(editPlan?.type ?? 'expens
       active,
       assetId,
     };
-    if (isEdit && editPlan) {
-      void updatePaymentPlan(editPlan.id, payload);
-    } else {
-      void addPaymentPlan({ ...payload, ledgerId: activeLedgerId } as any);
-    }
+    try {
+      if (isEdit && editPlan) await updatePaymentPlan(editPlan.id, payload);
+      else await addPaymentPlan({ ...payload, ledgerId: activeLedgerId });
+    } catch (error) { premium.showError(error); return; }
     hapticSuccess();
     navigation.goBack();
   };

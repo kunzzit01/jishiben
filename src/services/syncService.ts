@@ -104,6 +104,8 @@ export type SyncErrorCode =
   | 'network'
   | 'auth'
   | 'constraint'
+  /** 有记录需要会员才能上云（会员到期超过宽限期 / 未绑定游客会员）；记录保留在本机 */
+  | 'premium'
   | 'schema'
   | 'server'
   | 'local_data_corrupt'
@@ -143,6 +145,7 @@ function classifySyncError(
 ): Exclude<SyncErrorCode, 'local_data_corrupt' | 'not_logged_in' | 'sync_in_progress'> {
   if (e instanceof ApiError) {
     if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT') return 'network';
+    if (e.code === 'PREMIUM_REQUIRED') return 'premium';
     if (
       isSessionDeadError(e) ||
       e.code === 'TOKEN_EXPIRED' ||
@@ -1116,6 +1119,31 @@ interface RowFailure {
    * 一条转账的转出账户已被删除，App 每次同步都会重推并被后端 400 拒绝）。
    */
   silent?: boolean;
+  /** 服务端以 PREMIUM_REQUIRED 拒绝：记录留在本机，会员状态变化后再推 */
+  premium?: boolean;
+}
+
+// ── 需要会员才能上云的行 ──
+// 服务端拒绝后记下来，在会员状态变化（开通 / 绑定游客会员 / 锁定关闭）前不再逐次重推，
+// 避免每次同步都打同一批 403；最长 30 分钟后自动再试一次。行本身始终保留在本机。
+const PREMIUM_RETRY_MS = 30 * 60 * 1000;
+const premiumBlocked = new Map<string, number>();
+
+/** 会员状态变化时调用：清空记录并补推一次。 */
+export function clearPremiumBlocked(): void {
+  if (!premiumBlocked.size) return;
+  premiumBlocked.clear();
+  schedulePush();
+}
+
+function isPremiumBlocked(key: string): boolean {
+  const at = premiumBlocked.get(key);
+  if (at === undefined) return false;
+  if (Date.now() - at > PREMIUM_RETRY_MS) {
+    premiumBlocked.delete(key);
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1164,6 +1192,11 @@ async function pushRow(
     await withRetry(action);
   } catch (e) {
     if (isTransientError(e)) throw e; // 网络/5xx：整次同步失败（下次重试，本地数据零丢失）
+    if (e instanceof ApiError && e.code === 'PREMIUM_REQUIRED') {
+      premiumBlocked.set(table + ':' + id, Date.now());
+      failedRows.push({ table, id, op, reason: errorMessage(e), premium: true });
+      return;
+    }
     failedRows.push({ table, id, op, reason: errorMessage(e) });
   }
 }
@@ -1317,6 +1350,10 @@ async function pushUpsert(table: TableName, row: Row, failedRows: RowFailure[]):
   if (reject) {
     // 不联网、不重试、不打扰用户；保留在本地（数据不丢），仅记录诊断
     failedRows.push({ table, id, op: 'upsert', reason: reject, silent: true });
+    return;
+  }
+  if (isPremiumBlocked(table + ':' + id)) {
+    failedRows.push({ table, id, op: 'upsert', reason: 'PREMIUM_REQUIRED (waiting for membership)', premium: true });
     return;
   }
   const body = toApiBody(table, row);
@@ -1808,15 +1845,7 @@ export async function fullSync(): Promise<SyncResult> {
     const failedRows = await pushSnapshot(normalized);
     await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
-    const blocking = failedRows.filter((f) => !f.silent);
-    const silenced = failedRows.filter((f) => f.silent);
-    if (silenced.length) {
-      console.warn('已跳过 ' + silenced.length + ' 条本机无法上云的记录（不打扰用户）', formatRowFailures(silenced));
-    }
-    if (blocking.length) {
-      return { ok: false, error: 'constraint', detail: formatRowFailures(blocking) };
-    }
-    return { ok: true };
+    return pushOutcome(failedRows);
   } catch (e) {
     console.warn('云端同步失败', e);
     setStatus('error');
@@ -1825,6 +1854,23 @@ export async function fullSync(): Promise<SyncResult> {
     syncing = false;
     flushDeferredPush();
   }
+}
+
+/** 把逐行失败汇总成同步结果：数据类失败优先报；只剩会员类失败时报 premium（记录在本机，不丢） */
+function pushOutcome(failedRows: RowFailure[]): SyncResult {
+  const blocking = failedRows.filter((f) => !f.silent && !f.premium);
+  const silenced = failedRows.filter((f) => f.silent);
+  const premium = failedRows.filter((f) => f.premium);
+  if (silenced.length) {
+    console.warn('已跳过 ' + silenced.length + ' 条本机无法上云的记录（不打扰用户）', formatRowFailures(silenced));
+  }
+  if (blocking.length) {
+    return { ok: false, error: 'constraint', detail: formatRowFailures(blocking) };
+  }
+  if (premium.length) {
+    return { ok: false, error: 'premium', detail: formatRowFailures(premium) };
+  }
+  return { ok: true };
 }
 
 /** 同步进行中被跳过的推送请求：同步结束后补排一次，避免期间的编辑要等到下一次改动才上云 */
@@ -1875,15 +1921,7 @@ export async function pushNow(): Promise<SyncResult> {
     const failedRows = await pushLocalSnapshot();
     await AsyncStorage.setItem(LAST_USER_KEY, userId);
     setStatus('idle');
-    const blocking = failedRows.filter((f) => !f.silent);
-    const silenced = failedRows.filter((f) => f.silent);
-    if (silenced.length) {
-      console.warn('已跳过 ' + silenced.length + ' 条本机无法上云的记录（不打扰用户）', formatRowFailures(silenced));
-    }
-    if (blocking.length) {
-      return { ok: false, error: 'constraint', detail: formatRowFailures(blocking) };
-    }
-    return { ok: true };
+    return pushOutcome(failedRows);
   } catch (e) {
     console.warn('云端备份失败', e);
     setStatus('error');

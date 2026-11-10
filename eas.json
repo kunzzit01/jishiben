@@ -9,7 +9,8 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136"
+        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136",
+        "ORG_GRADLE_PROJECT_openiapStore": "google"
       }
     },
     "preview": {
@@ -19,7 +20,19 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136"
+        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136",
+        "ORG_GRADLE_PROJECT_openiapStore": "google"
+      }
+    },
+    "staging": {
+      "distribution": "internal",
+      "channel": "staging",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136/staging",
+        "ORG_GRADLE_PROJECT_openiapStore": "google"
       }
     },
     "production": {
@@ -29,7 +42,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136"
+        "EXPO_PUBLIC_API_BASE_URL": "https://187.127.125.136",
+        "ORG_GRADLE_PROJECT_openiapStore": "google"
       }
     }
   },

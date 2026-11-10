@@ -25,6 +25,10 @@ public enum ErrorCode {
     GOOGLE_ALREADY_REGISTERED,
     GOOGLE_ALREADY_LINKED,
     GOOGLE_SUB_TAKEN,
+    // 订阅：需要会员 / 购买归属其他记账账号 / 购买属于未绑定的游客身份，需要用户确认认领
+    PREMIUM_REQUIRED,
+    BILLING_OWNED_BY_OTHER,
+    BILLING_CLAIM_REQUIRED,
     NOT_IMPLEMENTED,
     INTERNAL_ERROR
 }

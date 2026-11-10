@@ -1,5 +1,8 @@
 # FEATURES.md — jishiben 仓库功能与技术事实盘点（只读审计）
 
+> 2026-11-10 更新：本文其余内容保留原审计时点。订阅已新增游客身份、管理员模拟、权益和 Google Play 接入代码，以下“订阅完全未实现”的历史结论已被 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md) 取代，正式商店验收仍待进行。
+
+
 > 审计对象：https://github.com/kunzzit01/jishiben.git
 > 本地副本：_repo/jishiben（git clone 后 git fetch --all --tags）
 > 审计方式：**纯只读**。未执行 npm install / expo / 构建 / dev server，未访问除 GitHub 外的任何站点，未修改仓库任何文件。

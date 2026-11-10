@@ -58,9 +58,9 @@ const NEW_SIGNING = `    signingConfigs {
         }
     }`;
 
-const OLD_RELEASE = `            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug`;
+// Newer Expo templates write `signingConfig = signingConfigs.debug` (Gradle assignment syntax);
+// older ones `signingConfig signingConfigs.debug`. Accept both.
+const OLD_RELEASE = /            \/\/ Caution! In production, you need to generate your own keystore file\.\r?\n            \/\/ see https:\/\/reactnative\.dev\/docs\/signed-apk-android\.\r?\n            signingConfig( =)? signingConfigs\.debug/;
 
 const NEW_RELEASE = `            signingConfig signingConfigs.release`;
 
@@ -68,7 +68,7 @@ if (!src.includes(OLD_SIGNING)) {
   console.error('[signing] signingConfigs block did not match the expected Expo template shape.');
   process.exit(1);
 }
-if (!src.includes(OLD_RELEASE)) {
+if (!OLD_RELEASE.test(src)) {
   console.error('[signing] release buildType block did not match the expected Expo template shape.');
   process.exit(1);
 }

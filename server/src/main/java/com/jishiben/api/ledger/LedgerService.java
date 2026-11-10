@@ -2,6 +2,7 @@ package com.jishiben.api.ledger;
 
 import com.jishiben.api.asset.AssetRepository;
 import com.jishiben.api.common.ApiException;
+import com.jishiben.api.premium.PremiumService;
 import com.jishiben.api.common.Checks;
 import com.jishiben.api.common.Texts;
 import com.jishiben.api.paymentplan.PaymentPlanRepository;
@@ -14,13 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class LedgerService {
 
+    private final PremiumService premium;
     private final LedgerRepository ledgers;
     private final AssetRepository assets;
     private final TransactionRepository transactions;
     private final PaymentPlanRepository paymentPlans;
 
     public LedgerService(LedgerRepository ledgers, AssetRepository assets, TransactionRepository transactions,
-                         PaymentPlanRepository paymentPlans) {
+                         PaymentPlanRepository paymentPlans, PremiumService premium) {
+        this.premium = premium;
         this.ledgers = ledgers;
         this.assets = assets;
         this.transactions = transactions;
@@ -44,7 +47,11 @@ public class LedgerService {
     public LedgerDtos.Response upsert(long ownerId, LedgerDtos.UpsertRequest request) {
         String uid = Texts.requireNonBlank(request.clientUid(), "clientUid");
         Texts.limit(uid, 64, "clientUid");
+        premium.lockAccount(ownerId);
         Ledger ledger = ledgers.findByOwnerIdAndClientUid(ownerId, uid).orElse(null);
+        if (ledger == null && !ledgers.findByOwnerIdOrderBySortOrderAscIdAsc(ownerId).isEmpty()) {
+            premium.requireFeature(ownerId, "addLedger");
+        }
         boolean creating = ledger == null;
         if (creating) {
             ledger = new Ledger();

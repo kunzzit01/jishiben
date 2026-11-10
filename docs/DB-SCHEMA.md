@@ -279,3 +279,21 @@ docker compose -f deploy/docker-compose.yml up -d mysql
 docker compose -f deploy/docker-compose.yml logs -f mysql     # 等 healthy
 curl -sf http://localhost/api/health                          # 经 nginx 探活
 ```
+
+## 订阅开发补充 · V13
+
+V13 新增以下表，详见 [订阅开发说明](SUBSCRIPTION-DEVELOPMENT.md)：
+
+| 表 | 用途 |
+| --- | --- |
+| `billing_subjects` | 游客 / 账号订阅身份，绑定关系只有一层 `linked_to` |
+| `billing_settings` | 管理员开关 |
+| `billing_admins` | 固定的管理员 Google sub |
+| `billing_subscriptions` | 模拟与 Google 订阅 |
+| `billing_orphans` | 暂未归属的 Google 购买 |
+| `billing_events` | 幂等与审计，含前后状态 |
+| `billing_jobs` | 后台任务租约 |
+
+- Google token 用 AES-GCM 加密保存，另存摘要作为唯一键；游客凭证只存摘要。
+- 注销账号时 subject 标记 `detached_at`，外键置空，去标识化记录保留。这部分须纳入隐私与保留策略。
+- 2026-11-10 已在本地 Docker mysql:8.0 实测 V1–V13 迁移成功，生产迁移前仍应先备份。

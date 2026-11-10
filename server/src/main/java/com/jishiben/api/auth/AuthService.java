@@ -32,10 +32,19 @@ public class AuthService {
     private final ProfileService profiles;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final GoogleTokenVerifier googleVerifier;
+    private final java.util.List<GoogleSignInListener> googleListeners;
 
     public AuthService(UserRepository users, PasswordEncoder passwordEncoder, JwtService jwtService,
             ProfileService profiles, GoogleTokenVerifier googleVerifier,
             org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        this(users, passwordEncoder, jwtService, profiles, googleVerifier, jdbc, java.util.List.of());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AuthService(UserRepository users, PasswordEncoder passwordEncoder, JwtService jwtService,
+            ProfileService profiles, GoogleTokenVerifier googleVerifier,
+            org.springframework.jdbc.core.JdbcTemplate jdbc, java.util.List<GoogleSignInListener> googleListeners) {
+        this.googleListeners = googleListeners == null ? java.util.List.of() : googleListeners;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -58,7 +67,7 @@ public class AuthService {
         User saved = users.save(user);
         // A profile row carries the account-level currency that blank budget currencies inherit.
         profiles.ensure(saved.getId());
-        return tokens(saved);
+        return tokens(saved, AuthPrincipal.METHOD_PASSWORD);
     }
 
     @Transactional
@@ -70,7 +79,7 @@ public class AuthService {
             throw ApiException.invalidCredentials();
         }
         user.setLastLoginAt(Instant.now());
-        return tokens(users.save(user));
+        return tokens(users.save(user), AuthPrincipal.METHOD_PASSWORD);
     }
 
     @Transactional(readOnly = true)
@@ -93,7 +102,8 @@ public class AuthService {
             throw new ApiException(HttpStatus.UNAUTHORIZED, ErrorCode.TOKEN_REVOKED,
                     "This session has been revoked; sign in again");
         }
-        return tokens(user);
+        // A refreshed session keeps the method it was originally established with.
+        return tokens(user, claimed.authMethod());
     }
 
     /** Signs out every device: the version bump makes all previously issued tokens useless. */
@@ -125,7 +135,7 @@ public class AuthService {
             }
             bound.setLastLoginAt(Instant.now());
             applyGoogleProfile(bound, identity);
-            return tokens(users.save(bound));
+            return googleTokens(users.save(bound), identity);
         }
 
         // 2) 同邮箱已有账号：产品决定（2026-11-05）—— Google 已验证该邮箱即视为账号所有权，
@@ -148,7 +158,7 @@ public class AuthService {
                 byEmail.setEmailVerifiedAt(Instant.now());
             }
             applyGoogleProfile(byEmail, identity);
-            return tokens(users.save(byEmail));
+            return googleTokens(users.save(byEmail), identity);
         }
 
         // 3) 新账号：password_hash 保持 NULL（不造假密码），同一个事务里建 profile
@@ -166,7 +176,14 @@ public class AuthService {
         user.setEmailVerifiedAt(Instant.now());
         User saved = users.save(user);
         profiles.ensure(saved.getId());
-        return tokens(saved);
+        return googleTokens(saved, identity);
+    }
+
+    private AuthDtos.TokenResponse googleTokens(User user, GoogleTokenVerifier.GoogleIdentity identity) {
+        for (GoogleSignInListener listener : googleListeners) {
+            listener.onGoogleSignIn(user, identity);
+        }
+        return tokens(user, AuthPrincipal.METHOD_GOOGLE);
     }
 
     /**
@@ -302,6 +319,8 @@ public class AuthService {
             "delete from payment_plans where user_id = ?",
             "delete from assets where user_id = ?",
             "delete from push_tokens where user_id = ?",
+            // 订阅身份去标识化保留（防重放 / 审计 / 同一 Play 账号日后可重新认领），外键随后置空
+            "update billing_subjects set detached_at = CURRENT_TIMESTAMP where user_id = ?",
             "delete from ledgers where user_id = ?",
             "delete from profiles where user_id = ?",
             "delete from users where id = ?",
@@ -337,9 +356,19 @@ public class AuthService {
         return at > 0 ? email.substring(0, at) : email;
     }
 
+    /** Password-established (or re-issued from the current session's method) token pair. */
     private AuthDtos.TokenResponse tokens(User user) {
+        return tokens(user, currentMethod());
+    }
+
+    private static String currentMethod() {
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getPrincipal() instanceof AuthPrincipal p ? p.authMethod() : AuthPrincipal.METHOD_PASSWORD;
+    }
+
+    private AuthDtos.TokenResponse tokens(User user, String method) {
         AuthPrincipal principal = new AuthPrincipal(user.getId(), user.getEmail(), user.getUserRole(),
-                user.getTokenVersion());
+                user.getTokenVersion(), method);
         JwtService.TokenPair pair = jwtService.issue(principal);
         return new AuthDtos.TokenResponse("Bearer", pair.accessToken(), pair.refreshToken(),
                 pair.expiresInSeconds(), toResponse(user));
