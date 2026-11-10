@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Keyboard,
+  InteractionManager,
   StyleSheet,
   TextInput,
   ScrollView,
@@ -526,10 +527,11 @@ export default function CategoryPage({
   const [perf, setPerf] = useState<{ first: number; full: number | null; renders: number } | null>(null);
   const [frameStats, setFrameStats] = useState<{ avg: number; max: number } | null>(null);
 
-  const [mountedSections, setMountedSections] = useState(2);
+  // 首帧一组网格都不挂（只有页头 + 精确高度的占位）：先让页面立刻出现，再按帧补网格
+  const [mountedSections, setMountedSections] = useState(0);
   // 切「支出 / 收入」→ 重新从 2 组开始挂
   useEffect(() => {
-    setMountedSections(2);
+    setMountedSections(0);
   }, [manageType]);
   // 组内排序编号（按分类 id 存，跟资产页 assetOrder 同一套思路）
   const [catOrder, setCatOrder] = useState<Record<string, number>>({});
@@ -692,7 +694,17 @@ export default function CategoryPage({
   useEffect(() => {
     const total = sections.length;
     if (mountedSections >= total) return;
-    const id = setTimeout(() => setMountedSections((n) => Math.min(n + 3, total)), 60);
+    if (mountedSections === 0) {
+      // 第一批：等转场 / 首帧交互结束再挂 1 组（兜底 250ms，防 InteractionManager 不回调）
+      const handle = InteractionManager.runAfterInteractions(() => setMountedSections((n) => (n === 0 ? 1 : n)));
+      const fallback = setTimeout(() => setMountedSections((n) => (n === 0 ? 1 : n)), 250);
+      return () => {
+        handle.cancel();
+        clearTimeout(fallback);
+      };
+    }
+    // 之后每 50ms 补 2 组：单批更小，不再一次堵住 JS 线程
+    const id = setTimeout(() => setMountedSections((n) => Math.min(n + 2, total)), 50);
     return () => clearTimeout(id);
   }, [mountedSections, sections.length]);
 
