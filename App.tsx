@@ -75,7 +75,6 @@ import TransactionDetailScreen from './src/screens/TransactionDetailScreen';
 import ReportScreen from './src/screens/ReportScreen';
 import AssetScreen from './src/screens/AssetScreen';
 import AddAssetScreen from './src/screens/AddAssetScreen';
-import AIScreen from './src/screens/AIScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import FinancialPlanningScreen from './src/screens/FinancialPlanningScreen';
@@ -85,10 +84,6 @@ import LedgerScreen from './src/screens/LedgerScreen';
 
 import AboutAppScreen from './src/screens/AboutAppScreen';
 import HelpFeedbackScreen from './src/screens/HelpFeedbackScreen';
-import CalculatorHubScreen from './src/screens/CalculatorHubScreen';
-import LoanCalculatorScreen from './src/screens/LoanCalculatorScreen';
-import CompoundInterestScreen from './src/screens/CompoundInterestScreen';
-import OverviewScreen from './src/screens/OverviewScreen';
 import NoticeCenterScreen from './src/screens/NoticeCenterScreen';
 import ReminderSettingsScreen from './src/screens/ReminderSettingsScreen';
 import { enableFreeze } from 'react-native-screens';
@@ -132,15 +127,6 @@ function HomeStack() {
       <HomeStackNav.Screen name="关于应用" component={AboutAppScreen} options={{ headerShown: false }} />
       <HomeStackNav.Screen name="通知中心" component={NoticeCenterScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
       <HomeStackNav.Screen name="帮助与反馈" component={HelpFeedbackScreen} options={{ headerShown: false }} />
-      <HomeStackNav.Screen name="计算器" component={CalculatorHubScreen} options={{ headerShown: false }} />
-      <HomeStackNav.Screen name="贷款计算器" component={LoanCalculatorScreen} options={{ headerShown: false }} />
-      <HomeStackNav.Screen name="复利计算器" component={CompoundInterestScreen} options={{ headerShown: false }} />
-      {/* AI专区双注册（与 ProfileStack 同一组件）：从首页侧进 AI专区（如 AI专区→记一笔 的往返）
-          时 push 的是 HomeStack 自己的实例，goBack 天然回记一笔/首页，不会串到设置项 Tab */}
-      <HomeStackNav.Screen name="AI专区" component={AIScreen} options={{ headerShown: false }} />
-      {/* 概览模式双注册（与 ProfileStack 同一组件）：从设置项进来 push 的是 ProfileStack 实例，
-          goBack 天然回设置；从首页侧导航过来时走本栈实例，goBack 天然回首页 */}
-      <HomeStackNav.Screen name="概览模式" component={OverviewScreen} options={{ headerShown: false }} />
       {/* 添加资产账户双注册（与 AssetStack 同一组件）：首页编辑记一笔时选择账户弹窗的
           "添加新账户" push 本栈实例，goBack 天然回记一笔，不会切去资产 Tab */}
       <HomeStackNav.Screen name="添加资产账户" component={AddAssetScreen} options={{ headerShown: false }} />
@@ -148,7 +134,7 @@ function HomeStack() {
   );
 }
 
-// "设置项"Tab内部堆栈：我的主页（预算） → 设置 → 各设置子页面 + AI专区
+// "设置项"Tab内部堆栈：我的主页（预算） → 设置 → 各设置子页面
 function ProfileStack() {
   const { colors } = useTheme();
   return (
@@ -165,10 +151,6 @@ function ProfileStack() {
       <ProfileStackNav.Screen name="类别分类" component={CategoryManagementScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }} />
       <ProfileStackNav.Screen name="开设账本" component={LedgerScreen} options={{ headerShown: false }} />
       <ProfileStackNav.Screen name="提醒设置" component={ReminderSettingsScreen} options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 200 }} />
-      {/* AI专区改用与其他二级页一致的自绘头部（圆框返回键），原生头部关闭 */}
-      <ProfileStackNav.Screen name="AI专区" component={AIScreen} options={{ headerShown: false }} />
-      {/* 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入 */}
-      <ProfileStackNav.Screen name="概览模式" component={OverviewScreen} options={{ headerShown: false }} />
       {/* 登录 / 注册独立页面（未登录时从"账号与同步"进入；已登录显示个人中心内容+退出登录。
           "我的账户"入口也指向这里——一个页面两种状态 */}
       <ProfileStackNav.Screen name="登录注册" component={AuthScreen} options={{ headerShown: false }} />
@@ -180,15 +162,10 @@ function ProfileStack() {
           goBack 天然回"我的主页"（与 HomeStack 的同名页面互不干扰） */}
       <ProfileStackNav.Screen name="关于应用" component={AboutAppScreen} options={{ headerShown: false }} />
       <ProfileStackNav.Screen name="帮助与反馈" component={HelpFeedbackScreen} options={{ headerShown: false }} />
-      <ProfileStackNav.Screen name="计算器" component={CalculatorHubScreen} options={{ headerShown: false }} />
-      {/* 计算器 Hub 的两个子页也要注册到 ProfileStack：从设置项进来的计算器 Hub
-          navigate('贷款计算器'/'复利计算器') 才有目标（否则报 NAVIGATE not handled） */}
-      <ProfileStackNav.Screen name="贷款计算器" component={LoanCalculatorScreen} options={{ headerShown: false }} />
-      <ProfileStackNav.Screen name="复利计算器" component={CompoundInterestScreen} options={{ headerShown: false }} />
-      {/* 记一笔双注册（与 HomeStack 同一组件）：AI专区→"扫描小票自动记账" push 的是
-          ProfileStack 自己的记一笔实例，goBack 天然回 AI专区，不会跳去首页 Tab */}
+      {/* 记一笔双注册（与 HomeStack 同一组件）：设置侧页面（如财务规划表单）push 的是
+          ProfileStack 自己的记一笔实例，goBack 天然回原页，不会跳去首页 Tab */}
       <ProfileStackNav.Screen name="记一笔" component={AddTransactionScreen} options={{ headerShown: false }} />
-      {/* 添加资产账户双注册（与 AssetStack 同一组件）：AI专区→记一笔选择账户弹窗的
+      {/* 添加资产账户双注册（与 AssetStack 同一组件）：设置侧记一笔选择账户弹窗的
           "添加新账户" push 本栈实例，goBack 天然回记一笔，不会切去资产 Tab */}
       <ProfileStackNav.Screen name="添加资产账户" component={AddAssetScreen} options={{ headerShown: false }} />
     </ProfileStackNav.Navigator>

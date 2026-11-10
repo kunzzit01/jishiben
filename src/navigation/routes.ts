@@ -28,15 +28,9 @@ export const ROUTES = {
   NOTICE_CENTER: '通知中心',
   /** 提醒设置（ProfileStack 里注册）：规则开关 / 预算提醒管理 */
   REMINDER_SETTINGS: '提醒设置',
-  CALCULATOR: '计算器',
-  LOAN_CALC: '贷款计算器',
-  COMPOUND_CALC: '复利计算器',
   // ProfileStack（设置项 Tab）
   PROFILE: '我的主页',
   SETTINGS: '设置',
-  AI: 'AI专区',
-  // 「概览模式」一屏汇总（设计稿第 11 屏）：HomeStack / ProfileStack 各自注册一个实例
-  OVERVIEW: '概览模式',
   AUTH: '登录注册',
   FINANCE_PLAN: '财务规划',
   FINANCE_PLAN_EDIT: '财务规划编辑',
@@ -85,12 +79,6 @@ export type HomeStackParamList = {
   帮助与反馈: undefined;
   // 通知中心：把「未来 3 个月会提醒什么」从系统通知栏搬进 App 可看（只读列表；设置项在设置里）
   通知中心: undefined;
-  计算器: undefined;
-  贷款计算器: undefined;
-  复利计算器: undefined;
-  AI专区: undefined;
-  // 概览模式（设计稿第 11 屏）
-  概览模式: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
   添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };
@@ -103,21 +91,18 @@ export type ProfileStackParamList = {
   开设账本: undefined;
   // 提醒设置：规则开关 / 预算提醒管理（从设置项「功能」分组进入）
   提醒设置: undefined;
-  AI专区: undefined;
-  // 概览模式（设计稿第 11 屏）：从设置项「功能」分组进入
-  概览模式: undefined;
   // 登录 / 注册独立页面（从设置项"账号与同步"进入）
   登录注册: undefined;
   // 财务规划（计划付款：固定支出自动扣账）
   财务规划: undefined;
   // 财务规划-新增/编辑计划(整页表单;planId 有值 = 编辑)
   财务规划编辑: { planId?: string } | undefined;
-  // AI专区→"扫描小票自动记账" 会 push 本栈的"记一笔"（双注册）
+  // 设置侧页面（如财务规划表单）会 push 本栈的"记一笔"（双注册）
   记一笔: {
     editTransaction?: TransactionLike;
     presetCategoryId?: string;
     autoScan?: boolean;
-    // 与 HomeStack 同签名（AI 专区等入口双注册进来）
+    // 与 HomeStack 同签名（双注册）
     presetType?: AddTxPresetType;
     initialType?: AddTxPresetType;
   } | undefined;
@@ -126,9 +111,6 @@ export type ProfileStackParamList = {
   帮助与反馈: undefined;
   // 手势诊断页（临时）：定位账本弹层上滑滚不动的坏点，诊断完删除
   手势诊断: undefined;
-  计算器: undefined;
-  贷款计算器: undefined;
-  复利计算器: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
   添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };

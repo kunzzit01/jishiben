@@ -433,43 +433,14 @@ export default function ProfileScreen({ navigation }: any) {
           />
         </ListSection>
 
-        {/* 功能分组：AI 专区入口 —— AIScreen 已双注册在 HomeStack / ProfileStack
-            （App.tsx 的 ROUTES.AI），但全仓一直没有 navigate(ROUTES.AI)，等于「有页面、没入口」；
-            这里补上设置页的正式入口。行规格直接复用 ListRow（同高 / 同内衬 / 同 chevron），不另画。 */}
+        {/* 功能分组：提醒设置（AI 专区 / 概览模式 / 计算器 已下线） */}
         <ListSection title={tr('profile.features')} style={styles.section} testID="profile-features">
-          <ListRow
-            leading={<RowIcon icon="sparkles-outline" tone="accent" />}
-            title={tr('profile.aiZone')}
-            chevron
-            onPress={() => navigation.navigate(ROUTES.AI)}
-            testID="profile-ai-row"
-          />
-          {/* 概览模式（设计稿第 11 屏）：OverviewScreen 双注册在 HomeStack / ProfileStack
-              （App.tsx 的 ROUTES.OVERVIEW）。设计稿第 11 屏自身没有入口提示、首页不在本任务可改
-              范围内（Boundary），所以入口落在设置项「功能」分组，与 AI 专区同组同规格。 */}
           <ListRow
             leading={<RowIcon icon="notifications-outline" />}
             title={tr('profile.reminderSettings')}
             chevron
             onPress={() => navigation.navigate(ROUTES.REMINDER_SETTINGS)}
             testID="profile-reminder-settings"
-          />
-          <ListRow
-            leading={<RowIcon icon="grid-outline" />}
-            title={tr('profile.overview')}
-            chevron
-            onPress={() => navigation.navigate(ROUTES.OVERVIEW)}
-            testID="profile-overview-row"
-          />
-          {/* 计算器（贷款 / 复利）：CalculatorHubScreen 在 App.tsx 双注册，但此前全仓没有
-              任何 navigate(ROUTES.CALCULATOR) —— 功能存在却无法到达（评审实测：设置页与
-              财务规划页都没有入口）。入口补在「功能」分组，与 AI 专区 / 概览模式同规格。 */}
-          <ListRow
-            leading={<RowIcon icon="calculator-outline" />}
-            title={tr('profile.calculators')}
-            chevron
-            onPress={() => navigation.navigate(ROUTES.CALCULATOR)}
-            testID="profile-calculators-row"
           />
         </ListSection>
 
