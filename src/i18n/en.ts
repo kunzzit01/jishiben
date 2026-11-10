@@ -703,8 +703,6 @@ export const en = {
   report: {
     yearLabel: '%{y}',
     dayCount: '%{n} days',
-    heroTotalExpense: 'Spent',
-    heroTotalIncome: 'Earned',
     expense: 'Expense',
     income: 'Income',
     totalExpense: 'Total Expense',

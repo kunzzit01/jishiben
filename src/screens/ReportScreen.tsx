@@ -805,30 +805,12 @@ export default function ReportScreen() {
               >
                 {periodTitle}
               </AppText>
-              {(periodMeta || !isEmpty) && (
-                <View style={styles.periodMeta}>
-                  {periodMeta ? (
-                    <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
-                      {periodMeta + (!isEmpty ? ' · ' : '')}
-                    </AppText>
-                  ) : null}
-                  {!isEmpty && (
-                    <>
-                      <AppText variant="caption" color={semantic.textSecondary}>
-                        {tr(type === 'expense' ? 'report.heroTotalExpense' : 'report.heroTotalIncome') + ' '}
-                      </AppText>
-                      <MoneyText
-                        value={periodTotal}
-                        kind="plain"
-                        currency={selectedReportCurrency}
-                        showCurrency
-                        variant="caption"
-                        color={semantic.textSecondary}
-                      />
-                    </>
-                  )}
-                </View>
-              )}
+              {/* 副标题只给区间信息（年份 · 天数）；本期总额已在饼图圆心，不在这里重复 */}
+              {periodMeta ? (
+                <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
+                  {periodMeta}
+                </AppText>
+              ) : null}
             </Pressable>
             {rangeType !== 'custom' && (
               <Pressable
@@ -1083,7 +1065,6 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
     periodTitle: { fontSize: 18, lineHeight: 24 },
     // 区间标题（周 / 自定义：11/02–11/08）字更长，降一档，旁边还有箭头也放得下
     periodTitleRange: { fontSize: 16 },
-    periodMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
     // 周 / 月 / 年 / 自定义 分段托盘（实底凹槽，同支出 / 收入）
     rangeTray: { flexShrink: 0, borderRadius: radius.full, backgroundColor: semantic.surfaceSunken },
     // 饼图卡：内衬 20（夜间是 GlassView、日间是白卡，两者都在这里给同样的内衬）
