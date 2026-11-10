@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { loadMutedKeys } from '../utils/reminderMute';
@@ -40,6 +41,15 @@ export function useReminderItems(): ReminderItemsState {
   const [muted, setMuted] = useState<Set<string>>(new Set());
   const [disabledRules, setDisabledRules] = useState<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
+  // 回到前台就刷新「现在」：App 进程常驻几天不重启时，buildInputs 里的 now 会一直停在上次挂载的时刻，
+  // 每日提醒的 14 天窗口 / 月末 3 个月窗口就不会往后滚，窗口用完后系统里再没有可触发的通知
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') setClock((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     void hydrateReminderPrefs();
@@ -67,7 +77,8 @@ export function useReminderItems(): ReminderItemsState {
       daily: { dailyEnabled: prefs.dailyEnabled, dailyHour: prefs.dailyHour },
       now: new Date(),
     }),
-    [scopeId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopeId, assets, paymentPlans, prefs.dailyEnabled, prefs.dailyHour, clock]
   );
 
   const allItems = useMemo(() => buildReminderItems(buildInputs), [buildInputs]);

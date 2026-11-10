@@ -1,7 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { useT } from '../i18n/LanguageContext';
-import { cancelScheduledNotification, scheduleLocalNotification } from '../utils/notifications';
+import {
+  cancelScheduledNotification,
+  isNotificationPermissionGranted,
+  scheduleLocalNotification,
+} from '../utils/notifications';
 import { loadMutedKeys } from '../utils/reminderMute';
 import { loadDisabledRules } from '../reminders/rules';
 import { useReminderItems } from '../reminders/useReminderItems';
@@ -150,15 +155,29 @@ export function useReminders(): void {
   const { decimalPlaces } = useApp();
   const t = useT();
   const lastRef = useRef('');
+  // 回到前台且「已有通知权限」→ 重试一次对账。
+  // 场景：首次因权限被拒没排上，用户随后去系统设置里打开了通知，回到 App 时提醒清单没变、
+  // 指纹相同 → 原来要杀进程重开才会补排。对账是幂等的（已排过的复用 id，只补缺的）。
+  // 只在已授权时才重试：没授权就重试只会反复弹授权框 / 白跑。
+  const [retryTick, setRetryTick] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') return;
+      void isNotificationPermissionGranted().then((ok) => {
+        if (ok) setRetryTick((n) => n + 1);
+      });
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (loading) return;
-    // 指纹 = 全部键 + 小数位；仅时间流逝（条目没变）时不重复读写映射
-    const fingerprint = `${allItems.map((i) => i.key).join(',')}|${decimalPlaces}`;
+    // 指纹 = 全部键 + 小数位 + 前台重试序号；仅时间流逝（条目没变）时不重复读写映射
+    const fingerprint = `${allItems.map((i) => i.key).join(',')}|${decimalPlaces}|${retryTick}`;
     if (lastRef.current === fingerprint) return;
     lastRef.current = fingerprint;
     void reconcileReminders({ items: allItems, t, decimals: decimalPlaces });
-  }, [allItems, loading, t, decimalPlaces, prefs.dailyEnabled, prefs.dailyHour]);
+  }, [allItems, loading, t, decimalPlaces, prefs.dailyEnabled, prefs.dailyHour, retryTick]);
 }
 
 export { loadMutedKeys };

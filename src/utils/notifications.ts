@@ -33,6 +33,37 @@ if (NotificationsModule) {
 }
 
 /**
+ * 先建 Android 通知渠道，再去请求通知权限（顺序不能反）。
+ * Android 13+ 的 POST_NOTIFICATIONS 授权框要求「App 至少有一个通知渠道」才会弹出；
+ * 原来两条路都是「先请求权限、后建渠道」，首次安装时授权框根本不出现、权限悄悄落成未授权，
+ * 本地提醒一条都排不上（要等下一次冷启动、渠道已存在，框才出来）。幂等：渠道已存在时是原地更新。
+ */
+async function ensureAndroidChannels(): Promise<void> {
+  if (!NotificationsModule || Platform.OS !== 'android') return;
+  await NotificationsModule.setNotificationChannelAsync('default', {
+    name: 'default',
+    importance: NotificationsModule.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#FF231F7C',
+  });
+  await NotificationsModule.setNotificationChannelAsync('reminders', {
+    name: '记账提醒',
+    importance: NotificationsModule.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+  });
+}
+
+/** 当前是否已有通知权限（只读，不会弹授权框；回到前台时用它决定要不要补排） */
+export async function isNotificationPermissionGranted(): Promise<boolean> {
+  if (!NotificationsModule) return false;
+  try {
+    return (await NotificationsModule.getPermissionsAsync()).status === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 请求权限并拿到 Expo Push Token。
  * 必须在真机上运行，模拟器拿不到有效token。
  * 在 Expo Go 里会直接跳过并返回 null，要用 development build 才会真正执行。
@@ -61,6 +92,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     return null;
   }
 
+  await ensureAndroidChannels().catch((e) => console.warn('建通知渠道失败', e));
   const { status: existingStatus } = await NotificationsModule.getPermissionsAsync();
   let finalStatus = existingStatus;
 
@@ -101,15 +133,6 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     return null;
   }
   lastPushError = '';
-
-  if (Platform.OS === 'android') {
-    await NotificationsModule.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: NotificationsModule.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
-  }
 
   return token;
 }
@@ -189,18 +212,11 @@ export async function ensureLocalReminderReady(): Promise<{ granted: boolean; ch
   const channelId = 'reminders';
   if (!NotificationsModule) return { granted: false, channelId };
   try {
+    // 渠道必须在请求权限之前存在（见 ensureAndroidChannels 的说明）
+    await ensureAndroidChannels();
     let status = (await NotificationsModule.getPermissionsAsync()).status;
     if (status !== 'granted') {
       status = (await NotificationsModule.requestPermissionsAsync()).status;
-    }
-    if (Platform.OS === 'android') {
-      for (const id of [channelId, 'default']) {
-        await NotificationsModule.setNotificationChannelAsync(id, {
-          name: id === channelId ? '记账提醒' : 'default',
-          importance: NotificationsModule.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-        });
-      }
     }
     return { granted: status === 'granted', channelId };
   } catch (e) {
