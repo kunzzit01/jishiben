@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import httpx
 import io
 import logging
 import math
