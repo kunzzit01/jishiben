@@ -269,9 +269,17 @@ public class PremiumService {
         if (enrollment && !cfg.enrollmentOpen()) throw ApiException.forbidden("Subscription applications are closed");
     }
 
+    /** Subscribing (simulated or real) needs a registered account unless guest subscriptions are enabled. */
+    void requireAccountForSubscribing() {
+        if (!props.guestSubscriptions() && BillingAdminService.principal() == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, ErrorCode.ACCOUNT_REQUIRED, "Register or sign in to subscribe");
+        }
+    }
+
     @Transactional
     public PremiumDtos.Status apply(String token, PremiumDtos.Application request) {
         requireSandbox(true);
+        requireAccountForSubscribing();
         Subject subject = subject(token);
         // Serialize concurrent applications of the same identity.
         jdbc.queryForObject("SELECT id FROM billing_subjects WHERE id=? FOR UPDATE", Long.class, subject.id());

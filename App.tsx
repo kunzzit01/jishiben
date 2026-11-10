@@ -28,6 +28,7 @@ import { AppProvider, useApp } from './src/context/AppContext';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { PremiumProvider } from './src/context/PremiumContext';
 import { PremiumScreenHost } from './src/screens/PremiumScreen';
+import { navigationRef } from './src/navigation/navigationRef';
 import { AppLockProvider, AppLockOverlay } from './src/context/AppLockContext';
 import { AppDialogProvider } from './src/components/AppDialog';
 import { useSyncManager } from './src/hooks/useSyncManager';
@@ -546,6 +547,7 @@ function AppContent() {
           抽屉 / 弹层可以正常贴到屏幕底边，页面内容也能画进导航条区域（edge-to-edge 正常行为） */}
       <View style={{ flex: 1, backgroundColor: semantic.bg }}>
       <NavigationContainer
+        ref={navigationRef}
         theme={navTheme}
         // 任何导航变化（切 Tab、push、pop）都让栏回到可见——
         // 新页面从顶部开始，收着栏会让人迷失

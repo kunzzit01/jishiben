@@ -145,6 +145,19 @@ class PremiumServiceTest {
         assertThat(canceled.subscriptions().getFirst().autoRenew()).isFalse();
     }
 
+    @Test void withGuestSubscriptionsOffOnlySignedInAccountsCanApply() {
+        var accountsOnly = new BillingProperties("production", true, false, ADMIN_EMAIL, "", 7, false);
+        var strict = new PremiumService(db.jdbc, accountsOnly, db.admins(accountsOnly));
+        db.open(true);
+        String guest = strict.createGuest().token();
+        assertThatThrownBy(() -> db.inTx(() -> strict.apply(guest, new PremiumDtos.Application("monthly", "g1"))))
+                .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.code()).isEqualTo(ErrorCode.ACCOUNT_REQUIRED));
+        assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_subscriptions", Integer.class)).isZero();
+        signIn(2, "other@example.com", AuthPrincipal.METHOD_PASSWORD);
+        var applied = db.inTx(() -> strict.apply(null, new PremiumDtos.Application("monthly", "u1")));
+        assertThat(applied.subscriptions().getFirst().state()).isEqualTo("PENDING");
+    }
+
     @Test void aPendingApplicationCanBeWithdrawn() {
         db.open(false);
         String guest = service.createGuest().token();

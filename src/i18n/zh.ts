@@ -3,6 +3,9 @@
 export const zh = {
   membership: {
     deleteNotice: '删除记账账号不会自动取消 Google Play 订阅。请先在会员中心管理或取消续费。',
+    signInTitle: '注册或登录后即可订阅',
+    signInHint: '会员订阅绑定在你的记账账号上，换手机、重装 App 后登录同一账号即可继续使用。未登录时仍可免费使用记账、提醒等基础功能。',
+    signInButton: '注册 / 登录',
     title: '会员订阅',
     sandbox: '开发模拟 · 不会扣款',
     sandboxBanner: '开发测试，不会扣款',
@@ -48,8 +51,8 @@ export const zh = {
     applications: '最近 100 条订阅 / 申请',
     auditLog: '最近操作记录',
     guest: '游客',
-    guestHint: '无需注册即可订阅。登录记账账号后可主动把会员绑定到账号；正式 Google 购买可用原 Play 账号恢复。',
-    guestHintSandbox: '无需注册即可申请。游客模拟订阅只保存在本次安装中，卸载或清除数据后无法恢复。',
+    guestHint: '订阅需要先注册并登录记账账号。',
+    guestHintSandbox: '订阅需要先注册并登录记账账号。',
     claimTitle: '本机有游客会员',
     claim: '绑定到当前账号',
     claimHint: '绑定后会员归属当前账号，本机游客身份失效，且不能再转给其他账号。当前账号：',

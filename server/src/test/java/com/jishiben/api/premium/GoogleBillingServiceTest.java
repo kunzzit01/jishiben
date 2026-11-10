@@ -154,6 +154,16 @@ class GoogleBillingServiceTest {
         assertThat(billing.verify(guest, "t", true, false).active()).isTrue();
     }
 
+    @Test void withGuestSubscriptionsOffAGuestCannotRegisterAPurchase() {
+        var accountsOnly = new BillingProperties("production", false, true, ADMIN_EMAIL, "", 7, false);
+        var strictPremium = db.service(accountsOnly);
+        var strict = new GoogleBillingService(strictPremium, google, json, db.transactions, accountsOnly);
+        String guest = strictPremium.createGuest().token();
+        assertThatThrownBy(() -> strict.verify(guest, "t", false, false))
+                .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.code()).isEqualTo(ErrorCode.ACCOUNT_REQUIRED));
+        verify(google, never()).verify(anyString());
+    }
+
     @Test void googleDisabledDeploymentRejectsVerification() {
         var off = new BillingProperties("production", false, false, ADMIN_EMAIL, "", 7);
         var disabled = new GoogleBillingService(premium, google, json, db.transactions, off);

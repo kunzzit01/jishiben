@@ -13,6 +13,7 @@ import {
   BasePlan, BillingConsole, BillingSettings, premiumApi, PremiumStatus, PremiumSubscription, requestKey,
 } from '../services/premiumApi';
 import { buyStore, restoreStore, storePlans, StorePlan } from '../services/playBilling';
+import { openSignIn } from '../navigation/navigationRef';
 
 const PACKAGE = 'com.kylim0103.jizhangapp';
 const PLAY_MANAGE_URL = 'https://play.google.com/store/account/subscriptions?sku=premium&package=' + PACKAGE;
@@ -186,7 +187,13 @@ function PremiumScreen() {
           <AppText variant="subhead" color={semantic.textSecondary}>{t('membership.benefitsText')}</AppText>
         </View></Card>
 
-        {sandbox || google ? <Card><View style={{ gap: spacing.md }}>
+        {(sandbox || google) && !user ? <Card><View style={{ gap: spacing.md }}>
+          <AppText variant="headline">{t('membership.signInTitle')}</AppText>
+          <AppText variant="subhead" color={semantic.textSecondary}>{t('membership.signInHint')}</AppText>
+          <Button title={t('membership.signInButton')} onPress={() => { premium.close(); openSignIn(); }} />
+        </View></Card> : null}
+
+        {(sandbox || google) && user ? <Card><View style={{ gap: spacing.md }}>
           {(['monthly', 'yearly'] as const).map(id => <Button key={id} variant={plan === id ? 'secondary' : 'ghost'}
             title={t('membership.' + id) + ' · ' + (sandbox ? t(id === 'monthly' ? 'membership.monthPrice' : 'membership.yearPrice')
               : plans.find(p => p.basePlan === id)?.displayPrice ?? '—')}

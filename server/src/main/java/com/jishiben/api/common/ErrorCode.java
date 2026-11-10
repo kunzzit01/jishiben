@@ -29,6 +29,8 @@ public enum ErrorCode {
     PREMIUM_REQUIRED,
     BILLING_OWNED_BY_OTHER,
     BILLING_CLAIM_REQUIRED,
+    /** 订阅需要先注册并登录记账账号 */
+    ACCOUNT_REQUIRED,
     NOT_IMPLEMENTED,
     INTERNAL_ERROR
 }

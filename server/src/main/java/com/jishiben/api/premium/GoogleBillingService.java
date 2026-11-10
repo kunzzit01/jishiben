@@ -51,6 +51,7 @@ public class GoogleBillingService {
      */
     public PremiumDtos.Status verify(String guest, String token, boolean restore, boolean claim) {
         requireGoogle();
+        premium.requireAccountForSubscribing();
         PremiumService.Subject caller = premium.subject(guest);
         PremiumService.Row known = find(token, false);
         if (known == null && !restore && !premium.settings().enrollmentOpen()) {

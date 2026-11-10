@@ -83,6 +83,8 @@ app:
     admin-email: ${BILLING_ADMIN_EMAIL:}
     admin-google-sub: ${BILLING_ADMIN_GOOGLE_SUB:}
     sync-grace-days: ${BILLING_SYNC_GRACE_DAYS:7}
+    # 游客能否订阅（2026-11-10 负责人决定：关闭，须注册登录后才能订阅）
+    guest-subscriptions: ${BILLING_GUEST_SUBSCRIPTIONS:false}
     package-name: ${BILLING_PACKAGE_NAME:com.kylim0103.jizhangapp}
     product-id: ${BILLING_PRODUCT_ID:premium}
     token-encryption-key: ${BILLING_TOKEN_ENCRYPTION_KEY:}

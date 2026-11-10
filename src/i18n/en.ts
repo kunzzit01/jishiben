@@ -2,6 +2,9 @@
 export const en = {
   membership: {
     deleteNotice: 'Deleting your account does not cancel a Google Play subscription. Manage or cancel renewal in Membership first.',
+    signInTitle: 'Sign in or register to subscribe',
+    signInHint: 'Membership belongs to your account, so it follows you to a new phone or a reinstall. Without signing in you can still use the free features such as entries and reminders.',
+    signInButton: 'Sign in / Register',
     title: 'Membership',
     sandbox: 'Development simulation · no charge',
     sandboxBanner: 'Development test: you will not be charged',
@@ -47,8 +50,8 @@ export const en = {
     applications: 'Latest 100 subscriptions / applications',
     auditLog: 'Recent activity',
     guest: 'Guest',
-    guestHint: 'No registration needed. After signing in you can bind the membership to your account; real Google purchases can be restored with the same Play account.',
-    guestHintSandbox: 'No registration needed. A guest simulated subscription lives only in this installation and is lost if the app is uninstalled or its data cleared.',
+    guestHint: 'Subscribing requires a registered, signed-in account.',
+    guestHintSandbox: 'Subscribing requires a registered, signed-in account.',
     claimTitle: 'This device has a guest membership',
     claim: 'Bind to this account',
     claimHint: 'After binding, the membership belongs to this account, the guest identity on this device stops working, and it cannot be moved to another account. Current account:',

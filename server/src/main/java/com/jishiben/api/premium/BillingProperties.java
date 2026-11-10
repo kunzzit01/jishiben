@@ -20,14 +20,23 @@ public class BillingProperties {
     private final String adminEmail;
     private final String adminGoogleSub;
     private final int syncGraceDays;
+    private final boolean guestSubscriptions;
 
+    /** Test/legacy constructor: guest subscriptions allowed (exercises the guest identity paths). */
+    public BillingProperties(String environment, boolean sandboxAllowed, boolean googleEnabled,
+                             String adminEmail, String adminGoogleSub, int syncGraceDays) {
+        this(environment, sandboxAllowed, googleEnabled, adminEmail, adminGoogleSub, syncGraceDays, true);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public BillingProperties(
             @Value("${app.billing.environment:production}") String environment,
             @Value("${app.billing.sandbox-allowed:false}") boolean sandboxAllowed,
             @Value("${app.billing.google-enabled:false}") boolean googleEnabled,
             @Value("${app.billing.admin-email:}") String adminEmail,
             @Value("${app.billing.admin-google-sub:}") String adminGoogleSub,
-            @Value("${app.billing.sync-grace-days:7}") int syncGraceDays) {
+            @Value("${app.billing.sync-grace-days:7}") int syncGraceDays,
+            @Value("${app.billing.guest-subscriptions:false}") boolean guestSubscriptions) {
         String env = environment == null ? "" : environment.trim().toLowerCase(Locale.ROOT);
         if (!STAGING.equals(env) && !PRODUCTION.equals(env)) {
             throw new IllegalStateException("app.billing.environment must be 'staging' or 'production'");
@@ -41,6 +50,7 @@ public class BillingProperties {
         this.adminEmail = adminEmail == null ? "" : adminEmail.trim();
         this.adminGoogleSub = adminGoogleSub == null ? "" : adminGoogleSub.trim();
         this.syncGraceDays = syncGraceDays;
+        this.guestSubscriptions = guestSubscriptions;
     }
 
     public String environment() { return environment; }
@@ -51,4 +61,6 @@ public class BillingProperties {
     public String adminEmail() { return adminEmail; }
     public String adminGoogleSub() { return adminGoogleSub; }
     public int syncGraceDays() { return syncGraceDays; }
+    /** Owner decision 2026-11-10: off — subscribing requires a registered, signed-in account. */
+    public boolean guestSubscriptions() { return guestSubscriptions; }
 }
