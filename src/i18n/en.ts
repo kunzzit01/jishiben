@@ -702,11 +702,9 @@ export const en = {
   },
   report: {
     yearLabel: '%{y}',
-    dayLabel: '%{m}/%{d}',
     dayCount: '%{n} days',
     heroTotalExpense: 'Spent',
     heroTotalIncome: 'Earned',
-    clearCustom: 'Clear custom range and go back to this month',
     expense: 'Expense',
     income: 'Income',
     totalExpense: 'Total Expense',

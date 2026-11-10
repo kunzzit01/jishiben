@@ -713,11 +713,9 @@ export const zh = {
   },
   report: {
     yearLabel: '%{y}年',
-    dayLabel: '%{m}月%{d}日',
     dayCount: '%{n} 天',
     heroTotalExpense: '共支出',
     heroTotalIncome: '共收入',
-    clearCustom: '退出自定义范围，回到本月',
     expense: '支出',
     income: '收入',
     totalExpense: '总支出',

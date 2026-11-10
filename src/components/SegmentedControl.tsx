@@ -49,6 +49,8 @@ interface Props {
   appearance?: 'solid' | 'glass';
   /** 选中块：'white'（默认，白色胶囊）/ 'accent'（accent 渐变 + 白字，设置页深色模式用） */
   thumb?: 'white' | 'accent';
+  /** 紧凑档：段最小宽 40、内衬 8（一行里还要和别的内容并排时用，如统计页 周/月/年/自定义） */
+  compact?: boolean;
 }
 
 /** 槽高（视觉高度） */
@@ -69,6 +71,7 @@ export default function SegmentedControl({
   stretch,
   appearance = 'solid',
   thumb = 'white',
+  compact,
 }: Props) {
   const { semantic, radius, motion, gradients, glassPill } = useTheme();
   const styles = useMemo(() => makeStyles(semantic, radius), [semantic, radius]);
@@ -152,7 +155,7 @@ export default function SegmentedControl({
         return (
           <TouchableOpacity
             key={opt.value}
-            style={[styles.segment, stretch && styles.segmentStretch]}
+            style={[styles.segment, compact && styles.segmentCompact, stretch && styles.segmentStretch]}
             activeOpacity={0.75}
             onLayout={onSegmentLayout(opt.value)}
             hitSlop={{ top: SEGMENT_HIT_SLOP, bottom: SEGMENT_HIT_SLOP, left: 0, right: 0 }}
@@ -239,5 +242,6 @@ function makeStyles(semantic: SemanticColors, radius: Radius) {
     },
     // stretch 档：每段等分（四段各占 1/4 行宽）
     segmentStretch: { flex: 1 },
+    segmentCompact: { minWidth: 40, paddingHorizontal: 8 },
   });
 }

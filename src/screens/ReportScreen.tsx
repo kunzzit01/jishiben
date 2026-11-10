@@ -356,23 +356,21 @@ export default function ReportScreen() {
 
   // 周期主标题与副标题（页头大字）：
   //   月 → 2026年11月；年 → 2026年；周 / 自定义 → 11月3日 – 11月12日（年份与天数放副标题）
-  const { periodTitle, periodMeta, customChipLabel } = useMemo(() => {
+  const { periodTitle, periodMeta } = useMemo(() => {
     const parse = (iso: string) => {
       const [y, m, d] = iso.split('-').map(Number);
       return { y, m, d };
     };
     const s0 = parse(range.start);
     const e0 = parse(range.end);
-    const day = (p: { m: number; d: number }) => tr('report.dayLabel', { m: p.m, d: p.d });
     const days = Math.round((Date.UTC(e0.y, e0.m - 1, e0.d) - Date.UTC(s0.y, s0.m - 1, s0.d)) / 86400000) + 1;
     const years = s0.y === e0.y ? `${s0.y}` : `${s0.y}–${e0.y}`;
-    const chip = `${shortFromIso(range.start)}–${shortFromIso(range.end)}`;
-    if (rangeType === 'month') return { periodTitle: range.label, periodMeta: '', customChipLabel: chip };
-    if (rangeType === 'year') return { periodTitle: tr('report.yearLabel', { y: s0.y }), periodMeta: '', customChipLabel: chip };
+    if (rangeType === 'month') return { periodTitle: range.label, periodMeta: '' };
+    if (rangeType === 'year') return { periodTitle: tr('report.yearLabel', { y: s0.y }), periodMeta: '' };
     return {
-      periodTitle: `${day(s0)} – ${day(e0)}`,
+      // 一行布局里给区间的空间有限：标题用数字短格式（11/09 – 11/20），年份与天数在下方小字
+      periodTitle: `${shortFromIso(range.start)}–${shortFromIso(range.end)}`,
       periodMeta: `${years} · ${tr('report.dayCount', { n: days })}`,
-      customChipLabel: chip,
     };
   }, [range, rangeType, tr]);
 
@@ -396,14 +394,6 @@ export default function ReportScreen() {
     hapticSelection();
     if (rangeType === 'custom') setAnchor(new Date());
     setRangeType(v);
-  };
-
-  // 自定义胶囊上的 ✕：退出自定义，回到本月
-  const clearCustomRange = () => {
-    hapticSelection();
-    setCustomRange(null);
-    setAnchor(new Date());
-    setRangeType('month');
   };
 
   // 中间周期视图的跟手滑动：拖动时内容实时跟随（带阻尼），松手按距离/速度决定
@@ -751,96 +741,91 @@ export default function ReportScreen() {
           </View>
         </View>
 
-        {/* 周期主标题：日期本身当标题（大字居中）+ 一行小字（年份 / 天数 / 本期总额）。
-            按月 / 年 / 周时左右箭头换期（仍保留饼图区滑动）；自定义区间时箭头收起。
-            点标题 = 打开日历面板改范围 */}
-        <View style={[styles.periodHero, { paddingHorizontal: pagePadding }]}>
-          {rangeType !== 'custom' ? (
-            <GlassRoundButton
-              icon="chevron-back"
-              accessibilityLabel={tr('report.prevPeriod')}
-              onPress={() => shiftRange(-1)}
-              testID="report-prev"
-            />
-          ) : (
-            <View style={styles.periodHeroSpacer} />
-          )}
-          <Pressable
-            style={styles.periodHeroCenter}
-            onPress={openDatePicker}
-            accessibilityRole="button"
-            accessibilityLabel={tr('addTx.dateSheetTitle')}
-            testID="report-period"
-          >
-            <AppText
-              variant="title2"
-              weight="600"
-              color={semantic.textPrimary}
-              style={styles.periodHeroTitle}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-            >
-              {periodTitle}
-            </AppText>
-            {(periodMeta || !isEmpty) && (
-              <View style={styles.periodHeroMeta}>
-                {periodMeta ? (
-                  <AppText variant="footnote" color={semantic.textSecondary}>
-                    {periodMeta + (!isEmpty ? ' · ' : '')}
-                  </AppText>
-                ) : null}
-                {!isEmpty && (
-                  <>
-                    <AppText variant="footnote" color={semantic.textSecondary}>
-                      {tr(type === 'expense' ? 'report.heroTotalExpense' : 'report.heroTotalIncome') + ' '}
-                    </AppText>
-                    <MoneyText
-                      value={periodTotal}
-                      kind="plain"
-                      currency={selectedReportCurrency}
-                      showCurrency
-                      variant="footnote"
-                      color={semantic.textSecondary}
-                    />
-                  </>
-                )}
-              </View>
+        {/* 周期一行（省竖向空间）：左 = ‹ 日期标题 ›（下挂年份 / 天数 / 本期总额小字，点标题开日历），
+            右 = 周 / 月 / 年 / 自定义 四档分段。自定义时箭头收起，标题换成完整区间；
+            退出自定义 = 直接点周 / 月 / 年；再点「自定义」= 重新选范围 */}
+        <View style={[styles.periodRow, { paddingHorizontal: pagePadding }]}>
+          <View style={styles.periodLeft}>
+            {rangeType !== 'custom' && (
+              <Pressable
+                onPress={() => shiftRange(-1)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={tr('report.prevPeriod')}
+                testID="report-prev"
+                style={styles.periodArrow}
+              >
+                <Ionicons name="chevron-back" size={18} color={semantic.textSecondary} />
+              </Pressable>
             )}
-          </Pressable>
-          {rangeType !== 'custom' ? (
-            <GlassRoundButton
-              icon="chevron-forward"
-              accessibilityLabel={tr('report.nextPeriod')}
-              onPress={() => shiftRange(1)}
-              testID="report-next"
+            <Pressable
+              style={styles.periodTitleWrap}
+              onPress={openDatePicker}
+              accessibilityRole="button"
+              accessibilityLabel={tr('addTx.dateSheetTitle')}
+              testID="report-period"
+            >
+              <AppText
+                variant="headline"
+                weight="600"
+                color={semantic.textPrimary}
+                style={[styles.periodTitle, (rangeType === 'week' || rangeType === 'custom') && styles.periodTitleRange]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
+              >
+                {periodTitle}
+              </AppText>
+              {(periodMeta || !isEmpty) && (
+                <View style={styles.periodMeta}>
+                  {periodMeta ? (
+                    <AppText variant="caption" color={semantic.textSecondary} numberOfLines={1}>
+                      {periodMeta + (!isEmpty ? ' · ' : '')}
+                    </AppText>
+                  ) : null}
+                  {!isEmpty && (
+                    <>
+                      <AppText variant="caption" color={semantic.textSecondary}>
+                        {tr(type === 'expense' ? 'report.heroTotalExpense' : 'report.heroTotalIncome') + ' '}
+                      </AppText>
+                      <MoneyText
+                        value={periodTotal}
+                        kind="plain"
+                        currency={selectedReportCurrency}
+                        showCurrency
+                        variant="caption"
+                        color={semantic.textSecondary}
+                      />
+                    </>
+                  )}
+                </View>
+              )}
+            </Pressable>
+            {rangeType !== 'custom' && (
+              <Pressable
+                onPress={() => shiftRange(1)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={tr('report.nextPeriod')}
+                testID="report-next"
+                style={styles.periodArrow}
+              >
+                <Ionicons name="chevron-forward" size={18} color={semantic.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+          <View style={styles.rangeTray}>
+            <SegmentedControl
+              compact
+              appearance="glass"
+              options={(['week', 'month', 'year', 'custom'] as const).map((v) => ({
+                value: v,
+                label: tr(RANGE_TYPE_KEYS[v]),
+              }))}
+              selected={rangeType}
+              onSelect={(v) => (v === 'custom' ? openDatePicker() : selectRangeType(v as Exclude<RangeType, 'custom'>))}
             />
-          ) : (
-            <View style={styles.periodHeroSpacer} />
-          )}
-        </View>
-
-        {/* 周期胶囊：周 / 月 / 年 / 自定义 —— 四档常驻、一行放得下（不再临时往分段控件里塞第 4 段）。
-            自定义选中时胶囊直接显示区间 + ✕，点它回到本月；改范围点上面的大标题或未选中时的「自定义」 */}
-        <View style={[styles.periodPills, { paddingHorizontal: pagePadding }]}>
-          {(['week', 'month', 'year'] as const).map((v) => (
-            <Chip
-              key={v}
-              label={tr(RANGE_TYPE_KEYS[v])}
-              selected={rangeType === v}
-              onPress={() => selectRangeType(v)}
-              testID={`report-range-${v}`}
-            />
-          ))}
-          <Chip
-            icon="calendar-outline"
-            label={rangeType === 'custom' && customRange ? customChipLabel : tr(RANGE_TYPE_KEYS.custom)}
-            selected={rangeType === 'custom'}
-            trailingIcon={rangeType === 'custom' ? 'close' : undefined}
-            onPress={rangeType === 'custom' ? clearCustomRange : openDatePicker}
-            accessibilityLabel={rangeType === 'custom' ? tr('report.clearCustom') : tr(RANGE_TYPE_KEYS.custom)}
-            testID="report-range-custom"
-          />
+          </View>
         </View>
 
         {/* 多币种切换：这段时间里出现不止一种货币时才显示（排序与行为照旧，只换成标准 Chip） */}
@@ -1047,15 +1032,17 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, layout: Layout, 
     heroTitle: { fontSize: 30, lineHeight: 36 },
     // 「支出 / 收入」小切换：按内容宽，不再和周期控件平分一行
     typeTray: { width: 140, borderRadius: radius.full, backgroundColor: semantic.surfaceSunken },
-    // 周期主标题行：‹  大标题 + 副标题  ›
-    periodHero: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.sm, marginTop: spacing.xs },
-    periodHeroCenter: { flex: 1, minWidth: 0, alignItems: 'center', paddingVertical: spacing.xs },
-    periodHeroTitle: { textAlign: 'center', fontSize: 24, lineHeight: 30 },
-    periodHeroMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-    // 自定义时箭头收起：同宽占位，保证大标题始终居中
-    periodHeroSpacer: { width: 36, height: 36 },
-    // 周期胶囊：周 / 月 / 年 / 自定义，居中一行（窄屏 / 大字自动换行，不截断）
-    periodPills: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: spacing.sm, rowGap: spacing.xs, marginTop: spacing.md },
+    // 周期一行：左「‹ 标题 ›」占剩余宽、可缩；右四档分段按内容宽
+    periodRow: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.sm, marginTop: spacing.xs },
+    periodLeft: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' },
+    periodArrow: { width: 22, height: 32, alignItems: 'center', justifyContent: 'center' },
+    periodTitleWrap: { flexShrink: 1, minWidth: 0, paddingHorizontal: 2 },
+    periodTitle: { fontSize: 18, lineHeight: 24 },
+    // 区间标题（周 / 自定义：11/02–11/08）字更长，降一档，旁边还有箭头也放得下
+    periodTitleRange: { fontSize: 16 },
+    periodMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
+    // 周 / 月 / 年 / 自定义 分段托盘（实底凹槽，同支出 / 收入）
+    rangeTray: { flexShrink: 0, borderRadius: radius.full, backgroundColor: semantic.surfaceSunken },
     // 饼图卡：内衬 20（夜间是 GlassView、日间是白卡，两者都在这里给同样的内衬）
     donutCard: { marginTop: spacing.md, padding: 20 },
     // 日间白卡：与列表卡统一 26（阴影 / 白底由 Card 自己给）
