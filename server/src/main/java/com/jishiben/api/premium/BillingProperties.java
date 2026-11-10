@@ -5,8 +5,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Deployment-level billing configuration. Staging and production are separate deployments with
- * separate databases; production refuses to start with the simulator allowed.
+ * Deployment-level billing configuration. One deployment serves the app; whether the simulator
+ * may be used is a deployment flag, and whether it is actually on is the administrator's switch
+ * (billing_settings.sandbox_open, off by default). Simulated orders never touch Google Play rows.
  */
 @Component
 public class BillingProperties {
@@ -31,9 +32,6 @@ public class BillingProperties {
         if (!STAGING.equals(env) && !PRODUCTION.equals(env)) {
             throw new IllegalStateException("app.billing.environment must be 'staging' or 'production'");
         }
-        if (PRODUCTION.equals(env) && sandboxAllowed) {
-            throw new IllegalStateException("Simulated billing (BILLING_SANDBOX_ALLOWED) is not allowed in production");
-        }
         if (syncGraceDays < 0 || syncGraceDays > 30) {
             throw new IllegalStateException("app.billing.sync-grace-days must be between 0 and 30");
         }
@@ -47,8 +45,8 @@ public class BillingProperties {
 
     public String environment() { return environment; }
     public boolean production() { return PRODUCTION.equals(environment); }
-    /** The simulator can only ever run in a staging deployment that explicitly allows it. */
-    public boolean sandboxAllowed() { return !production() && sandboxAllowed; }
+    /** The administrator may switch the simulator on only when the deployment allows it. */
+    public boolean sandboxAllowed() { return sandboxAllowed; }
     public boolean googleEnabled() { return googleEnabled; }
     public String adminEmail() { return adminEmail; }
     public String adminGoogleSub() { return adminGoogleSub; }

@@ -123,6 +123,19 @@ ensureKeepRule(
   ].join('\n')
 );
 
+// Google Play 内购（expo-iap → OpenIAP → Play Billing Library）：反射 + JSON 映射，整包保留
+ensureKeepRule(
+  'dev.hyo.**',
+  [
+    '',
+    '# ---- jishiben: Google Play 内购（expo-iap / OpenIAP / Play Billing）----',
+    '-keep class dev.hyo.** { *; }',
+    '-keep class io.github.hyochan.** { *; }',
+    '-keep class com.android.billingclient.** { *; }',
+    ''
+  ].join('\n')
+);
+
 if (existsSync(proguard)) {
   const cur = readFileSync(proguard, 'utf8');
   if (!cur.includes('jishiben: R8 keep rules')) {

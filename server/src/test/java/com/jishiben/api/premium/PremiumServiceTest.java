@@ -66,17 +66,22 @@ class PremiumServiceTest {
         assertThat(db.jdbc.queryForList("SELECT google_sub FROM billing_admins", String.class)).containsExactly(ADMIN_SUB);
     }
 
-    @Test void productionRefusesTheSimulatorAndAdminCannotOpenIt() {
-        assertThatThrownBy(() -> new BillingProperties("production", true, false, ADMIN_EMAIL, "", 7))
-                .isInstanceOf(IllegalStateException.class);
-        var prod = new BillingProperties("production", false, true, ADMIN_EMAIL, "", 7);
-        var prodAdmins = db.admins(prod);
-        db.pinAdmin(prodAdmins);
-        var prodService = new PremiumService(db.jdbc, prod, prodAdmins);
+    @Test void simulatorStaysOffUnlessTheDeploymentAllowsItAndTheAdminOpensIt() {
+        // Deployment does not allow it: admin cannot switch it on.
+        var locked = new BillingProperties("production", false, true, ADMIN_EMAIL, "", 7);
+        var lockedAdmins = db.admins(locked);
+        db.pinAdmin(lockedAdmins);
+        var lockedService = new PremiumService(db.jdbc, locked, lockedAdmins);
         signIn(1, ADMIN_EMAIL, AuthPrincipal.METHOD_GOOGLE);
-        assertThatThrownBy(() -> db.inTx(() -> prodService.updateSettings(new PremiumDtos.Settings(true, true, true))))
+        assertThatThrownBy(() -> db.inTx(() -> lockedService.updateSettings(new PremiumDtos.Settings(true, true, true))))
                 .isInstanceOf(ApiException.class);
-        assertThat(prodService.status(null).mode()).isEqualTo("GOOGLE_PLAY");
+        assertThat(lockedService.status(null).mode()).isEqualTo("GOOGLE_PLAY");
+        // Single deployment that allows it: off by default, on only after the admin opens it.
+        var single = new BillingProperties("production", true, true, ADMIN_EMAIL, "", 7);
+        var singleService = new PremiumService(db.jdbc, single, db.admins(single));
+        assertThat(singleService.status(null).sandboxAvailable()).isFalse();
+        db.inTx(() -> singleService.updateSettings(new PremiumDtos.Settings(true, true, false)));
+        assertThat(singleService.status(null).mode()).isEqualTo("SANDBOX");
     }
 
     @Test void settingChangesAreAudited() {

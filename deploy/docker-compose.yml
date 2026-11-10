@@ -63,9 +63,9 @@ services:
       DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-10}
       # Google 登录：ID Token 的受众白名单（Web application OAuth Client ID）。留空则功能关闭。
       GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
-      # 本 compose 是正式环境：强制 production，模拟入口永远关闭（staging 用 docker-compose.staging.yml）
+      # 唯一的线上环境。模拟订阅是否开启由管理员在 App 里控制（默认关闭）；设为 false 可彻底禁用
       BILLING_ENV: production
-      BILLING_SANDBOX_ALLOWED: "false"
+      BILLING_SANDBOX_ALLOWED: ${BILLING_SANDBOX_ALLOWED:-true}
       BILLING_GOOGLE_ENABLED: ${BILLING_GOOGLE_ENABLED:-false}
       BILLING_ADMIN_EMAIL: ${BILLING_ADMIN_EMAIL:-}
       BILLING_ADMIN_GOOGLE_SUB: ${BILLING_ADMIN_GOOGLE_SUB:-}
