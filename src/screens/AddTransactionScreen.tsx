@@ -2433,7 +2433,7 @@ function fxAmountText(raw: string, live: string | null): string {
             底部留白收紧(insets-32)：edge-to-edge 下根视图已延伸到导航条后面，
             再垫满 insets 会在键盘下方多出一条空位——键盘整体下移填补它 */}
         {amountKeypadOpen && (
-          <View ref={footerRef} style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}>
+          <View ref={footerRef} style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: noteOnly ? 6 : keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}>
             <AmountCalculatorKeypad
               onPressKey={handleExprKey}
               onPressToday={() => setDatePickerOpen(true)}
@@ -2746,6 +2746,8 @@ function fxAmountText(raw: string, live: string | null): string {
           onLayout={(e) => {
             // 实测网格区可见高度 → 决定铺多少行（至少 1 行，不封顶）
             const h = e.nativeEvent.layout.height;
+            // 安卓备注聚焦：面板上抬会临时压矮网格区，此时冻结行数测量，别把类别裁成一行
+            if (noteOnly) return;
             setGridH((prev) => {
               if (prev != null && Math.abs(prev - h) <= 0.5) return prev;
               setGridRowAdjust(0); // 屏高变了，重新从估算值开始收敛
@@ -2753,7 +2755,7 @@ function fxAmountText(raw: string, live: string | null): string {
             });
           }}
           onContentSizeChange={(_w, h) => {
-            if (gridH == null || h <= 0) return;
+            if (gridH == null || h <= 0 || noteOnly) return;
             // 实测行高 = 内容高 / 已铺行数（含末尾「全部」那格）
             const rows = Math.max(1, Math.ceil((gridCategories.length + 1) / gridColumns));
             const rowH = h / rows;
@@ -2833,7 +2835,7 @@ function fxAmountText(raw: string, live: string | null): string {
       {amountKeypadOpen && (
         <View
           ref={footerRef}
-          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}
+          style={[styles.stickyFooter, isShort && styles.stickyFooterShort, { paddingBottom: noteOnly ? 6 : keypadBottomPad + (forceHideWanted ? 0 : tabClearance), paddingHorizontal: 0, marginBottom: keypadKeyboardLift + androidKbLift }]}
         >
           <AmountCalculatorKeypad
             onPressKey={(key) => setAmountCursor(amountExpr.pressKeyAt(key, amountCursor))}
