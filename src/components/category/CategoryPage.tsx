@@ -30,7 +30,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent, ViewStyle } from 'react-n
 const WEB_GLASS_INTENSITY = Platform.OS === 'web' ? 8 : undefined;
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
@@ -401,9 +401,15 @@ export default function CategoryPage({
   const { width: windowW, height: windowH } = useWindowDimensions();
   // 图标弹层用像素高度：百分比在 web 的 Pressable 里会算成 0（网格被压扁 → 图标叠成黑块）
   const PICKER_H = Math.min(420, Math.round(windowH * 0.55));
-  // 图标格：6 列定宽（百分比宽 + aspectRatio 在 ScrollView 内会被算成 0，图标全挤成一行乱码）
-  const ICON_COLS = 6;
-  const ICON_CELL_W = Math.floor((Math.min(windowW, 560) - 20) / ICON_COLS);
+  // 底部安全区：弹层是 Modal，安卓 edge-to-edge 下最后一行会被三键导航条盖住，必须让开
+  const pickerInsets = useSafeAreaInsets();
+  /* 图标格：按网格**实测宽度**定列数与格宽（定像素，不用百分比 —— 百分比宽 + aspectRatio 在 ScrollView 内
+   * 会被算成 0）。原先按 windowW 推算 6 列，但 Modal 里的实际可用宽与 windowW 不一致，
+   * 真机上折成 5 列且右侧空出一大块。现在：列数 = 可用宽 ÷ 58 夹在 5~8，格宽 = 可用宽 ÷ 列数，整行铺满、左右对齐。 */
+  const [iconGridW, setIconGridW] = useState(0);
+  const iconGridInnerW = iconGridW > 0 ? iconGridW - 20 : Math.min(windowW, 560) - 20;
+  const ICON_COLS = Math.min(8, Math.max(5, Math.floor(iconGridInnerW / 58)));
+  const ICON_CELL_W = Math.floor(iconGridInnerW / ICON_COLS);
   const ICON_CELL_H = Math.round(ICON_CELL_W / 1.15);
 
   /* —— 内联新增小卡的聚焦滚动（原在记一笔，两处入口共用一套） ——
@@ -1540,7 +1546,10 @@ export default function CategoryPage({
               intensity={WEB_GLASS_INTENSITY}
               radius={0}
               fill={semantic.homeCard}
-              style={[styles.iconPickerSheet, { height: PICKER_H }]}
+              style={[
+                styles.iconPickerSheet,
+                { height: PICKER_H + pickerInsets.bottom, paddingBottom: styles.iconPickerSheet.paddingBottom + pickerInsets.bottom },
+              ]}
             >
               <View style={styles.iconPickerHeader}>
                 <AppText variant="headline">{t('addTx.pickIconTitle')}</AppText>
@@ -1557,6 +1566,10 @@ export default function CategoryPage({
               </View>
               <ScrollView
                 style={[styles.iconPickerGrid, { height: PICKER_H - 64 }]}
+                onLayout={(e) => {
+                  const w = Math.round(e.nativeEvent.layout.width);
+                  if (w > 0 && Math.abs(w - iconGridW) > 1) setIconGridW(w);
+                }}
                 contentContainerStyle={styles.iconPickerGridContent}
                 keyboardShouldPersistTaps="handled"
               >
