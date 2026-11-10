@@ -747,7 +747,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const getCategoryById = (id: string) => categories.find((c) => c.id === id);
+  const getCategoryById = useCallback((id: string) => categories.find((c) => c.id === id), [categories]);
 
   const addLedger: AppContextValue['addLedger'] = async (name, icon, color) => {
     setLedgers((prev) => [...prev, { id: genId(), name, icon, color: color ?? LEDGER_DEFAULT_COLOR, createdAt: Date.now() }]);
@@ -879,12 +879,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // 引用某账户的交易条数：assetId / fromAssetId / toAssetId 任一命中即算一条
-  const assetRecordCount: AppContextValue['assetRecordCount'] = (id) =>
-    transactions.reduce(
-      (n, t) => (t.assetId === id || t.fromAssetId === id || t.toAssetId === id ? n + 1 : n),
-      0
-    );
-  const assetHasRecords: AppContextValue['assetHasRecords'] = (id) => assetRecordCount(id) > 0;
+  const assetRecordCount: AppContextValue['assetRecordCount'] = useCallback(
+    (id) =>
+      transactions.reduce(
+        (n, t) => (t.assetId === id || t.fromAssetId === id || t.toAssetId === id ? n + 1 : n),
+        0
+      ),
+    [transactions]
+  );
+  const assetHasRecords: AppContextValue['assetHasRecords'] = useCallback(
+    (id) => assetRecordCount(id) > 0,
+    [assetRecordCount]
+  );
 
   const archiveAsset: AppContextValue['archiveAsset'] = async (id) => {
     const archivedAt = new Date().toISOString();
@@ -924,14 +930,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAssets((prev) => prev.filter((a) => a.id !== id));
   };
 
-  const getAssetById = (id: string) => assets.find((a) => a.id === id);
+  const getAssetById = useCallback((id: string) => assets.find((a) => a.id === id), [assets]);
 
   const setDefaultAsset: AppContextValue['setDefaultAsset'] = async (id) => {
     // 归档账户不能设为默认
     setAssets((prev) => prev.map((a) => ({ ...a, isDefault: id !== null && a.id === id && !a.archivedAt })));
   };
 
-  const getAssetBalance: AppContextValue['getAssetBalance'] = (assetId) => {
+  const getAssetBalance: AppContextValue['getAssetBalance'] = useCallback((assetId) => {
     const asset = assets.find((a) => a.id === assetId);
     if (!asset) return 0;
     let balance = asset.initialBalance;
@@ -946,7 +952,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (t.type === 'expense') balance -= t.amount;
     });
     return balance;
-  };
+  }, [assets, transactions]);
 
   const addTransfer: AppContextValue['addTransfer'] = async ({
     fromAssetId,
@@ -1130,76 +1136,99 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [loading, paymentPlans, activeLedgerId]);
 
+  const mutatorsRef = useRef<Record<string, (...args: any[]) => any>>({});
+  mutatorsRef.current = {
+    addPaymentPlan,
+    updatePaymentPlan,
+    deletePaymentPlan,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+    updateTransfer,
+    addCategory,
+    addCategoryGroup,
+    deleteCategoryGroup,
+    updateCategory,
+    deleteCategory,
+    setBudget,
+    renameBudget,
+    addLedger,
+    updateLedger,
+    promotePendingLedger,
+    renameLedger,
+    deleteLedger,
+    clearAllData,
+    setActiveLedgerId,
+    setDefaultLedger,
+    setCurrency,
+    setPeriodPreference,
+    setDateFormat,
+    setWeekStartsOn,
+    setDecimalPlaces,
+    addAsset,
+    updateAsset,
+    deleteAsset,
+    deleteAssetDeep,
+    archiveAsset,
+    unarchiveAsset,
+    setDefaultAsset,
+    addTransfer,
+  };
+  // 稳定引用的写操作：函数本体每次渲染都是新闭包（读最新 state），直接放进 context value 会让
+  // 全部消费者在每次 Provider 渲染时都重渲。这里对外暴露永不变的代理，调用时转给 mutatorsRef 里最新的那份。
+  const stableMutators = useMemo(() => {
+    const out: Record<string, (...args: any[]) => any> = {};
+    for (const name of ['addPaymentPlan', 'updatePaymentPlan', 'deletePaymentPlan', 'addTransaction', 'updateTransaction', 'deleteTransaction', 'updateTransfer', 'addCategory', 'addCategoryGroup', 'deleteCategoryGroup', 'updateCategory', 'deleteCategory', 'setBudget', 'renameBudget', 'addLedger', 'updateLedger', 'promotePendingLedger', 'renameLedger', 'deleteLedger', 'clearAllData', 'setActiveLedgerId', 'setDefaultLedger', 'setCurrency', 'setPeriodPreference', 'setDateFormat', 'setWeekStartsOn', 'setDecimalPlaces', 'addAsset', 'updateAsset', 'deleteAsset', 'deleteAssetDeep', 'archiveAsset', 'unarchiveAsset', 'setDefaultAsset', 'addTransfer']) {
+      out[name] = (...args: any[]) => mutatorsRef.current[name](...args);
+    }
+    return out as Pick<AppContextValue, 'addPaymentPlan' | 'updatePaymentPlan' | 'deletePaymentPlan' | 'addTransaction' | 'updateTransaction' | 'deleteTransaction' | 'updateTransfer' | 'addCategory' | 'addCategoryGroup' | 'deleteCategoryGroup' | 'updateCategory' | 'deleteCategory' | 'setBudget' | 'renameBudget' | 'addLedger' | 'updateLedger' | 'promotePendingLedger' | 'renameLedger' | 'deleteLedger' | 'clearAllData' | 'setActiveLedgerId' | 'setDefaultLedger' | 'setCurrency' | 'setPeriodPreference' | 'setDateFormat' | 'setWeekStartsOn' | 'setDecimalPlaces' | 'addAsset' | 'updateAsset' | 'deleteAsset' | 'deleteAssetDeep' | 'archiveAsset' | 'unarchiveAsset' | 'setDefaultAsset' | 'addTransfer'>;
+  }, []);
+  const contextValue = useMemo<AppContextValue>(
+    () => ({
+      transactions,
+      categories,
+      budgets,
+      // 界面永远拿到至少一本账本（真账本未到位时是内存占位，不落盘、不参与同步）
+      ledgers: ledgers.length > 0 ? ledgers : [pendingLedger],
+      activeLedgerId: effectiveActiveLedgerId,
+      // 占位账本不是什么"默认账本"，别给它挂默认标记
+      defaultLedgerId:
+        ledgers.length === 0
+          ? ''
+          : ledgers.some((l) => l.id === defaultLedgerId)
+            ? defaultLedgerId
+            : effectiveActiveLedgerId,
+      currency,
+      currencySymbol: getCurrencySymbol(currency),
+      periodPreference,
+      assets,
+      activeAssets,
+      assetBelongsToActiveLedger,
+      dateFormat,
+      weekStartsOn,
+      decimalPlaces,
+      loading,
+      paymentPlans,
+      categoryGroups,
+      getCategoryById,
+      assetRecordCount,
+      assetHasRecords,
+      getAssetById,
+      getAssetBalance,
+      reloadFromStorage: loadFromStorage,
+      ...stableMutators,
+    }),
+    [
+      transactions, categories, budgets, ledgers, pendingLedger, effectiveActiveLedgerId, defaultLedgerId,
+      currency, periodPreference, assets, activeAssets, assetBelongsToActiveLedger, dateFormat, weekStartsOn,
+      decimalPlaces, loading, paymentPlans, categoryGroups, getCategoryById, assetRecordCount, assetHasRecords,
+      getAssetById, getAssetBalance, loadFromStorage, stableMutators,
+    ]
+  );
+
   return (
     <AppContext.Provider
-      value={{
-        transactions,
-        categories,
-        budgets,
-        // 界面永远拿到至少一本账本（真账本未到位时是内存占位，不落盘、不参与同步）
-        ledgers: ledgers.length > 0 ? ledgers : [pendingLedger],
-        activeLedgerId: effectiveActiveLedgerId,
-        // 占位账本不是什么"默认账本"，别给它挂默认标记
-        defaultLedgerId:
-          ledgers.length === 0
-            ? ''
-            : ledgers.some((l) => l.id === defaultLedgerId)
-              ? defaultLedgerId
-              : effectiveActiveLedgerId,
-        currency,
-        currencySymbol: getCurrencySymbol(currency),
-        periodPreference,
-        assets,
-        activeAssets,
-        assetBelongsToActiveLedger,
-        dateFormat,
-        weekStartsOn,
-        decimalPlaces,
-        loading,
-        paymentPlans,
-        addPaymentPlan,
-        updatePaymentPlan,
-        deletePaymentPlan,
-        addTransaction,
-        updateTransaction,
-        deleteTransaction,
-        updateTransfer,
-        addCategory,
-        addCategoryGroup,
-        deleteCategoryGroup,
-        updateCategory,
-        categoryGroups,
-        deleteCategory,
-        setBudget,
-        renameBudget,
-        getCategoryById,
-        addLedger,
-        updateLedger,
-        promotePendingLedger,
-        renameLedger,
-        deleteLedger,
-        clearAllData,
-        setActiveLedgerId,
-        setDefaultLedger,
-        setCurrency,
-        setPeriodPreference,
-        setDateFormat,
-        setWeekStartsOn,
-        setDecimalPlaces,
-        addAsset,
-        updateAsset,
-        deleteAsset,
-        deleteAssetDeep,
-        archiveAsset,
-        unarchiveAsset,
-        assetRecordCount,
-        assetHasRecords,
-        getAssetById,
-        getAssetBalance,
-        setDefaultAsset,
-        addTransfer,
-        reloadFromStorage: loadFromStorage,
-      }}
+      value={contextValue}
     >
       {children}
     </AppContext.Provider>

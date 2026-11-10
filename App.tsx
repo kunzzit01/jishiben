@@ -91,6 +91,12 @@ import CompoundInterestScreen from './src/screens/CompoundInterestScreen';
 import OverviewScreen from './src/screens/OverviewScreen';
 import NoticeCenterScreen from './src/screens/NoticeCenterScreen';
 import ReminderSettingsScreen from './src/screens/ReminderSettingsScreen';
+import { enableFreeze } from 'react-native-screens';
+
+// 切到别的 Tab 后，原 Tab 暂停重渲染（react-freeze）：记一笔页输入 / 同步回写数据时，
+// 后台的首页 / 资产 / 统计不再跟着整页重画（它们本来就被 display:none，白画而已）。
+// 状态与滚动位置都保留，切回来时一次性补上最新数据。需要先全局打开，Tab 的 freezeOnBlur 才生效。
+enableFreeze(true);
 
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -578,6 +584,7 @@ function AppContent() {
           )}
           screenOptions={({ route }) => ({
             headerShown: false,
+            freezeOnBlur: true,
             // 选中 = 实心图标 + palette.tabActive；未选中 = 线框图标 + palette.tabInactive
             // （颜色唯一来源改为 useHomePalette：与参考图底栏同一个蓝，不再走旧语义令牌）
             tabBarActiveTintColor: palette.tabActive,
