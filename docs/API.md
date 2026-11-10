@@ -417,7 +417,6 @@
 
 | 情况 | 响应 |
 |---|---|
-| 服务端没配 AI 密钥 | `503 AI_UNAVAILABLE`（**不是崩溃**） |
 | 图片 > 6 MiB | `413 PAYLOAD_TOO_LARGE` |
 | base64 非法 / mime 不在白名单 | `400 VALIDATION_FAILED` |
 | 上游超时/拒答 | `502 UPSTREAM_ERROR`（只回状态码，不回显上游 body，永不回显密钥） |
@@ -449,7 +448,6 @@
 | `PAYLOAD_TOO_LARGE` | 413 | 收据图片超过上限 |
 | `NOT_IMPLEMENTED` | 501 | 会员购买（桩） |
 | `UPSTREAM_ERROR` | 502 | 上游汇率/AI 服务异常 |
-| `AI_UNAVAILABLE` | 503 | 服务端未配置 AI 密钥 |
 | `INTERNAL_ERROR` | 500 | 未预期异常（日志有堆栈，响应只有一句话） |
 
 ---
@@ -460,7 +458,6 @@
 |---|---|---|
 | `JWT_SECRET` | **是** | HS256 密钥，≥ 32 字节；缺失/过短时**拒绝启动**（fail closed） |
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | 是（生产） | MySQL 8 连接 |
-| `OPENROUTER_API_KEY` | 否 | 收据识别密钥；缺失时该端点 503，其它功能不受影响 |
 | `CORS_ALLOWED_ORIGINS` | 否 | 默认 `*` |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | 否 | 默认 `PT24H` / `P30D` |
 | `JPA_DDL_AUTO` | 否 | 默认 `validate`（表结构由 Flyway 拥有） |
@@ -483,67 +480,5 @@
 
 ---
 
-### 3.16 AI 小票识别（经服务端中转，客户端不持有第三方密钥）
-
-| 方法 | 路径 | 鉴权 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/ai/receipt-scan` | Bearer | 上传票据图片 base64，返回结构化记账字段 |
-
-**请求**：`{ "imageBase64": "<裸 base64 或 data:image/*;base64,...>" }`
-只受理 PNG / JPEG / WEBP / GIF / HEIC —— **按文件魔数嗅探**，不采信 data URL 里声明的类型。
-
-**响应 200**：`{ amount, merchant, date, type, suggestedCategory }`（识别不到的字段为 null，服务端 `non_null` 会整体省略）。
-
-**错误码**
-
-| HTTP | code | 含义 |
-| --- | --- | --- |
-| 400 | `VALIDATION_FAILED` | 非 base64 / 非图片字节 / 缺少 imageBase64 |
-| 401 | `UNAUTHORIZED` | 无 token 或 token 失效 |
-| 413 | `PAYLOAD_TOO_LARGE` | 解码后超过上限（默认 8MB） |
-| 502 | `AI_UPSTREAM_ERROR` | 上游拒绝或返回不可解析内容（不透传第三方原文，仅带其状态码） |
-| 503 | `AI_NOT_CONFIGURED` | 服务端未配置 `OPENROUTER_API_KEY`，客户端应降级为手动记账 |
-| 504 | `AI_UPSTREAM_TIMEOUT` | 上游超时（默认 30s） |
-
-**服务端环境变量**：`OPENROUTER_API_KEY`（必填，否则 503）、`OPENROUTER_MODEL`、`OPENROUTER_BASE_URL`、
-`AI_RECEIPT_TIMEOUT_MS`、`AI_RECEIPT_MAX_IMAGE_BYTES`。
-
-> 客户端**不再使用** `EXPO_PUBLIC_OPENROUTER_API_KEY`；密钥只存在于服务端。
-> 旧接口 `/api/receipts/extract` 已删除（receipt 包与测试一并移除），统一走本端点。
-
----
-
-### 3.17 AI 语音记账（经服务端中转，客户端不持有第三方密钥）
-
-| 方法 | 路径 | 鉴权 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/ai/voice-parse` | Bearer | 上传录音 base64，服务端**两步**：音频转写 → 文本解析成记账字段 |
-
-**请求**：`{ "audioBase64": "<裸 base64>", "format": "m4a" }`
-`format` 走白名单：`m4a/wav/mp3/aac/amr/caf/flac/ogg/opus/webm/mp4/mpga/mpeg`，不在表内 → 400。
-
-**响应 200**：`{ amount, merchant, date, type, suggestedCategory, note, transcript }`
-字段形状与 App 的 `VoiceAccountingResult` 一致（`transcript` 必有；其余识别不到为 null，服务端 `non_null` 会整体省略）。
-
-**错误码**
-
-| HTTP | code | 含义 |
-| --- | --- | --- |
-| 400 | `VALIDATION_FAILED` | 缺少 audioBase64 / 非法 base64 / format 缺失或不在白名单 |
-| 401 | `UNAUTHORIZED` | 无 token 或 token 失效 |
-| 413 | `PAYLOAD_TOO_LARGE` | 解码后超过上限（默认 10MB，`AI_VOICE_MAX_AUDIO_BYTES`） |
-| 502 | `AI_UPSTREAM_ERROR` | 转写或解析上游拒绝/返回不可解析内容（不透传第三方原文，仅带其状态码） |
-| 503 | `AI_NOT_CONFIGURED` | 服务端未配置 `OPENROUTER_API_KEY`，客户端应降级为手动记账 |
-| 504 | `AI_UPSTREAM_TIMEOUT` | 上游超时（与 AI 客户端共用的读超时，默认 30s/步） |
-
-**服务端环境变量**：`OPENROUTER_API_KEY`（必填，否则 503）、`OPENROUTER_MODEL`（第二步解析用）、
-`OPENROUTER_BASE_URL`、`AI_VOICE_STT_MODEL`（第一步转写用，默认 `qwen/qwen3-asr-flash-2026-02-10`）、
-`AI_VOICE_MAX_AUDIO_BYTES`。
-
-**日志边界**：只记 `format`、解码后字节数、模型 slug 与转写字符数；
-音频 base64、密钥、转写原文全文都不进日志。
-
-> 客户端**不再使用** `EXPO_PUBLIC_OPENROUTER_API_KEY` / `EXPO_PUBLIC_AI_MODEL`：
-> `src/config/aiConfig.ts` 里的 `OPENROUTER_API_KEY`、`AI_MODEL` 两个常量已删除，只保留 `isAiConfigured`。
-> `src/` 下对 `openrouter.ai` 与 `sk-or-v1` 的引用均为 0。
+> 3.16 AI 小票识别、3.17 AI 语音记账：已随 App「AI 专区」一并下线（服务端 `ai` 包已删除）。
 

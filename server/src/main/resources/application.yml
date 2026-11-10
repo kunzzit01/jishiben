@@ -88,24 +88,6 @@ app:
     refresh-token-ttl: "${JWT_REFRESH_TTL:P30D}"
   cors:
     allowed-origins: "${CORS_ALLOWED_ORIGINS:*}"
-  # The key is NEVER committed: it arrives from the environment, and an empty value is a supported
-  # state — the endpoint then answers 503 AI_NOT_CONFIGURED and the app falls back to manual entry.
-  ai:
-    openrouter:
-      api-key: "${OPENROUTER_API_KEY:}"
-      model: "${OPENROUTER_MODEL:anthropic/claude-sonnet-4.5}"
-      base-url: "${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}"
-      connect-timeout-ms: "${OPENROUTER_CONNECT_TIMEOUT_MS:5000}"
-      # 输出上限：推理型免费视觉模型会先吃掉上千 reasoning token，必须给足否则正文为空
-      max-tokens: "${AI_MAX_TOKENS:2048}"
-
-    voice-parse:
-      # Decoded audio ceiling: base64 on the wire is ~4/3 of this (10 MB decoded). Over it is 413.
-      max-audio-bytes: "${AI_VOICE_MAX_AUDIO_BYTES:10485760}"
-      # Speech-to-text model slug (transcription endpoint). The accounting parse reuses
-      # openrouter.model above; both steps share the read timeout configured for the AI client.
-      stt-model: "${AI_VOICE_STT_MODEL:qwen/qwen3-asr-flash-2026-02-10}"
-
 logging:
   level:
     root: INFO

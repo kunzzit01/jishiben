@@ -85,6 +85,5 @@ curl -s localhost/api/health          # {"status":"ok",...}
 ## 安全基线
 
 - 前端**不含任何第三方密钥**（`grep -r "sk-or-v1\|openrouter.ai" _repo/jishiben/src` = 0）；
-  小票识别与语音记账都经 `/api/ai/*` 中转，密钥只在服务端环境变量里。
 - 访问令牌只存内存 + 设备本地存储，不落日志、不进 URL。
 - `JWT_SECRET` 与数据库口令必须换成随机长串；`deploy/.env` 不提交。

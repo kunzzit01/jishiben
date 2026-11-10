@@ -11,9 +11,6 @@ cp deploy/.env.example deploy/.env
 vi deploy/.env      # 至少改这三个：
                     #   DB_PASSWORD / MYSQL_ROOT_PASSWORD / JWT_SECRET（>=32 随机字符）
 
-# 2) 可选：AI 能力（小票识别 / 语音记账）
-#    不填则相关接口返回 503 AI_NOT_CONFIGURED，App 自动降级为手动记账
-OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
 ## 二、启动
