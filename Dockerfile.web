@@ -173,7 +173,7 @@ server {
         proxy_connect_timeout 5s;
         proxy_send_timeout 60s;
         # 首次调用要加载 onnx 模型（数秒），给足读超时
-        proxy_read_timeout 60s;
+        proxy_read_timeout 120s;
         proxy_buffering off;
     }
 

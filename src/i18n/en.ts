@@ -481,6 +481,7 @@ export const en = {
     photoPermissionTitle: 'Photo permission required',
     photoPermissionMsg: 'Please allow this app to access photos in system settings',
     aiScanning: 'AI is scanning the receipt...',
+    aiScanningSlow: 'Handwritten or blurry receipts take longer to read — up to about a minute',
     fromWhichAccount: 'Which account are the funds transferred from?',
     toWhichAccount: 'Which account receives the funds?',
     feeDeductTransfer: 'Fee %{fee} deducted, %{net} incoming',

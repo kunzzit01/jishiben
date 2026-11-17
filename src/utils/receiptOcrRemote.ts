@@ -331,8 +331,8 @@ export interface VisionReceipt {
   legible: boolean;
 }
 
-/** 视觉识别比 OCR 慢（要等大模型）：给 30s，用户看着「识别中」可以接受，换来手写也读得出 */
-const VISION_TIMEOUT_MS = 30_000;
+/** 视觉识别比 OCR 慢（本机 CPU 跑视觉模型，一张约 20–50 秒）：给足时间，换来手写也读得出；服务端总超时 105s、nginx 120s */
+const VISION_TIMEOUT_MS = 110_000;
 /** 未启用（503 VISION_DISABLED）长冷却；其它失败短冷却 —— 都不会拖累原有 OCR 的熔断 */
 const VISION_DISABLED_COOLDOWN_MS = 30 * 60_000;
 const VISION_FAIL_COOLDOWN_MS = 2 * 60_000;

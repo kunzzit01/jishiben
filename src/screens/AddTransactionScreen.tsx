@@ -467,6 +467,16 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [autoMonthly, setAutoMonthly] = useState(false);
   const [note, setNote] = useState(editTransaction?.note ?? '');
   const [scanning, setScanning] = useState(false);
+  // 识别超过 6 秒（说明走到了本机视觉模型）才出现的耐心提示
+  const [scanSlow, setScanSlow] = useState(false);
+  useEffect(() => {
+    if (!scanning) {
+      setScanSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setScanSlow(true), 6000);
+    return () => clearTimeout(timer);
+  }, [scanning]);
   // 凭证：支出/收入详情页里附加的真实单据照片（拍照或从相册选）
   const [receiptUri, setReceiptUri] = useState<string | null>(editTransaction?.receiptUri ?? null);
   // 扫票后的**备注建议**（receiptNoteSuggestion：购买明细 / 采购类别）：同样只是建议，
@@ -1940,6 +1950,7 @@ function fxAmountText(raw: string, live: string | null): string {
         <View style={styles.scanningWrap}>
           <ActivityIndicator size="large" color={colors.icon} />
           <Text style={styles.scanningText}>{t('addTx.aiScanning')}</Text>
+          {scanSlow && <Text style={styles.scanningSlow}>{t('addTx.aiScanningSlow')}</Text>}
         </View>
       </SafeAreaView>
     );
@@ -2977,6 +2988,7 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   container: { flex: 1, backgroundColor: semantic.bg },
   scanningWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scanningText: { marginTop: 16, color: colors.textSecondary, fontSize: 14 },
+  scanningSlow: { marginTop: 8, color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 32 },
 
   // ---------- 键盘停靠区（V2）：面板自身画 keypadPanel 底 + 顶部 30 圆角，这里只留底部安全区补白 ----------
   stickyFooter: {

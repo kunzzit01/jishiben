@@ -648,17 +648,23 @@ async def ocr_deep(file: UploadFile = File(...), _: None = Depends(require_key))
         "loadMs": int((data.get("load_duration") or 0) / 1e6),
     }
 
-# ── 视觉识别（第四层，最精准）：多模态大模型直接读图 ─────────────────────
+# ── 视觉识别（第四层，最精准）：本机多模态小模型（Ollama）直接读图 ───────────
 # 为什么要有它：OCR 只认字、不理解「这是总额」，手写金额（88/=、潦草数字）、
-# 热敏纸褪色、斜拍反光时，OCR 行里根本没有可用的数字。大模型看整张图，按上下文判断应付总额。
-# 约束：未配置 ANTHROPIC_API_KEY 一律 503（客户端会静默退回本地结果）；单图只发一次；
-#      图片在内存里缩放后直发上游，不落盘、不打印图片或回答内容；返回结构化字段由客户端二次校验。
-VISION_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-VISION_MODEL = os.environ.get("VISION_MODEL", "claude-sonnet-5-5").strip()
-VISION_URL = os.environ.get("ANTHROPIC_API_URL", "https://api.anthropic.com").rstrip("/")
-VISION_TIMEOUT_MS = _env_int("VISION_TIMEOUT_MS", 40000)
-VISION_MAX_SIDE = _env_int("VISION_MAX_SIDE", 1568)
-_VISION_SEM = asyncio.Semaphore(_env_int("VISION_CONCURRENCY", 3))
+# 热敏纸褪色、斜拍反光时，OCR 行里根本没有可用的数字。视觉模型看整张图，按上下文判断应付总额。
+# 全部跑在你自己的服务器上：模型是 Ollama 里的 qwen2.5vl（开源），不调用任何付费 API、没有按次费用，
+# 图片也不会离开你的 VPS。
+# 约束：Ollama 不可达 / 模型没拉取 → 503（客户端静默退回本地结果）；CPU 推理单并发；
+#      图片在内存里缩放后直送，不落盘、不打印图片或回答内容；返回字段由客户端再做二次校验。
+VISION_OLLAMA_URL = os.environ.get("VISION_OLLAMA_URL", "http://ollama-dqkw-ollama-1:11434").rstrip("/")
+VISION_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b").strip()
+VISION_ENABLED = os.environ.get("VISION_ENABLED", "1").strip() == "1"
+# 常驻内存：不常驻的话每次冷加载模型要 35–50 秒
+VISION_KEEP_ALIVE = os.environ.get("VISION_KEEP_ALIVE", "24h").strip()
+# 请求总超时必须小于 nginx 的 proxy_read_timeout（/ocr/ 现为 120s）
+VISION_TIMEOUT_MS = _env_int("VISION_TIMEOUT_MS", 105000)
+# CPU 推理的耗时基本随图像 token 数线性增长：896 是「小票小字还读得清」与「别太慢」的折中
+VISION_MAX_SIDE = _env_int("VISION_MAX_SIDE", 896)
+_VISION_SEM = asyncio.Semaphore(_env_int("VISION_CONCURRENCY", 1))
 
 VISION_EXPENSE_CATEGORIES = (
     "餐饮,蔬菜,水果,零食,烟酒,购物,日用,外卖,奶茶,食材,服饰,美容,住房,居家,维修,孩子,宠物,水电,网络,家电,"
@@ -666,43 +672,42 @@ VISION_EXPENSE_CATEGORIES = (
 )
 VISION_INCOME_CATEGORIES = "工资,兼职,退款,其他收入"
 
-VISION_SYSTEM = (
-    "你是记账 App 的票据识别器。输入是一张小票、发票、账单或手写单据的照片。"
-    "只通过 record_receipt 工具回答，不要输出别的文字。规则：\n"
-    "1) amount = 这张单据最终实际应付/已付的总金额（含税、含服务费、扣掉折扣后）。"
-    "不是小计、不是找零、不是现金收款额、不是单价；有多个金额时按上下文判断总额。\n"
-    "2) 手写金额要逐位仔细读，注意 1/7、0/6、5/6、4/9 易混；常见写法 88/=、88.- 都表示 88。"
-    "整张图里读不清金额就把 amount 置 null，绝不猜。\n"
-    "3) amount_text 填你读到金额的**原文**（票面上怎么写就怎么抄，含符号），供程序核对。\n"
-    "4) 日期按票面写 YYYY-MM-DD；没有或看不清置 null；不要用今天的日期补。\n"
-    "5) currency 用 ISO 代码（RM→MYR，S$→SGD，$ 无法判断时置 null，￥/元→CNY）。\n"
-    "6) category 必须从给定列表里选一个，选不准用「其他」。\n"
-    "7) handwritten：总金额是否为手写。legible：金额是否清晰可读。"
+VISION_PROMPT = (
+    "这是一张小票、发票、账单或手写单据的照片。请只输出 JSON，字段含义：\n"
+    "- amount：这张单据最终实际应付/已付的总金额（含税、含服务费、扣掉折扣后）。"
+    "不是小计、不是找零、不是现金收款额、不是单价；有多个金额时按上下文判断总额。"
+    "手写金额要逐位仔细读（1/7、0/6、5/6、4/9 易混；88/= 与 88.- 都表示 88）；读不清就写 null，绝不猜。\n"
+    "- amount_text：金额在票面上的原文（怎么写就怎么抄，含符号）。\n"
+    "- currency：ISO 币种代码（RM→MYR，S$→SGD，￥/元→CNY）；无法判断写 null。\n"
+    "- date：票面日期，格式 YYYY-MM-DD；没有或看不清写 null，不要用今天的日期补。\n"
+    "- merchant：商户名，没有写 null。\n"
+    "- type：expense 或 income。\n"
+    "- category：从下面列表里选一个，选不准用「其他」。支出可选：" + VISION_EXPENSE_CATEGORIES
+    + "；收入可选：" + VISION_INCOME_CATEGORIES + "。\n"
+    "- handwritten：总金额是否为手写（true/false）。\n"
+    "- legible：金额是否清晰可读（true/false）。"
 )
 
-VISION_TOOL = {
-    "name": "record_receipt",
-    "description": "记录从票据图片读到的结构化信息",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "amount": {"type": ["number", "null"], "description": "最终应付总金额，纯数字；读不清为 null"},
-            "amount_text": {"type": ["string", "null"], "description": "金额在票面上的原文"},
-            "currency": {"type": ["string", "null"]},
-            "date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
-            "merchant": {"type": ["string", "null"]},
-            "type": {"type": "string", "enum": ["expense", "income"]},
-            "category": {"type": ["string", "null"]},
-            "handwritten": {"type": "boolean"},
-            "legible": {"type": "boolean"},
-        },
-        "required": ["amount", "amount_text", "type", "handwritten", "legible"],
+# Ollama 结构化输出：用 JSON Schema 约束，模型只能按这个形状回答
+VISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "amount": {"type": ["number", "null"]},
+        "amount_text": {"type": ["string", "null"]},
+        "currency": {"type": ["string", "null"]},
+        "date": {"type": ["string", "null"]},
+        "merchant": {"type": ["string", "null"]},
+        "type": {"type": "string", "enum": ["expense", "income"]},
+        "category": {"type": ["string", "null"]},
+        "handwritten": {"type": "boolean"},
+        "legible": {"type": "boolean"},
     },
+    "required": ["amount", "amount_text", "type", "handwritten", "legible"],
 }
 
 
 def _vision_prepare(raw: bytes) -> str:
-    """解码（已处理 EXIF 之外的坏图）→ 最长边缩到 VISION_MAX_SIDE → JPEG q88 → base64。"""
+    """解码 → 修正 EXIF 方向 → 最长边缩到 VISION_MAX_SIDE → JPEG q88 → base64。"""
     img, _w, _h = _decode(raw)
     try:
         from PIL import ImageOps
@@ -723,8 +728,11 @@ def _vision_prepare(raw: bytes) -> str:
 
 
 def _vision_clean(tool_input: dict) -> dict:
-    """工具输入 → 受约束的返回字段（金额非数/非正/离谱一律置 null）。"""
+    """模型输出 → 受约束的返回字段（金额非数/非正/离谱一律置 null）。"""
     amount = tool_input.get("amount")
+    if isinstance(amount, str):
+        m = re.fullmatch(r"\s*[A-Za-z$￥¥]*\s*(\d[\d,]*(?:\.\d+)?)\s*", amount)
+        amount = float(m.group(1).replace(",", "")) if m else None
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not math.isfinite(amount):
         amount = None
     elif amount <= 0 or amount >= 10_000_000:
@@ -756,10 +764,25 @@ def _vision_clean(tool_input: dict) -> dict:
     }
 
 
+async def _vision_warmup() -> None:
+    """启动后台预热：把模型加载进内存并常驻，首张票就不用付 35–50 秒的冷加载。失败只记日志。"""
+    if not VISION_ENABLED:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(
+                VISION_OLLAMA_URL + "/api/generate",
+                json={"model": VISION_MODEL, "prompt": "", "keep_alive": VISION_KEEP_ALIVE, "stream": False},
+            )
+        logger.info("vision warmup model=%s status=%d", VISION_MODEL, resp.status_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("vision warmup failed: %s", type(exc).__name__)
+
+
 @router.post("/vision")
 async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key)) -> dict:
-    if not VISION_API_KEY:
-        raise OCRError("VISION_DISABLED", "视觉识别未启用（未配置 ANTHROPIC_API_KEY）")
+    if not VISION_ENABLED:
+        raise OCRError("VISION_DISABLED", "视觉识别未启用（VISION_ENABLED=0）")
 
     started = time.monotonic()
     content_type = (file.content_type or "").split(";")[0].strip().lower()
@@ -770,51 +793,37 @@ async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key
 
     body = {
         "model": VISION_MODEL,
-        "max_tokens": 400,
-        "system": VISION_SYSTEM,
-        "tools": [VISION_TOOL],
-        "tool_choice": {"type": "tool", "name": "record_receipt"},
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                    {
-                        "type": "text",
-                        "text": "支出分类可选：" + VISION_EXPENSE_CATEGORIES
-                        + "；收入分类可选：" + VISION_INCOME_CATEGORIES + "。请读这张单据。",
-                    },
-                ],
-            }
-        ],
-    }
-    headers = {
-        "x-api-key": VISION_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+        "stream": False,
+        "keep_alive": VISION_KEEP_ALIVE,
+        "format": VISION_SCHEMA,
+        "options": {"temperature": 0, "num_predict": 260, "num_ctx": 4096},
+        "messages": [{"role": "user", "content": VISION_PROMPT, "images": [b64]}],
     }
 
     async with _VISION_SEM:
         try:
             async with httpx.AsyncClient(timeout=VISION_TIMEOUT_MS / 1000.0) as client:
-                resp = await client.post(VISION_URL + "/v1/messages", json=body, headers=headers)
+                resp = await client.post(VISION_OLLAMA_URL + "/api/chat", json=body)
         except httpx.TimeoutException:
             raise OCRError("VISION_TIMEOUT", "视觉识别超时（%dms）" % VISION_TIMEOUT_MS)
         except Exception as exc:  # noqa: BLE001
-            raise OCRError("VISION_UNAVAILABLE", "连不上视觉识别服务：" + type(exc).__name__)
+            raise OCRError("VISION_UNAVAILABLE", "连不上本机视觉模型服务：" + type(exc).__name__)
 
+    if resp.status_code == 404:
+        raise OCRError("VISION_UNAVAILABLE", "本机没有模型 " + VISION_MODEL + "（请先 ollama pull）")
     if resp.status_code != 200:
-        # 不回传上游正文（可能含请求片段）；只留状态码
         logger.warning("ocr vision upstream status=%d", resp.status_code)
-        raise OCRError("VISION_ERROR", "视觉识别服务返回 %d" % resp.status_code)
+        raise OCRError("VISION_ERROR", "视觉模型服务返回 %d" % resp.status_code)
 
-    tool_input = None
-    for block in (resp.json().get("content") or []):
-        if isinstance(block, dict) and block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
-            tool_input = block["input"]
-            break
-    if tool_input is None:
-        raise OCRError("VISION_ERROR", "视觉识别没有返回结构化结果")
+    content = str(((resp.json().get("message") or {}).get("content")) or "")
+    try:
+        import json as _json
+
+        tool_input = _json.loads(content)
+    except Exception:  # noqa: BLE001
+        tool_input = None
+    if not isinstance(tool_input, dict):
+        raise OCRError("VISION_ERROR", "视觉模型没有返回可解析的 JSON")
 
     result = _vision_clean(tool_input)
     elapsed = int((time.monotonic() - started) * 1000)
@@ -833,7 +842,11 @@ async def _lifespan(_: FastAPI):
     if not OCR_SHARED_KEY:
         logger.error("OCR_SHARED_KEY 未设置：/ocr/lines 将全部拒绝，仅健康检查可用")
     logger.info("ocr total budget %dms", TOTAL_BUDGET_MS)
-    yield
+    warm = asyncio.create_task(_vision_warmup())  # 后台预热视觉模型，不阻塞启动
+    try:
+        yield
+    finally:
+        warm.cancel()
 
 
 app = FastAPI(

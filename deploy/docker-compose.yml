@@ -181,10 +181,14 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:7b}
       OCR_DEEP_TIMEOUT_MS: ${OCR_DEEP_TIMEOUT_MS:-120000}
-      # 视觉识别（多模态大模型，手写/褪色票据最精准的一层）：不填 ANTHROPIC_API_KEY 则该层关闭
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      VISION_MODEL: ${VISION_MODEL:-claude-sonnet-5-5}
-      VISION_TIMEOUT_MS: ${VISION_TIMEOUT_MS:-40000}
+      # 视觉识别（手写/褪色票据最精准的一层）：用本机 Ollama 里的开源视觉模型，不调用任何付费 API。
+      # Ollama 容器通过外部网络 ollama-net 访问（见文件末尾 networks）。
+      VISION_ENABLED: ${VISION_ENABLED:-1}
+      VISION_OLLAMA_URL: ${VISION_OLLAMA_URL:-http://ollama-dqkw-ollama-1:11434}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:7b}
+      VISION_KEEP_ALIVE: ${VISION_KEEP_ALIVE:-24h}
+      VISION_MAX_SIDE: ${VISION_MAX_SIDE:-896}
+      VISION_TIMEOUT_MS: ${VISION_TIMEOUT_MS:-105000}
       TZ: UTC
     # 仅内网可达：只写 expose，不写 ports（宿主机无法直连 8090）
     expose:
@@ -196,6 +200,7 @@ services:
     mem_limit: 2g
     networks:
       - jishiben-net
+      - ollama-net
     stop_grace_period: 30s
     logging:
       driver: json-file
@@ -211,3 +216,8 @@ networks:
   jishiben-net:
     name: jishiben-net
     driver: bridge
+  # 宿主机上已有的 Ollama 容器所在网络（external：不由本 compose 创建/删除）。
+  # 网络名随 Ollama 的部署而定；不一样就改 name，或用环境变量 VISION_OLLAMA_URL 指向可达地址。
+  ollama-net:
+    name: ${OLLAMA_NETWORK:-ollama-dqkw_default}
+    external: true
