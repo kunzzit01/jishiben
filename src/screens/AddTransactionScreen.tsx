@@ -467,14 +467,6 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [autoMonthly, setAutoMonthly] = useState(false);
   const [note, setNote] = useState(editTransaction?.note ?? '');
   const [scanning, setScanning] = useState(false);
-  // OCR 初步结果已填入、AI 视觉模型还在后台核对：表单先可用，顶部显示一行「核对中」提示
-  const [scanVerifying, setScanVerifying] = useState(false);
-  // OCR 初步金额：核对期间金额没被用户改过（仍等于它）就视为「待核对」—— 显示成半透明，并拦住保存
-  const [scanPrelimAmount, setScanPrelimAmount] = useState<number | null>(null);
-  const amountUnverified = scanVerifying && scanPrelimAmount !== null && Number(amount) === scanPrelimAmount;
-  // 最新的金额输入框内容：AI 核对完要不要覆盖金额，取决于用户这期间有没有自己改过
-  const amountNowRef = useRef('');
-  amountNowRef.current = amount;
   // 识别超过 6 秒（说明走到了本机视觉模型）才出现的耐心提示
   const [scanSlow, setScanSlow] = useState(false);
   useEffect(() => {
@@ -1570,15 +1562,7 @@ function fxAmountText(raw: string, live: string | null): string {
   // 加 try/catch 是因为：这是个 async 函数，如果内部（amountExpr.confirm / addTransaction 等）
   // 抛出异常又没人接住，Promise 会变成"未处理的 rejection"——不会崩溃，也不会有任何提示，
   // 表现出来就是点了"完成"完全没反应。这里统一兜底，出问题至少能看到是哪里错了。
-  /** OCR 的初步金额还在等 AI 核对（手写票常被读错，如 88/= → 881）：先别存，免得把错金额记进账里 */
-  const blockSaveWhileVerifying = (): boolean => {
-    if (!amountUnverified) return false;
-    dialog.alert({ title: t('common.confirm'), message: t('addTx.aiVerifyingBlock') });
-    return true;
-  };
-
   const handleKeypadConfirm = async () => {
-    if (blockSaveWhileVerifying()) return;
     try {
       const total = commitAmount();
       const ok = await saveTransaction(total);
@@ -1604,7 +1588,6 @@ function fxAmountText(raw: string, live: string | null): string {
   // 长按"完成"＝保存这一笔之后不退出，留在本页直接记下一笔
   // （原来"保存并继续记一笔"按钮做的事，现在挪到这个长按手势上；编辑模式下不会用到）
   const handleKeypadConfirmAndContinue = async () => {
-    if (blockSaveWhileVerifying()) return;
     try {
       const total = commitAmount();
       const ok = await saveTransaction(total);
@@ -1834,15 +1817,8 @@ function fxAmountText(raw: string, live: string | null): string {
       return;
     }
     setScanning(true);
-    setScanVerifying(false);
-    setScanPrelimAmount(null);
-    // 初步结果（OCR）与最终结果（AI 核对后）共用同一套写表单的逻辑
-    let prelimAmount: number | null = null;
-    let userEditedAmount = false;
-    let dupShown = false;
-    let currencyShown = false;
     let stableUriForApply = uri;
-    const apply = (result: ScannedReceipt, final: boolean) => {
+    const apply = (result: ScannedReceipt) => {
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
       lastScanMetaRef.current = {
@@ -1850,8 +1826,7 @@ function fxAmountText(raw: string, live: string | null): string {
         merchantConfident: result.merchantConfident,
         amountLabel: result.amountLabel,
       };
-      if (result.duplicate && !dupShown) {
-        dupShown = true;
+      if (result.duplicate) {
         dialog.alert({
           title: t('addTx.receiptDuplicateTitle'),
           message: t('addTx.receiptDuplicateMsg').replace('{n}', String(result.duplicateDaysAgo ?? 0)),
@@ -1875,17 +1850,7 @@ function fxAmountText(raw: string, live: string | null): string {
       userPickedCategoryRef.current = true;
       }
 
-      // 金额：初步结果直接填；最终结果只在用户没自己改过时才覆盖（用户改了就尊重用户）
-      if (!final) {
-        if (result.amount != null) {
-          prelimAmount = result.amount;
-          setScanPrelimAmount(result.amount);
-          setAmount(String(result.amount));
-          amountExpr.reset(result.amount);
-        }
-      } else if (prelimAmount != null && Number(amountNowRef.current) !== prelimAmount) {
-        userEditedAmount = true;
-      } else if (result.amount != null) {
+      if (result.amount != null) {
         setAmount(String(result.amount));
         amountExpr.reset(result.amount);
       }
@@ -1897,9 +1862,8 @@ function fxAmountText(raw: string, live: string | null): string {
       setStep('detail');
 
       const accountCurrency = assets.find((a) => a.id === assetId)?.currency ?? null;
-      if (result.currency && accountCurrency && result.currency !== accountCurrency && !currencyShown) {
+      if (result.currency && accountCurrency && result.currency !== accountCurrency) {
         // 币种不一致：绝不把同一个数字按另一种币直接入账
-        currencyShown = true;
         dialog.alert({
           title: t('addTx.scanCurrencyMismatchTitle'),
           message: t('addTx.scanCurrencyMismatchMsg')
@@ -1907,8 +1871,6 @@ function fxAmountText(raw: string, live: string | null): string {
             .replace('{account}', accountCurrency),
         });
       }
-      if (!final) return; // 初步结果不弹金额类提示，等 AI 核对完再说
-      if (userEditedAmount) return; // 用户已经自己改了金额：不再用提示打扰
       if (result.amount == null) {
         // 清空金额框：否则会残留上一次扫描/输入的数值，用户一路「完成」就记错了
         setAmount('');
@@ -1949,18 +1911,9 @@ function fxAmountText(raw: string, live: string | null): string {
       setReceiptAmountBox(null);
       const stableUri = await persistReceiptImage(uri, { localOnly: true });
       stableUriForApply = stableUri;
-      const result = await scanReceipt(stableUri, base64, (prelim) => {
-        // OCR 已读出金额、AI 还在核对：先把表单给用户（不用干等 30–50 秒）
-        apply(prelim, false);
-        setScanning(false);
-        setScanVerifying(true);
-      });
-      setScanVerifying(false);
-      setScanPrelimAmount(null);
-      apply(result, true);
+      const result = await scanReceipt(stableUri, base64);
+      apply(result);
     } catch (e: any) {
-      setScanVerifying(false);
-      setScanPrelimAmount(null);
       dialog.alert({ title: t('addTx.scanFailed'), message: e?.message ?? t('addTx.scanFailed') });
     } finally {
       setScanning(false);
@@ -2734,7 +2687,7 @@ function fxAmountText(raw: string, live: string | null): string {
             </AppText>
           )}
 
-          <View onLayout={registerFieldY('amount')} style={[styles.heroAmountBox, amountUnverified && { opacity: 0.4 }]}>
+          <View onLayout={registerFieldY('amount')} style={styles.heroAmountBox}>
             <PressableScale
               style={styles.heroAmountTouch}
               activeScale={0.98}
@@ -2762,14 +2715,6 @@ function fxAmountText(raw: string, live: string | null): string {
             </PressableScale>
           </View>
         </View>
-
-        {/* AI 视觉模型正在后台核对金额：金额已先按 OCR 填好，可以先编辑；核对完一致就静默，不一致会更新并提示 */}
-        {scanVerifying && (
-          <View style={styles.verifyingRow}>
-            <ActivityIndicator size="small" color={colors.textTertiary} />
-            <Text style={styles.verifyingText}>{t('addTx.aiVerifying')}</Text>
-          </View>
-        )}
 
         {/* 币种/钱包卡 + 每月（用户 2026-11-03 二改：只重排这三个控件，其余不动）：
             左＝白色钱包卡，内含「货币按钮 → 短竖线 → 钱包信息」三个互不嵌套的热区；
@@ -3076,8 +3021,6 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   container: { flex: 1, backgroundColor: semantic.bg },
   scanningWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scanningText: { marginTop: 16, color: colors.textSecondary, fontSize: 14 },
-  verifyingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4, marginBottom: 6 },
-  verifyingText: { color: colors.textTertiary, fontSize: 12 },
   scanningSlow: { marginTop: 8, color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 32 },
 
   // ---------- 键盘停靠区（V2）：面板自身画 keypadPanel 底 + 顶部 30 圆角，这里只留底部安全区补白 ----------

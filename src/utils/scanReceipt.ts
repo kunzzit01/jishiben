@@ -37,8 +37,6 @@ export interface ScannedReceipt {
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
   ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed';
-  /** true = 这是 OCR 的初步结果，AI 视觉模型还在后台核对（只在 onPreliminary 回调里出现） */
-  verifying?: boolean;
   /** 视觉模型指出的总金额位置（0~1 归一化，近似）：界面在原图大图上高亮，方便用户核对 */
   amountBox?: { x: number; y: number; w: number; h: number } | null;
   /** OCR 与视觉模型读到的金额不一致时，没被采用的那一个（界面据此提示「另一个读数是 X」） */
@@ -112,6 +110,23 @@ async function tryReceiptAi(lines: OcrLine[], imageUri: string): Promise<AiAttem
     return { draft: verified.amount === null ? null : verified, reason: verified.reason };
   } catch (e) {
     return { draft: null, reason: `ai-error: ${String((e as Error)?.message ?? e).slice(0, 120)}` };
+  }
+}
+
+/** 设备上取图片原始宽高（用来把文字框归一化）；取不到返回 null */
+async function getLocalImageSize(uri: string): Promise<{ w: number; h: number } | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Image } = require('react-native');
+    return await new Promise((resolve) => {
+      Image.getSize(
+        uri,
+        (w: number, h: number) => resolve(w > 0 && h > 0 ? { w, h } : null),
+        () => resolve(null),
+      );
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -278,12 +293,7 @@ async function tryReceiptRemote(
  */
 export async function scanReceipt(
   imageUri: string,
-  imageBase64?: string,
-  /**
-   * OCR 先读出金额、AI 视觉模型还在核对时调用一次（verifying=true）：界面可以先把金额填上，
-   * 不用干等 AI 的 30–50 秒；AI 核对完 scanReceipt 才 resolve，最终结果再覆盖。
-   */
-  onPreliminary?: (r: ScannedReceipt) => void,
+  imageBase64?: string
 ): Promise<ScannedReceipt> {
   const { recognizeReceiptLines, ReceiptOcrError } = await import('./receiptOcr');
   const { parseReceiptOcr } = await import('./receiptParse');
@@ -383,7 +393,7 @@ export async function scanReceipt(
     const localIsConfident =
       parsed.amount !== null && parsed.confidence >= 0.6 && !isWeakAmountTier(parsed.amountTier);
     /** 用「当前」各变量组装结果（闭包）：OCR 初步结果与最终结果共用，verifying 区分 */
-    const build = async (verifying: boolean): Promise<ScannedReceipt> => {
+    const build = async (): Promise<ScannedReceipt> => {
       // 查重（本地指纹，不联网）：只提示，不阻止用户记账
       let duplicate = false;
       let duplicateDaysAgo: number | undefined;
@@ -398,7 +408,6 @@ export async function scanReceipt(
       void AsyncStorage.setItem(LAST_SCAN_TEXT_KEY, rawText.slice(0, 1200)).catch(() => undefined);
       // 备注建议（纯函数、只出文案）：界面做成「点击填入」占位提示，绝不自动写进备注
       return {
-        verifying,
         amount,
         merchant,
         merchantConfident,
@@ -437,14 +446,21 @@ export async function scanReceipt(
         : '本地解析已够用（amount ≠ null 且 confidence ≥ 0.6）';
       serverReason = localRecognitionFailed ? 'server-lines（本地识别失败，已用服务端行）' : 'server-skip（已够用）';
     } else {
-      // 视觉识别与服务端 OCR **同时**开跑（原来是先后排队）：视觉最慢（本机 CPU 读一张图约 30–50 秒），
-      // 把 OCR 那几秒藏进它的等待里；tryReceiptVision 内部吞掉所有异常，不会变成未处理的拒绝。
+      // 视觉识别优先（本机 AI 直接读整张图，一次得到正确金额）：
+      // 之前让视觉和服务端 OCR 同时跑，但两者抢同一批 CPU，视觉被拖慢，还要多传一份几 MB 的图。
+      // 现在先等视觉；它读出了金额就不再跑服务端 OCR；没读出来才退回服务端 OCR（原来的兜底顺序）。
+      // tryReceiptVision 内部吞掉所有异常，不会变成未处理的拒绝。
       const visionTask: Promise<VisionAttempt> = visionPre
         ? Promise.resolve(visionPre)
         : tryReceiptVision(imageUri, imageBase64);
-      // a) 服务端 OCR 兜底：开关打开 + 有密钥才会上传。
-      //    本地识别失败时这里用上面的预取结果 —— 一次扫票最多上传一次。
-      const remote = prefetched ?? (await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels));
+      const visionFirst = await visionTask;
+      const visionGotAmount = visionFirst.result !== null && visionFirst.result.amount !== null;
+      // a) 服务端 OCR 兜底：视觉没读出金额才用；本地识别失败时这里用上面的预取结果 —— 一次扫票最多上传一次。
+      const remote: RemoteAttempt =
+        prefetched ??
+        (visionGotAmount
+          ? { parsed: null, lines: null, attempted: false, reason: 'server-skip（视觉已读出金额，不再跑服务端 OCR）' }
+          : await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels));
       if (remote.lines) {
         serverLines = remote.lines;
         serverImageSize = remote.imageSize ?? null;
@@ -479,15 +495,6 @@ export async function scanReceipt(
       confidence = active.confidence;
       aiReason = remote.reason;
 
-      // OCR 已经读出金额：先给界面看（视觉还在后台核对），用户不用干等
-      if (onPreliminary && amount !== null) {
-        try {
-          onPreliminary(await build(true));
-        } catch {
-          /* 回调出错不影响后续核对 */
-        }
-      }
-
       // b) 端侧 AI 兜底（现有逻辑不变）：只有服务端也没给出可用金额时才打扰模型 ——
       //    否则 AI 会用固定 0.7 覆盖掉更好的服务端结果。
       // c) 视觉识别（多模态大模型）：走到这里说明本地没把握（手写 / 模糊 / 难读的票），
@@ -511,11 +518,13 @@ export async function scanReceipt(
         const vr = v.result;
         if (vr) {
           // 位置：模型给了框（qwen）就用；没给（gemma 等更快的模型不要求）就用 OCR 文字框定位
-          amountBox =
-            vr.amountBox ??
-            (vr.amount !== null && serverLines
-              ? locateAmountBox(vr.amount, serverLines, serverImageSize?.w, serverImageSize?.h)
-              : null);
+          if (vr.amountBox) {
+            amountBox = vr.amountBox;
+          } else if (vr.amount !== null) {
+            // 本地 ML Kit 的文字框同样是原图像素坐标，原图尺寸在设备上直接取
+            const size = serverImageSize ?? (await getLocalImageSize(imageUri));
+            amountBox = locateAmountBox(vr.amount, serverLines ?? lines, size?.w, size?.h);
+          }
         }
         if (vr && vr.amount !== null) {
           const agree = ocrAmount !== null && Math.abs(ocrAmount - vr.amount) < 0.005;
@@ -591,7 +600,7 @@ export async function scanReceipt(
         ' serverLines=' + (serverLines?.length ?? 0) + ' passes=' + serverPasses,
     ).catch(() => undefined);
 
-    return await build(false);
+    return await build();
   } catch (e) {
     // 已经翻译过的错误（含「本地识别失败且服务端也没拿到行」）原样抛出，不再二次包装成 ocr-failed
     if (e instanceof ReceiptScanError) {
