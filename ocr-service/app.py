@@ -685,7 +685,9 @@ VISION_PROMPT = (
     "- category：从下面列表里选一个，选不准用「其他」。支出可选：" + VISION_EXPENSE_CATEGORIES
     + "；收入可选：" + VISION_INCOME_CATEGORIES + "。\n"
     "- handwritten：总金额是否为手写（true/false）。\n"
-    "- legible：金额是否清晰可读（true/false）。"
+    "- legible：金额是否清晰可读（true/false）。\n"
+    "- amount_box：你读到的那个总金额数字在图中的位置，格式 [x1,y1,x2,y2]（左上角与右下角的像素坐标，"
+    "相对于你看到的这张图）；只框住金额数字本身。找不到就写 null。"
 )
 
 # Ollama 结构化输出：用 JSON Schema 约束，模型只能按这个形状回答
@@ -701,12 +703,13 @@ VISION_SCHEMA = {
         "category": {"type": ["string", "null"]},
         "handwritten": {"type": "boolean"},
         "legible": {"type": "boolean"},
+        "amount_box": {"type": ["array", "null"], "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
     },
     "required": ["amount", "amount_text", "type", "handwritten", "legible"],
 }
 
 
-def _vision_prepare(raw: bytes) -> str:
+def _vision_prepare(raw: bytes) -> tuple[str, int, int]:
     """解码 → 修正 EXIF 方向 → 最长边缩到 VISION_MAX_SIDE → JPEG q88 → base64。"""
     img, _w, _h = _decode(raw)
     try:
@@ -724,7 +727,31 @@ def _vision_prepare(raw: bytes) -> str:
         )
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=88)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    return base64.b64encode(buf.getvalue()).decode("ascii"), img.size[0], img.size[1]
+
+
+def _vision_box(raw_box, w: int, h: int):
+    """模型给的 [x1,y1,x2,y2] → 0~1 归一化的 {x,y,w,h}；不合理（越界太多 / 面积为 0）一律 None，绝不瞎画。"""
+    if not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4 or w <= 0 or h <= 0:
+        return None
+    try:
+        x1, y1, x2, y2 = [float(v) for v in raw_box]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+        return None
+    if x2 < x1:
+        x1, x2 = x2, x1
+    if y2 < y1:
+        y1, y2 = y2, y1
+    nx1, ny1, nx2, ny2 = x1 / w, y1 / h, x2 / w, y2 / h
+    # 允许 5% 的越界（模型坐标有小误差），超过就认为坐标系不对，放弃
+    if nx1 < -0.05 or ny1 < -0.05 or nx2 > 1.05 or ny2 > 1.05:
+        return None
+    nx1, ny1, nx2, ny2 = max(0.0, nx1), max(0.0, ny1), min(1.0, nx2), min(1.0, ny2)
+    if nx2 - nx1 < 0.005 or ny2 - ny1 < 0.003:
+        return None
+    return {"x": round(nx1, 4), "y": round(ny1, 4), "w": round(nx2 - nx1, 4), "h": round(ny2 - ny1, 4)}
 
 
 def _vision_clean(tool_input: dict) -> dict:
@@ -789,7 +816,7 @@ async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key
     if content_type not in LAX_MIME:
         raise OCRError("BAD_IMAGE", "不支持的 Content-Type: " + (content_type or "empty"))
     raw = await _read_limited(file)
-    b64 = await asyncio.get_running_loop().run_in_executor(None, _vision_prepare, raw)
+    b64, sent_w, sent_h = await asyncio.get_running_loop().run_in_executor(None, _vision_prepare, raw)
 
     body = {
         "model": VISION_MODEL,
@@ -826,6 +853,9 @@ async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key
         raise OCRError("VISION_ERROR", "视觉模型没有返回可解析的 JSON")
 
     result = _vision_clean(tool_input)
+    result["amountBox"] = _vision_box(tool_input.get("amount_box"), sent_w, sent_h)
+    result["_rawBox"] = tool_input.get("amount_box")  # 临时调试：核对坐标系用，验证完删除
+    result["_sent"] = [sent_w, sent_h]
     elapsed = int((time.monotonic() - started) * 1000)
     logger.info(
         "ocr vision bytes=%d model=%s elapsedMs=%d hasAmount=%s handwritten=%s",
