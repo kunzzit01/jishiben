@@ -185,7 +185,7 @@ services:
       # Ollama 容器通过外部网络 ollama-net 访问（见文件末尾 networks）。
       VISION_ENABLED: ${VISION_ENABLED:-1}
       VISION_OLLAMA_URL: ${VISION_OLLAMA_URL:-http://ollama-dqkw-ollama-1:11434}
-      VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:7b}
+      VISION_MODEL: ${VISION_MODEL:-gemma3:4b}
       VISION_KEEP_ALIVE: ${VISION_KEEP_ALIVE:-24h}
       VISION_MAX_SIDE: ${VISION_MAX_SIDE:-896}
       VISION_TIMEOUT_MS: ${VISION_TIMEOUT_MS:-105000}

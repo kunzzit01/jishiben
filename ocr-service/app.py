@@ -479,6 +479,9 @@ def _recognize_sync(raw: bytes, deadline: float | None = None) -> dict:
         "passes": 2 if crop is not None else 1,
         "warnings": warnings,
         "crop": crop,
+        # 行坐标所在的原图像素空间：客户端要把 OCR 文字框归一化成「在整张图的哪个位置」就靠它
+        "imageWidth": orig_w,
+        "imageHeight": orig_h,
     }
 
 
@@ -656,7 +659,14 @@ async def ocr_deep(file: UploadFile = File(...), _: None = Depends(require_key))
 # 约束：Ollama 不可达 / 模型没拉取 → 503（客户端静默退回本地结果）；CPU 推理单并发；
 #      图片在内存里缩放后直送，不落盘、不打印图片或回答内容；返回字段由客户端再做二次校验。
 VISION_OLLAMA_URL = os.environ.get("VISION_OLLAMA_URL", "http://ollama-dqkw-ollama-1:11434").rstrip("/")
-VISION_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b").strip()
+# 模型选型（2026-11-17 在这台 8 核无 GPU 服务器上、两张真实手写票实测）：
+#   qwen2.5vl:7b ≈40s 读对（每张图固定 ~1100 个图像 token，会给位置框）
+#   gemma3:4b    ≈18s 读对（图像只要 ~430 token）← 默认
+#   minicpm-v:8b ≈20s 读对 / moondream:1.8b 6–9s 但读错成 0.8 / granite3.2-vision 单图 5300 token 超上下文
+VISION_MODEL = os.environ.get("VISION_MODEL", "gemma3:4b").strip()
+# 位置框只有 qwen 系列会给可靠的像素坐标；其它模型不要求（客户端改用 OCR 文字框定位）
+VISION_BOX = os.environ.get("VISION_BOX", "auto").strip().lower()
+_VISION_WANT_BOX = (VISION_BOX == "1") or (VISION_BOX == "auto" and VISION_MODEL.lower().startswith("qwen"))
 VISION_ENABLED = os.environ.get("VISION_ENABLED", "1").strip() == "1"
 # 常驻内存：不常驻的话每次冷加载模型要 35–50 秒
 VISION_KEEP_ALIVE = os.environ.get("VISION_KEEP_ALIVE", "24h").strip()
@@ -679,9 +689,13 @@ VISION_PROMPT = (
     "- currency：ISO 币种代码（RM→MYR，S$→SGD，￥/元→CNY）；无法判断写 null。{nl}"
     "- handwritten：总金额是否为手写（true/false）。{nl}"
     "- legible：金额是否清晰可读（true/false）。{nl}"
-    "- amount_box：你读到的那个总金额数字在图中的位置，格式 [x1,y1,x2,y2]（左上角与右下角的像素坐标，"
-    "相对于你看到的这张图）；只框住金额数字本身。找不到就写 null。"
 ).replace("{nl}", "\n")
+
+if _VISION_WANT_BOX:
+    VISION_PROMPT += (
+        "\n- amount_box：你读到的那个总金额数字在图中的位置，格式 [x1,y1,x2,y2]（左上角与右下角的像素坐标，"
+        "相对于你看到的这张图）；只框住金额数字本身。找不到就写 null。"
+    )
 
 # Ollama 结构化输出：用 JSON Schema 约束，模型只能按这个形状回答
 VISION_SCHEMA = {
@@ -696,6 +710,10 @@ VISION_SCHEMA = {
     },
     "required": ["amount", "amount_text", "currency", "handwritten", "legible", "amount_box"],
 }
+if not _VISION_WANT_BOX:
+    # 不要求位置框的模型：schema 里去掉 amount_box，少生成几个 token（也避免它瞎编坐标）
+    VISION_SCHEMA["properties"].pop("amount_box")
+    VISION_SCHEMA["required"].remove("amount_box")
 
 
 def _vision_prepare(raw: bytes) -> tuple[str, int, int]:

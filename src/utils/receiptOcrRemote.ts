@@ -218,11 +218,18 @@ function toOcrLines(body: unknown): OcrLine[] {
  * 任何失败（无密钥 / 熔断期 / 超时 / 非 200 / 响应不可解析）都抛 RemoteOcrError；
  * 调用方（scanReceipt）负责吞掉并回退到本地结果 —— 这里绝不静默返回空数组。
  */
+export interface RemoteLinesResult {
+  lines: OcrLine[];
+  /** 行坐标所在的原图像素空间（用来把文字框归一化成「在整张图的哪个位置」）；服务端没给为 null */
+  imageWidth: number | null;
+  imageHeight: number | null;
+}
+
 export async function recognizeReceiptLinesRemote(
   imageUri: string,
   base64: string | undefined,
   settings: ServerOcrSettings,
-): Promise<OcrLine[]> {
+): Promise<RemoteLinesResult> {
   const key = settings.key.trim();
   if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过上传');
 
@@ -244,7 +251,9 @@ export async function recognizeReceiptLinesRemote(
   if (!result.ok) throw httpError(result.status, result.body);
 
   // 行里没文字是「引擎没读懂这张图」，由 toOcrLines 抛 no-text
-  return toOcrLines(result.body);
+  const meta = (result.body ?? {}) as { imageWidth?: unknown; imageHeight?: unknown };
+  const dim = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+  return { lines: toOcrLines(result.body), imageWidth: dim(meta.imageWidth), imageHeight: dim(meta.imageHeight) };
 }
 
 // ── 视觉识别（多模态大模型，最精准的一层兜底）────────────────────────────────

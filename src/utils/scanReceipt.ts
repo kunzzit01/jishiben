@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { OcrLine, ParsedReceipt } from './receiptParse';
+import { locateAmountBox } from './locateAmountBox';
 import { verifyAiDraft, type VerifiedDraft } from './receiptVerify';
 
 export interface ScannedReceipt {
@@ -155,6 +156,8 @@ function amountInLines(amount: number, lines: OcrLine[]): boolean {
 }
 
 interface RemoteAttempt {
+  /** 服务端行坐标所在的原图尺寸 */
+  imageSize?: { w: number; h: number } | null;
   /** 采用的服务端解析结果；null 表示没有「比本地更好」的可用结果 */
   parsed: ParsedReceipt | null;
   /** 服务端返回的原始行（诊断/证据核对用）；null 表示这次没拿到行 */
@@ -168,6 +171,8 @@ interface RemoteAttempt {
 interface RemoteLinesAttempt {
   /** 服务端行；null 表示这次没有可用结果 */
   lines: OcrLine[] | null;
+  /** 服务端行坐标所在的原图尺寸（定位总金额用） */
+  imageSize?: { w: number; h: number } | null;
   /** 是否真的发出了上传请求 */
   attempted: boolean;
   reason: string;
@@ -200,8 +205,9 @@ async function fetchRemoteLines(
       };
     }
     const { recognizeReceiptLinesRemote } = await import('./receiptOcrRemote');
-    const lines = await recognizeReceiptLinesRemote(uploadUri, imageBase64, settings);
-    return { lines, attempted: true, reason: 'server-lines=' + lines.length };
+    const res = await recognizeReceiptLinesRemote(uploadUri, imageBase64, settings);
+    const imageSize = res.imageWidth && res.imageHeight ? { w: res.imageWidth, h: res.imageHeight } : null;
+    return { lines: res.lines, imageSize, attempted: true, reason: 'server-lines=' + res.lines.length };
   } catch (e) {
     return {
       lines: null,
@@ -226,12 +232,14 @@ async function tryReceiptRemote(
 ): Promise<RemoteAttempt> {
   const got = await fetchRemoteLines(imageUri, imageBase64);
   if (!got.lines) return { parsed: null, lines: null, attempted: got.attempted, reason: got.reason };
+  const imageSize = got.imageSize ?? null;
   const { parseReceiptOcr } = await import('./receiptParse');
   const remoteParsed = parseReceiptOcr(got.lines, { learnedLabels });
   if (remoteParsed.amount === null) {
     return {
       parsed: null,
       lines: got.lines,
+      imageSize,
       attempted: true,
       reason: 'server-no-amount（服务端行里也没找到应付金额）',
     };
@@ -240,6 +248,7 @@ async function tryReceiptRemote(
     return {
       parsed: null,
       lines: got.lines,
+      imageSize,
       attempted: true,
       reason:
         'server-not-better（confidence ' +
@@ -252,6 +261,7 @@ async function tryReceiptRemote(
   return {
     parsed: remoteParsed,
     lines: got.lines,
+    imageSize,
     attempted: true,
     reason: 'server-used（amount=' + remoteParsed.amount + ' confidence=' + remoteParsed.confidence.toFixed(2) + '）',
   };
@@ -281,6 +291,7 @@ export async function scanReceipt(
   const { checkReceiptDuplicate } = await import('./receiptDedupe');
   // 服务端证据：拿到行就留在这两个变量里，最后原样带回返回值（诊断/核对用）
   let serverLines: OcrLine[] | null = null;
+  let serverImageSize: { w: number; h: number } | null = null;
   let serverPasses = 0;
   try {
     const learnedLabels = await getLearnedAmountLabels().catch(() => []);
@@ -305,6 +316,7 @@ export async function scanReceipt(
       if (got.lines) {
         lines = got.lines;
         serverLines = got.lines;
+        serverImageSize = got.imageSize ?? null;
         serverPasses = 1;
       } else {
         // OCR 两层都一行字没读到（手写 / 严重褪色时常见）：还有视觉识别可以救 —— 它读的是整张图
@@ -435,6 +447,7 @@ export async function scanReceipt(
       const remote = prefetched ?? (await tryReceiptRemote(imageUri, imageBase64, parsed, learnedLabels));
       if (remote.lines) {
         serverLines = remote.lines;
+        serverImageSize = remote.imageSize ?? null;
         serverPasses = 1;
       }
       serverReason = remote.reason;
@@ -496,7 +509,14 @@ export async function scanReceipt(
           (v.result ? (v.result.amount === null ? '（模型没读出金额）' : '（视觉=' + v.result.amount + '）') : '');
         aiReason += ' | ' + v.reason;
         const vr = v.result;
-        if (vr) amountBox = vr.amountBox;
+        if (vr) {
+          // 位置：模型给了框（qwen）就用；没给（gemma 等更快的模型不要求）就用 OCR 文字框定位
+          amountBox =
+            vr.amountBox ??
+            (vr.amount !== null && serverLines
+              ? locateAmountBox(vr.amount, serverLines, serverImageSize?.w, serverImageSize?.h)
+              : null);
+        }
         if (vr && vr.amount !== null) {
           const agree = ocrAmount !== null && Math.abs(ocrAmount - vr.amount) < 0.005;
           const disagree = ocrAmount !== null && !agree;
