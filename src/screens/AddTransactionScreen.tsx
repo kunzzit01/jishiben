@@ -1881,6 +1881,15 @@ function fxAmountText(raw: string, live: string | null): string {
           title: t('common.confirm'),
           message: t('addTx.scanNoAmount') + (result.diag ? '\n\n诊断：' + result.diag : ''),
         });
+      } else if (result.altAmount != null) {
+        // OCR 与 AI 读数不一致：把两个数都告诉用户，别悄悄选一个
+        dialog.alert({
+          title: t('addTx.scanCheckAmountTitle'),
+          message: t('addTx.scanAmountDisagreeMsg')
+            .replace('{used}', String(result.amount))
+            .replace('{alt}', String(result.altAmount))
+            .replace('{src}', result.altSource === 'vision' ? 'AI' : 'OCR'),
+        });
       } else if ((result.confidence ?? 1) < 0.6) {
         // 规则置信度低（没找到明确金额标签/货币符号）：提醒核对，而不是悄悄填错
         dialog.alert({ title: t('addTx.scanCheckAmountTitle'), message: t('addTx.scanCheckAmountMsg') });

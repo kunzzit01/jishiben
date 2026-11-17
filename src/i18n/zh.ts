@@ -270,6 +270,7 @@ export const zh = {
     scanCurrencyMismatchMsg: '识别到 {scan}，当前账户是 {account}。请确认是否换账户，或手动校正金额后再保存。',
     // 扫票：置信度偏低时提示核对
     scanCheckAmountTitle: '识别结果请核对',
+    scanAmountDisagreeMsg: '两种识别结果不一致：已填入 {used}，另一个读数是 {alt}（{src}）。请对照原单核对金额。',
     scanCheckAmountMsg: '没有找到明确的金额标签，金额可能是推断的。请确认无误后再保存。',
     // 关于应用：本地扫票模块自检
     localOcr: '本地识别',

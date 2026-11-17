@@ -36,6 +36,9 @@ export interface ScannedReceipt {
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
   ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed';
+  /** OCR 与视觉模型读到的金额不一致时，没被采用的那一个（界面据此提示「另一个读数是 X」） */
+  altAmount?: number | null;
+  altSource?: 'ocr' | 'vision';
   /** 一行诊断：本地行数 / 服务端 OCR / 视觉识别各走到哪一步、为什么跳过（识别失败时界面会显示，便于定位） */
   diag?: string;
   /** 是否请求过视觉识别（多模态大模型；诊断用，界面不展示） */
@@ -332,6 +335,8 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let visionTried = false;
     let visionUsed = false;
     let visionReason = '';
+    let altAmount: number | null = null;
+    let altSource: 'ocr' | 'vision' | undefined;
     let aiReason = '';
     // 本地识别整体失败时，解析结果本来就来自服务端行 → 路径直接记 server
     let ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed' = localRecognitionFailed ? 'server' : 'local';
@@ -396,34 +401,65 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
 
       // b) 端侧 AI 兜底（现有逻辑不变）：只有服务端也没给出可用金额时才打扰模型 ——
       //    否则 AI 会用固定 0.7 覆盖掉更好的服务端结果。
-      // c) 视觉识别（多模态大模型）：OCR 没把握 / 只有弱证据时，让模型看整张图。
-      //    采用规则：模型读到金额就采用；金额在 OCR 文字里出现过 = 有证据（0.92），
-      //    没出现过（多半是手写，OCR 本来就读不到）= 无证据，置信度压到 0.55，界面会提示用户核对金额。
-      const needVision =
-        visionPre !== null || active.amount === null || active.confidence < 0.6 || isWeakAmountTier(active.amountTier);
-      if (needVision) {
+      // c) 视觉识别（多模态大模型）：走到这里说明本地没把握（手写 / 模糊 / 难读的票），
+      //    此时即使服务端 OCR 给出了金额也**不直接信**，一律让模型看整张图再读一遍做交叉验证 ——
+      //    线上实测：手写 88/= 被 OCR 读成 188（贯穿空行的手写斜线被当成前面的「1」），
+      //    OCR 自己很有把握，如果不核对就直接填进去了。
+      //    采用规则：
+      //    · 两者一致 → 置信度 0.95；
+      //    · 不一致 → 默认采用视觉（它看的是整张图的上下文），置信度压到 0.5，并把另一个读数带给界面一起提示；
+      //      例外：视觉自己说不是手写、而 OCR 解析本来就很有把握（≥0.85）→ 保留 OCR，视觉读数作为提示；
+      //    · OCR 没金额 → 视觉有证据（金额在 OCR 文字里出现过）0.92，无证据 0.55。
+      const ocrAmount: number | null = amount;
+      const ocrConfidence = confidence;
+      {
         const v = visionPre ?? (await tryReceiptVision(imageUri, imageBase64));
         visionTried = v.attempted;
-        visionReason = v.reason + (v.result && v.result.amount === null ? '（模型没读出金额）' : '');
+        visionReason =
+          v.reason +
+          (v.result ? (v.result.amount === null ? '（模型没读出金额）' : '（视觉=' + v.result.amount + '）') : '');
         aiReason += ' | ' + v.reason;
         const vr = v.result;
         if (vr && vr.amount !== null) {
-          const grounded = amountInLines(vr.amount, [...lines, ...(serverLines ?? [])]);
-          amount = vr.amount;
-          currency = vr.currency ?? currency;
-          date = vr.date ?? date;
-          type = vr.type;
-          if (vr.category) suggestedCategory = vr.category;
-          // 商户只在 OCR 文字里确有其字时才当可靠备注（与 AI 校验同口径）
-          if (vr.merchant && rawText.toLowerCase().includes(vr.merchant.toLowerCase())) {
-            merchant = vr.merchant;
-            merchantConfident = true;
+          const agree = ocrAmount !== null && Math.abs(ocrAmount - vr.amount) < 0.005;
+          const disagree = ocrAmount !== null && !agree;
+          const preferOcr = disagree && !vr.handwritten && ocrConfidence >= 0.85;
+          if (preferOcr) {
+            altAmount = vr.amount;
+            altSource = 'vision';
+            confidence = 0.5;
+            aiReason += ' | vision-disagree-kept-ocr（视觉=' + vr.amount + ' OCR=' + ocrAmount + '）';
+          } else {
+            const grounded = amountInLines(vr.amount, [...lines, ...(serverLines ?? [])]);
+            amount = vr.amount;
+            currency = vr.currency ?? currency;
+            date = vr.date ?? date;
+            type = vr.type;
+            if (vr.category) suggestedCategory = vr.category;
+            // 商户只在 OCR 文字里确有其字时才当可靠备注（与 AI 校验同口径）
+            if (vr.merchant && rawText.toLowerCase().includes(vr.merchant.toLowerCase())) {
+              merchant = vr.merchant;
+              merchantConfident = true;
+            }
+            amountLabel = vr.amountText ?? amountLabel;
+            confidence = agree
+              ? 0.95
+              : disagree
+                ? 0.5
+                : grounded && vr.legible
+                  ? 0.92
+                  : vr.legible
+                    ? 0.55
+                    : 0.45;
+            if (disagree) {
+              altAmount = ocrAmount;
+              altSource = 'ocr';
+            }
+            visionUsed = true;
+            ocrSource = agree ? ocrSource : 'vision';
+            aiReason +=
+              ' | vision-used（视觉=' + vr.amount + ' OCR=' + ocrAmount + ' agree=' + agree + ' handwritten=' + vr.handwritten + '）';
           }
-          amountLabel = vr.amountText ?? amountLabel;
-          confidence = grounded && vr.legible ? 0.92 : vr.legible ? 0.55 : 0.45;
-          visionUsed = true;
-          ocrSource = 'vision';
-          aiReason += ' | vision-used（amount=' + vr.amount + ' grounded=' + grounded + ' handwritten=' + vr.handwritten + '）';
         }
       }
 
@@ -492,6 +528,8 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       diag:
         '本地' + lines.length + '行 ｜ ' + (serverReason || 'server-?') + ' ｜ ' +
         (visionReason || (localIsConfident ? 'vision-skip（本地已有把握）' : 'vision-skip')),
+      altAmount,
+      altSource,
       visionTried,
       visionUsed,
       ocrSource,
