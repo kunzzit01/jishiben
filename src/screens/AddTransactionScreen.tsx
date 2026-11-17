@@ -1816,7 +1816,11 @@ function fxAmountText(raw: string, live: string | null): string {
     }
     setScanning(true);
     try {
-      const result = await scanReceipt(uri, base64);
+      // 先把照片一次性存成「只留本机」的副本，识别和凭证都用它：
+      // ① 识别上传时不再每层各复制一份（以前每次扫票会在手机上多出最多 3 份）；
+      // ② 文件名带 scan- 前缀，账同步时跳过上传 —— 服务器只读照片做识别，不保存。
+      const stableUri = await persistReceiptImage(uri, { localOnly: true });
+      const result = await scanReceipt(stableUri, base64);
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
@@ -1859,7 +1863,7 @@ function fxAmountText(raw: string, live: string | null): string {
       // 新票据 = 新建议：复位「手动改过」标记（已有备注不会被覆盖，填入只发生在备注为空时）
       // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
       // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
-      setReceiptUri(await persistReceiptImage(uri));
+      setReceiptUri(stableUri);
 
       setStep('detail');
 

@@ -18,6 +18,16 @@ function normalize(path: string): string {
   return path.replace(/^\/+/, '');
 }
 
+/** 扫票照片的文件名前缀：带它的凭证只留在手机上，永不上传服务器 */
+const LOCAL_ONLY_PREFIX = 'scan-';
+
+/** 是不是「只留本机」的凭证（扫票拍的照片）。同步前必须判断，命中就不上传。 */
+export function isLocalOnlyReceipt(uri?: string | null): boolean {
+  if (!uri) return false;
+  const name = uri.split('?')[0].split('#')[0].split('/').pop() ?? '';
+  return name.startsWith(LOCAL_ONLY_PREFIX);
+}
+
 /** 是不是服务端相对路径（receipts/xxx.jpg；file:// / content:// / http(s):// 都不算） */
 export function isRemoteReceipt(path?: string | null): boolean {
   if (!path) return false;
@@ -55,14 +65,15 @@ function randomId(): string {
  * 把相机/相册给的临时图片复制到 documentDirectory/receipts/，返回新 uri。
  * 任何失败都原样返回入参：凭证落不了盘也不能让用户记不了账。
  */
-export async function persistReceiptImage(uri: string): Promise<string> {
+export async function persistReceiptImage(uri: string, opts?: { localOnly?: boolean }): Promise<string> {
   if (!uri) return uri;
   // 已经是服务端相对路径 / 已经落在持久目录里：不用再复制一份
   if (isRemoteReceipt(uri) || uri.startsWith(RECEIPTS_DIR)) return uri;
   if (!FileSystem.documentDirectory) return uri;
   try {
     await FileSystem.makeDirectoryAsync(RECEIPTS_DIR, { intermediates: true });
-    const dest = RECEIPTS_DIR + randomId() + '.' + fileExtension(uri);
+    // localOnly（扫票拍的照片）：文件名带 scan- 前缀，同步时据此跳过上传 —— 服务器只读它做识别，绝不保存
+    const dest = RECEIPTS_DIR + (opts?.localOnly ? LOCAL_ONLY_PREFIX : '') + randomId() + '.' + fileExtension(uri);
     await FileSystem.copyAsync({ from: uri, to: dest });
     return dest;
   } catch (e) {

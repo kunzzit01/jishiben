@@ -37,7 +37,7 @@ import {
   WeekStartsOn,
 } from '../types';
 import { amountKey, optionalAmount, optionalRate, parseAmount, rateKey } from '../utils/money4';
-import { isRemoteReceipt, localReceiptExists } from '../utils/receiptStore';
+import { isLocalOnlyReceipt, isRemoteReceipt, localReceiptExists } from '../utils/receiptStore';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
 import { t as translate } from '../i18n';
 
@@ -521,6 +521,8 @@ const knownReceiptPaths = new Map<string, string>();
 async function receiptPathFor(txId: string, uri: string | undefined): Promise<string | null> {
   if (!uri) return null;
   if (isRemoteReceipt(uri)) return clip(uri, 512);
+  // 扫票拍的照片只留在手机上：服务器只读它做识别，不保存（产品要求）
+  if (isLocalOnlyReceipt(uri)) return null;
   const cached = uploadedReceipts.get(uri);
   if (cached) return clip(cached, 512);
   if (!(await localReceiptExists(uri))) return knownReceiptPaths.get(txId) ?? null;

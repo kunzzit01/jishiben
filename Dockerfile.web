@@ -169,6 +169,9 @@ server {
         set $ocr_upstream http://ocr:8090;
         # 服务端上限 8MB，留出 multipart 边界与表单头的余量
         client_max_body_size 26m;
+        # 上传的照片只放内存、不落盘：缓冲区 ≥ 上限，nginx 就不会把请求体写进 client_temp 临时文件
+        # （服务器只读照片做识别，不保存、不残留）
+        client_body_buffer_size 26m;
         proxy_pass $ocr_upstream;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
