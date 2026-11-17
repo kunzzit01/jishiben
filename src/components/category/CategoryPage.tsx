@@ -32,7 +32,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { useApp } from '../../context/AppContext';
 import { useDialog } from '../AppDialog';
@@ -56,6 +56,7 @@ import {
   CategoryGridEditor,
   GRID_EDGE_ZONE,
   GRID_FINGER_STEP,
+  GRID_DRAG_SLOP as GROUP_DRAG_SLOP,
   GRID_LAND_MS,
   GRID_SCROLL_STEP,
   GRID_SLOT_H,
@@ -120,20 +121,28 @@ type GroupDragShared = {
  * 手指位置 → 落点分组下标：按每张卡的中线判定（越过中线才让位），
  * worklet 与 JS 自动滚动共用同一份算式。
  */
+/** 换位触发线离目标卡远端边的距离上限（≈ 幽灵组头半高 + 一点余量） */
+const GROUP_SWAP_EDGE = 40;
 function groupIndexAt(
   y: number,
   listTop: number,
   scrollDelta: number,
   tops: number[],
   ends: number[],
-  count: number
+  count: number,
+  from: number
 ): number {
   'worklet';
   if (count <= 0 || tops.length < count) return 0;
   const local = y - (listTop - scrollDelta);
   let idx = 0;
   for (let i = 0; i < count; i++) {
-    if (local >= tops[i] + (ends[i] - tops[i]) / 2) idx = i + 1;
+    const h = ends[i] - tops[i];
+    // 触发线按拖动方向取「卡的远端」：高卡片不再一越过中线就换位，
+    // 往上拖要拖到它的顶边附近、往下拖要拖到它的底边附近（k 封顶，矮卡仍约等于中线）
+    const k = Math.min(h / 2, GROUP_SWAP_EDGE);
+    const line = i < from ? tops[i] + k : i > from ? ends[i] - k : tops[i] + h / 2;
+    if (local >= line) idx = i + 1;
   }
   return Math.min(count - 1, idx);
 }
@@ -164,6 +173,7 @@ function groupSlotSpan(index: number, count: number, boxAt: (i: number) => Group
  * · 往上拖 / 原位：空位就在目标卡原来的位置上 → tops[to]。
  */
 function groupLandTop(from: number, to: number, tops: number[], ends: number[]): number {
+  'worklet';
   const top = tops[to] ?? 0;
   if (to <= from) return top;
   const fromH = Math.max(0, (ends[from] ?? 0) - (tops[from] ?? 0));
@@ -289,7 +299,8 @@ function GroupCardSlot({
         scrollY.value - scroll0.value,
         tops.value,
         ends.value,
-        count.value
+        count.value,
+        from.value
       );
       const landY =
         tops.value[idx] == null ? baseY.value : groupLandTop(from.value, idx, tops.value, ends.value);
@@ -325,7 +336,8 @@ function GroupCardSlot({
           scrollY.value - scroll0.value,
           tops.value,
           ends.value,
-          count.value
+          count.value,
+          from.value
         );
         if (idx !== cur.value) {
           cur.value = idx;
@@ -479,6 +491,8 @@ export default function CategoryPage({
   const gScale = useSharedValue(1);
   const gFrom = useSharedValue(0);
   const gCur = useSharedValue(0);
+  /** 落点虚线框的纵向位置（内容坐标）：落点槽位一变就用弹簧滑过去，全程 UI 线程 */
+  const gPhY = useSharedValue(0);
   const gBaseY = useSharedValue(0);
   const gTransY = useSharedValue(0);
   const gCount = useSharedValue(0);
@@ -758,11 +772,16 @@ export default function CategoryPage({
     const fingerY = groupFingerYRef.current;
     const dir = fingerY > windowH - GRID_EDGE_ZONE ? 1 : fingerY < GRID_EDGE_ZONE ? -1 : 0;
     if (!dir) return;
+    // 越靠边滚得越快（0.3x → 1.5x），松松贴边时慢慢走，不再一贴边就全速
+    const depth = dir > 0 ? fingerY - (windowH - GRID_EDGE_ZONE) : GRID_EDGE_ZONE - fingerY;
+    const ramp = 0.3 + 1.2 * Math.min(1, Math.max(0, depth / GRID_EDGE_ZONE));
     const max = Math.max(0, contentHRef.current - windowH);
     const current = scrollYSV.value;
-    const next = Math.min(max, Math.max(0, current + dir * GRID_SCROLL_STEP));
+    const next = Math.min(max, Math.max(0, current + dir * GRID_SCROLL_STEP * ramp));
     if (next === current) return;
     scrollRef.current?.scrollTo({ y: next, animated: false });
+    // 立刻同步滚动量：onScroll 回写有延迟，期间手指再动一下就会拿旧值算位置 → 幽灵/虚线框来回抖
+    scrollYSV.value = next;
     gMoveY.value = gBaseY.value + gTransY.value + (next - gScroll0.value);
     const idx = groupIndexAt(
       fingerY,
@@ -770,7 +789,8 @@ export default function CategoryPage({
       next - gScroll0.value,
       gTops.value,
       gEnds.value,
-      gCount.value
+      gCount.value,
+      gFrom.value
     );
     if (idx !== gCur.value) {
       gCur.value = idx;
@@ -795,6 +815,7 @@ export default function CategoryPage({
       gTops.value = boxes.tops;
       gEnds.value = boxes.ends;
       gBaseY.value = boxes.tops[from] ?? 0;
+      gPhY.value = boxes.tops[from] ?? 0; // 直接赋值会打断上一次的弹簧：虚线框从原槽位起步
       gScroll0.value = scrollYSV.value;
       gMoveY.value = gBaseY.value;
       setGroupDrag({ group, from, hover: from });
@@ -803,7 +824,7 @@ export default function CategoryPage({
       });
       startGroupLoop();
     },
-    [gBaseY, gCount, gCur, gEnds, gFrom, gMoveY, gScroll0, gTops, readGroupBoxes, scrollYSV, startGroupLoop]
+    [gBaseY, gPhY, gCount, gCur, gEnds, gFrom, gMoveY, gScroll0, gTops, readGroupBoxes, scrollYSV, startGroupLoop]
   );
 
   const handleGroupDragHover = useCallback((index: number, absY: number) => {
@@ -865,6 +886,8 @@ export default function CategoryPage({
   const getGroupPanHandlers = useCallback((group: string) => {
     const cached = groupPanCache.current[group];
     if (cached) return cached.panHandlers;
+    /** 手指是否已真的拖开：按住不动只占住手势，不抬起、不让位；挪过 slop 才开始 */
+    let started = false;
     const responder = PanResponder.create({
       // 不在一按下就接管：只认「明显的竖直拖动」。
       // 否则这枚把手的 44×44 绝对定位盒会连同其下方的图标一起被吞掉 ——
@@ -874,14 +897,19 @@ export default function CategoryPage({
       onStartShouldSetPanResponder: () => !gridDraggingRef.current,
       onMoveShouldSetPanResponder: () => !gridDraggingRef.current,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (_e, g) => {
-        gScroll0.value = scrollYSV.value;
-        gTransY.value = 0;
-        gLastY.value = g.y0;
-        gScale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
-        handleGroupDragStart(group, g.y0);
+      onPanResponderGrant: () => {
+        started = false;
       },
       onPanResponderMove: (_e, g) => {
+        if (!started) {
+          if (Math.abs(g.dy) < GROUP_DRAG_SLOP && Math.abs(g.dx) < GROUP_DRAG_SLOP) return;
+          started = true;
+          gScroll0.value = scrollYSV.value;
+          gTransY.value = 0;
+          gLastY.value = g.y0;
+          gScale.value = withTiming(GROUP_DRAG_SCALE, { duration: 130 });
+          handleGroupDragStart(group, g.y0);
+        }
         gMoveY.value = gBaseY.value + g.dy + (scrollYSV.value - gScroll0.value);
         gTransY.value = g.dy;
         const fingerY = g.moveY;
@@ -891,7 +919,8 @@ export default function CategoryPage({
           scrollYSV.value - gScroll0.value,
           gTops.value,
           gEnds.value,
-          gCount.value
+          gCount.value,
+          gFrom.value
         );
         if (idx !== gCur.value) {
           gCur.value = idx;
@@ -903,13 +932,16 @@ export default function CategoryPage({
         }
       },
       onPanResponderRelease: (_e, g) => {
+        if (!started) return;
+        started = false;
         const idx = groupIndexAt(
           g.moveY,
           gListTop.value,
           scrollYSV.value - gScroll0.value,
           gTops.value,
           gEnds.value,
-          gCount.value
+          gCount.value,
+          gFrom.value
         );
         const landY =
           gTops.value[idx] == null ? gBaseY.value : groupLandTop(gFrom.value, idx, gTops.value, gEnds.value);
@@ -917,7 +949,11 @@ export default function CategoryPage({
         gScale.value = withTiming(1, { duration: 150 });
         handleGroupDragEnd(gFrom.value, idx);
       },
-      onPanResponderTerminate: () => handleGroupDragCancel(),
+      onPanResponderTerminate: () => {
+        if (!started) return;
+        started = false;
+        handleGroupDragCancel();
+      },
     });
     groupPanCache.current[group] = responder;
     return responder.panHandlers;
@@ -951,6 +987,25 @@ export default function CategoryPage({
     });
     return map;
   }, [sections, groupDrag]);
+
+  // 落点槽位（gCur）变了 → 虚线框弹到「被拖组换位完成后的位置」，正好是让位腾出的空档
+  useAnimatedReaction(
+    () => gCur.value,
+    (cur) => {
+      const y = groupLandTop(gFrom.value, cur, gTops.value, gEnds.value);
+      gPhY.value = withSpring(y, { damping: 24, stiffness: 300, mass: 0.7 });
+    }
+  );
+  const groupPlaceholderStyle = useAnimatedStyle(() => {
+    const f = gFrom.value;
+    const h = Math.max(0, (gEnds.value[f] ?? 0) - (gTops.value[f] ?? 0));
+    return {
+      height: h,
+      transform: [{ translateY: gPhY.value }],
+      // 抬起时淡入、松手落位（scale 回 1）时淡出
+      opacity: Math.max(0, Math.min(1, (gScale.value - 1) / (GROUP_DRAG_SCALE - 1))),
+    };
+  });
 
   const groupGhostStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: gMoveY.value }, { scale: gScale.value }],
@@ -1120,7 +1175,7 @@ export default function CategoryPage({
 
       <ScrollView
         ref={scrollRef}
-        scrollEnabled={!gridDragging}
+        scrollEnabled={!gridDragging && !groupDrag}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         onContentSizeChange={(_w, h) => {
@@ -1199,9 +1254,13 @@ export default function CategoryPage({
                     {...getGroupPanHandlers(group)}
                     accessibilityRole="button"
                     accessibilityLabel={group + ' reorder'}
-                    style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 2 }}
+                    style={[
+                      styles.groupHandle,
+                      { backgroundColor: semantic.accentSoft },
+                      GROUP_DRAG_HANDLE_WEB_STYLE,
+                    ]}
                   >
-                    <Ionicons name="reorder-three-outline" size={18} color={semantic.textTertiary} />
+                    <Ionicons name="reorder-three-outline" size={20} color={semantic.accentText} />
                   </View>
                   {/* 整组删除入口（记一笔同款：垃圾桶贴数量胶囊右侧；默认组自定义组都可删） */}
                   <PressableScale
@@ -1514,6 +1573,16 @@ export default function CategoryPage({
             <Animated.View
               pointerEvents="none"
               style={[
+                styles.groupPlaceholder,
+                { borderColor: semantic.accentText, backgroundColor: semantic.accentSoft },
+                groupPlaceholderStyle,
+              ]}
+            />
+          )}
+          {groupDrag && ghostSection && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
                 styles.groupGhost,
                 { backgroundColor: glass.fill, boxShadow: glass.shadow },
                 groupGhostStyle,
@@ -1617,7 +1686,18 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
     groupDeleteBtn: { marginLeft: spacing.sm },
     groupCount: { marginLeft: 'auto' },
     // 正在被拖走的那张组卡：留在原位变淡（幽灵在手指底下），其余组卡让位平移
-    groupDragging: { opacity: 0.35 },
+    groupDragging: { opacity: 0 },
+    // 落点虚线框：与被拖组同高同圆角，叠在让位腾出的空档里（ghost 之下）
+    groupPlaceholder: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      borderRadius: 26,
+      borderWidth: 1.5,
+      borderStyle: 'dashed',
+      zIndex: 1,
+    },
     groupGhostHandle: { marginRight: spacing.xs + 2 },
     // 整组拖拽的幽灵（跟手的组头胶囊）：与组卡同宽（内容包了 padding，这里 left/right 0 即对齐卡片）
     groupGhost: {
@@ -1631,6 +1711,16 @@ function makeStyles(semantic: ReturnType<typeof useTheme>['semantic'], spacing: 
       flexDirection: 'row',
       alignItems: 'center',
       zIndex: 30,
+    },
+    // 组序拖拽把手：淡蓝胶囊 + 蓝色 ≡，一眼看出是可拖的；web 上鼠标悬停显示抓手
+    groupHandle: {
+      width: 38,
+      height: 30,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginHorizontal: 4,
+      ...(Platform.OS === 'web' ? ({ cursor: 'grab' } as unknown as ViewStyle) : null),
     },
     groupEmpty: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
     // ---------- TASK-020③：selectMode 照搬记一笔的两步小卡 + 图标弹层样式（原样搬，防两处漂移） ----------

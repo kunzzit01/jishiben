@@ -53,6 +53,8 @@ export const GRID_EDGE_ZONE = 140;
 export const GRID_SCROLL_STEP = 12;
 /** 手指移动不足这个距离就不再往 JS 送坐标（贴边判定用不到更细的粒度） */
 export const GRID_FINGER_STEP = 20;
+/** 长按抬起后，手指要真的挪开这么远才开始重排（只按住不动 = 只进编辑态，不让位） */
+export const GRID_DRAG_SLOP = 10;
 /** 编辑态抖动：单程 90ms（往返 180ms）、±1.3° */
 const JIGGLE_DEG = 1.3;
 const JIGGLE_HALF_MS = 90;
@@ -123,6 +125,10 @@ type GridGeometryShared = {
   scroll0: SharedValue<number>;
   lastX: SharedValue<number>;
   lastY: SharedValue<number>;
+  /** 抬起时的手指位置与"是否已真的拖动"（0/1）：没挪过 slop 之前不算落点 */
+  startX: SharedValue<number>;
+  startY: SharedValue<number>;
+  moved: SharedValue<number>;
 };
 
 /** 磁贴外框（图标 + 删除角标 + 标签）：管理态和拖起的幽灵共用同一份外观 */
@@ -232,7 +238,7 @@ function CategoryGridCell({
     draggingCbRef.current?.(v);
   }, []);
   const { moveX, moveY, scale, slotW, count, from, cur, baseY, transY, cols, slotH, reveal } = drag;
-  const { gridLeft, gridTop, scroll0, lastX, lastY } = geometry;
+  const { gridLeft, gridTop, scroll0, lastX, lastY, startX, startY, moved } = geometry;
 
   // 让位用 transform 平移，绝不重排 DOM：重排会把按住的那个节点在 DOM 里挪走，
   // 浏览器的 pointer capture 随之丢失，拖到一半手势就断了
@@ -273,6 +279,9 @@ function CategoryGridCell({
           transY.value = 0;
           lastX.value = e.absoluteX;
           lastY.value = e.absoluteY;
+          startX.value = e.absoluteX;
+          startY.value = e.absoluteY;
+          moved.value = 0;
           scale.value = withTiming(GRID_DRAG_SCALE, { duration: 130 });
           // 起始槽位交给 JS 用 items 数组算（量出来之前就准），这里只负责抬起
           runOnJS(onDragStart)(item.id, e.absoluteX, e.absoluteY);
@@ -280,6 +289,16 @@ function CategoryGridCell({
         })
         .onUpdate((e) => {
           'worklet';
+          // 只按住不动：幽灵留在原槽位、不算落点、不让位；挪开 slop 才真正开始拖
+          if (moved.value === 0) {
+            const dx = e.absoluteX - startX.value;
+            const dy = e.absoluteY - startY.value;
+            if (dx * dx + dy * dy < GRID_DRAG_SLOP * GRID_DRAG_SLOP) return;
+            moved.value = 1;
+            lastX.value = e.absoluteX;
+            lastY.value = e.absoluteY;
+            runOnJS(onDragMove)(e.absoluteX, e.absoluteY);
+          }
           moveX.value = (from.value % cols.value) * slotW.value + e.translationX;
           transY.value = e.translationY;
           moveY.value = baseY.value + e.translationY + (scrollY.value - scroll0.value);
@@ -309,7 +328,7 @@ function CategoryGridCell({
         })
         .onEnd((e) => {
           'worklet';
-          const idx = gridIndexAt(
+          const idx = moved.value === 0 ? from.value : gridIndexAt(
             e.absoluteX,
             e.absoluteY,
             gridLeft.value,
@@ -461,6 +480,9 @@ function CategoryGridEditorInner({
   const scroll0 = useSharedValue(0);
   const lastX = useSharedValue(0);
   const lastY = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const moved = useSharedValue(0);
   const cols = useSharedValue(columns);
   const slotH = useSharedValue(slotHeight);
   /** 编辑态视觉元素（虚线占位 + 删除角标）：0 = 干净态 */
@@ -471,8 +493,8 @@ function CategoryGridEditorInner({
     [moveX, moveY, scale, slotW, count, from, cur, baseY, transY, cols, slotH, reveal]
   );
   const geometryShared: GridGeometryShared = useMemo(
-    () => ({ gridLeft, gridTop, scroll0, lastX, lastY }),
-    [gridLeft, gridTop, scroll0, lastX, lastY]
+    () => ({ gridLeft, gridTop, scroll0, lastX, lastY, startX, startY, moved }),
+    [gridLeft, gridTop, scroll0, lastX, lastY, startX, startY, moved]
   );
 
   const slotWidth = gridW > 0 ? Math.max(0, gridW - spacing.sm * 2) / columns : 0;
@@ -569,10 +591,10 @@ function CategoryGridEditorInner({
       // 长按 200ms 抬起 = 进入编辑态（虚线占位 + 删除角标淡入）
       setEditing(true);
       setDrag({ id, from: startIndex, hover: startIndex });
+      // 贴边自动滚动等手指真的拖动了再开（见 handleDragMove），只按住不动不滚
       syncRect();
-      startLoop();
     },
-    [baseY, cur, from, moveX, moveY, slotW, startLoop, syncRect, clearIdleTimer, columns, slotHeight]
+    [baseY, cur, from, moveX, moveY, slotW, syncRect, clearIdleTimer, columns, slotHeight]
   );
 
   const clampHover = useCallback((index: number) => {
@@ -590,9 +612,13 @@ function CategoryGridEditorInner({
     [clampHover]
   );
 
-  const handleDragMove = useCallback((absX: number, absY: number) => {
-    fingerRef.current = { x: absX, y: absY, active: true };
-  }, []);
+  const handleDragMove = useCallback(
+    (absX: number, absY: number) => {
+      fingerRef.current = { x: absX, y: absY, active: true };
+      startLoop();
+    },
+    [startLoop]
+  );
 
   const releasePickSuppression = useCallback(() => {
     if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);

@@ -29,7 +29,7 @@ type IconName = keyof typeof Ionicons.glyphMap;
 /** 一格最小宽：放得下 44 球 + 4 个汉字标签。可用宽 ÷ 它 = 列数，夹在 3~4 列之间 */
 const CELL_MIN_WIDTH = 72;
 const MIN_COLUMNS = 3;
-const MAX_COLUMNS = 4;
+const MAX_COLUMNS = 3; // 固定 3 列，与「管理类别」页的选择类别一致
 /** 网格在卡片里的左右内衬（格子之间不再额外留缝，间距由格宽自然分出） */
 const GRID_PAD_X = 8;
 
@@ -174,7 +174,7 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, radius: Radius, 
     group: { marginBottom: spacing.md },
     grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: GRID_PAD_X, paddingVertical: spacing.sm },
     // 宽度未测得前的兜底（首帧）：按 4 列估，测得后立即换成实测格宽
-    cellFallback: { width: '25%' },
+    cellFallback: { width: '33.333%' },
     // 顶部留 8：选中态外圈向外溢出 8，要有地方露出来
     cell: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: 2 },
     cellLabel: { marginTop: spacing.xs, textAlign: 'center' },
