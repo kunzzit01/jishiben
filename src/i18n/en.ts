@@ -483,6 +483,7 @@ export const en = {
     photoPermissionTitle: 'Photo permission required',
     photoPermissionMsg: 'Please allow this app to access photos in system settings',
     aiScanning: 'AI is scanning the receipt...',
+    aiVerifying: 'AI is double-checking the amount… (about 30–50 s, you can edit meanwhile)',
     aiScanningSlow: 'Handwritten or blurry receipts take longer to read — up to about a minute',
     fromWhichAccount: 'Which account are the funds transferred from?',
     toWhichAccount: 'Which account receives the funds?',

@@ -666,29 +666,22 @@ VISION_TIMEOUT_MS = _env_int("VISION_TIMEOUT_MS", 105000)
 VISION_MAX_SIDE = _env_int("VISION_MAX_SIDE", 896)
 _VISION_SEM = asyncio.Semaphore(_env_int("VISION_CONCURRENCY", 1))
 
-VISION_EXPENSE_CATEGORIES = (
-    "餐饮,蔬菜,水果,零食,烟酒,购物,日用,外卖,奶茶,食材,服饰,美容,住房,居家,维修,孩子,宠物,水电,网络,家电,"
-    "交通,汽车,旅行,娱乐,加油,医疗,运动,书籍,学习,办公,数码,药品,学费,保险,礼物,通讯,其他"
-)
-VISION_INCOME_CATEGORIES = "工资,兼职,退款,其他收入"
-
+# 输出越短越快：CPU 上每个输出 token 约 0.07 秒，10 个字段约 8 秒、只要金额相关的 5 项约 3 秒。
+# 所以只让模型给金额 / 币种 / 是否手写 / 是否清晰 / 位置；日期、商户、分类、收支类型交给 OCR 解析（客户端沿用）。
+# 提示语里的读数规则**不能砍**：实测把它缩成一句话，7b 会把 88/= 读成 881。
 VISION_PROMPT = (
-    "这是一张小票、发票、账单或手写单据的照片。请只输出 JSON，字段含义：\n"
+    "这是一张小票、发票、账单或手写单据的照片。请只输出 JSON，字段含义：{nl}"
     "- amount：这张单据最终实际应付/已付的总金额（含税、含服务费、扣掉折扣后）。"
     "不是小计、不是找零、不是现金收款额、不是单价；有多个金额时按上下文判断总额。"
-    "手写金额要逐位仔细读（1/7、0/6、5/6、4/9 易混；88/= 与 88.- 都表示 88）；读不清就写 null，绝不猜。\n"
-    "- amount_text：金额在票面上的原文（怎么写就怎么抄，含符号）。\n"
-    "- currency：ISO 币种代码（RM→MYR，S$→SGD，￥/元→CNY）；无法判断写 null。\n"
-    "- date：票面日期，格式 YYYY-MM-DD；没有或看不清写 null，不要用今天的日期补。\n"
-    "- merchant：商户名，没有写 null。\n"
-    "- type：expense 或 income。\n"
-    "- category：从下面列表里选一个，选不准用「其他」。支出可选：" + VISION_EXPENSE_CATEGORIES
-    + "；收入可选：" + VISION_INCOME_CATEGORIES + "。\n"
-    "- handwritten：总金额是否为手写（true/false）。\n"
-    "- legible：金额是否清晰可读（true/false）。\n"
+    "手写金额要逐位仔细读（1/7、0/6、5/6、4/9 易混；88/= 与 88.- 都表示 88，末尾的 / 和 = 不是数字；"
+    "贯穿空行的斜线是划线，也不是数字）；读不清就写 null，绝不猜。{nl}"
+    "- amount_text：金额在票面上的原文（怎么写就怎么抄，含符号）。{nl}"
+    "- currency：ISO 币种代码（RM→MYR，S$→SGD，￥/元→CNY）；无法判断写 null。{nl}"
+    "- handwritten：总金额是否为手写（true/false）。{nl}"
+    "- legible：金额是否清晰可读（true/false）。{nl}"
     "- amount_box：你读到的那个总金额数字在图中的位置，格式 [x1,y1,x2,y2]（左上角与右下角的像素坐标，"
     "相对于你看到的这张图）；只框住金额数字本身。找不到就写 null。"
-)
+).replace("{nl}", "\n")
 
 # Ollama 结构化输出：用 JSON Schema 约束，模型只能按这个形状回答
 VISION_SCHEMA = {
@@ -697,15 +690,11 @@ VISION_SCHEMA = {
         "amount": {"type": ["number", "null"]},
         "amount_text": {"type": ["string", "null"]},
         "currency": {"type": ["string", "null"]},
-        "date": {"type": ["string", "null"]},
-        "merchant": {"type": ["string", "null"]},
-        "type": {"type": "string", "enum": ["expense", "income"]},
-        "category": {"type": ["string", "null"]},
         "handwritten": {"type": "boolean"},
         "legible": {"type": "boolean"},
         "amount_box": {"type": ["array", "null"], "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
     },
-    "required": ["amount", "amount_text", "type", "handwritten", "legible"],
+    "required": ["amount", "amount_text", "currency", "handwritten", "legible", "amount_box"],
 }
 
 

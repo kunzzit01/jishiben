@@ -487,6 +487,7 @@ export const zh = {
     photoPermissionTitle: '需要相册权限',
     photoPermissionMsg: '请在系统设置里允许本APP访问照片',
     aiScanning: 'AI正在识别收据...',
+    aiVerifying: 'AI 正在核对金额…（约 30–50 秒，可先编辑）',
     aiScanningSlow: '手写或模糊的票据需要仔细读，最长约 1 分钟，请稍候',
     fromWhichAccount: '资金从哪个账户转出',
     toWhichAccount: '资金转入哪个账户',

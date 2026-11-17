@@ -32,7 +32,7 @@ import { TransactionType, Transaction, Category } from '../types';
 import { useT, useLanguage } from '../i18n/LanguageContext';
 import { getCategoryLabel, findCategoryIdByChineseName } from '../i18n/categories';
 import { EXPENSE_CATEGORY_GROUPS, INCOME_CATEGORY_GROUPS } from '../utils/defaultCategories';
-import { scanReceipt, rememberReceiptRawText } from '../utils/scanReceipt';
+import { scanReceipt, rememberReceiptRawText, type ScannedReceipt } from '../utils/scanReceipt';
 import { rememberAmountLabel, rememberMerchantCategory } from '../utils/receiptLearning';
 import { isLocalOcrAvailable } from '../utils/receiptOcr';
 import { persistReceiptImage } from '../utils/receiptStore';
@@ -467,6 +467,11 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [autoMonthly, setAutoMonthly] = useState(false);
   const [note, setNote] = useState(editTransaction?.note ?? '');
   const [scanning, setScanning] = useState(false);
+  // OCR 初步结果已填入、AI 视觉模型还在后台核对：表单先可用，顶部显示一行「核对中」提示
+  const [scanVerifying, setScanVerifying] = useState(false);
+  // 最新的金额输入框内容：AI 核对完要不要覆盖金额，取决于用户这期间有没有自己改过
+  const amountNowRef = useRef('');
+  amountNowRef.current = amount;
   // 识别超过 6 秒（说明走到了本机视觉模型）才出现的耐心提示
   const [scanSlow, setScanSlow] = useState(false);
   useEffect(() => {
@@ -1817,15 +1822,14 @@ function fxAmountText(raw: string, live: string | null): string {
       return;
     }
     setScanning(true);
-    try {
-      // 先把照片一次性存成「只留本机」的副本，识别和凭证都用它：
-      // ① 识别上传时不再每层各复制一份（以前每次扫票会在手机上多出最多 3 份）；
-      // ② 文件名带 scan- 前缀，账同步时跳过上传 —— 服务器只读照片做识别，不保存。
-      setReceiptAmountBox(null);
-      const stableUri = await persistReceiptImage(uri, { localOnly: true });
-      const result = await scanReceipt(stableUri, base64);
-      setReceiptAmountBox(result.amountBox ?? null);
-
+    setScanVerifying(false);
+    // 初步结果（OCR）与最终结果（AI 核对后）共用同一套写表单的逻辑
+    let prelimAmount: number | null = null;
+    let userEditedAmount = false;
+    let dupShown = false;
+    let currencyShown = false;
+    let stableUriForApply = uri;
+    const apply = (result: ScannedReceipt, final: boolean) => {
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
       lastScanMetaRef.current = {
@@ -1833,7 +1837,8 @@ function fxAmountText(raw: string, live: string | null): string {
         merchantConfident: result.merchantConfident,
         amountLabel: result.amountLabel,
       };
-      if (result.duplicate) {
+      if (result.duplicate && !dupShown) {
+        dupShown = true;
         dialog.alert({
           title: t('addTx.receiptDuplicateTitle'),
           message: t('addTx.receiptDuplicateMsg').replace('{n}', String(result.duplicateDaysAgo ?? 0)),
@@ -1856,24 +1861,31 @@ function fxAmountText(raw: string, live: string | null): string {
         if (matched) setCategoryId(matched.id);
       userPickedCategoryRef.current = true;
       }
-      if (result.amount != null) {
+
+      // 金额：初步结果直接填；最终结果只在用户没自己改过时才覆盖（用户改了就尊重用户）
+      if (!final) {
+        if (result.amount != null) {
+          prelimAmount = result.amount;
+          setAmount(String(result.amount));
+          amountExpr.reset(result.amount);
+        }
+      } else if (prelimAmount != null && Number(amountNowRef.current) !== prelimAmount) {
+        userEditedAmount = true;
+      } else if (result.amount != null) {
         setAmount(String(result.amount));
         amountExpr.reset(result.amount);
       }
       if (result.date) setDate(result.date);
       // 备注不再自动填充（OCR 商户名常抓错字眼）；只存成建议，由用户点备注框时决定
-      // 方案 B：只有票据里有明确 Merchant 标签（钱包账单）才给备注建议；纸质小票一律不给
-      // 备注建议：1–2 件商品「购买 A、B」→ ≥3 件「采购文具」→ 高置信商户兜底；null 表示不给建议
-      // 新票据 = 新建议：复位「手动改过」标记（已有备注不会被覆盖，填入只发生在备注为空时）
-      // 扫描用的这张照片本身就是单据，顺手存成凭证，不用用户再拍一次。
-      // 相机给的是 cache 里的临时 uri：先复制进 documentDirectory，清缓存/换机才不会破图
-      setReceiptUri(stableUri);
-
+      // 扫描用的这张照片本身就是单据，顺手存成凭证（只留本机，不上传），不用用户再拍一次。
+      setReceiptUri(stableUriForApply);
+      setReceiptAmountBox(result.amountBox ?? null);
       setStep('detail');
 
       const accountCurrency = assets.find((a) => a.id === assetId)?.currency ?? null;
-      if (result.currency && accountCurrency && result.currency !== accountCurrency) {
+      if (result.currency && accountCurrency && result.currency !== accountCurrency && !currencyShown) {
         // 币种不一致：绝不把同一个数字按另一种币直接入账
+        currencyShown = true;
         dialog.alert({
           title: t('addTx.scanCurrencyMismatchTitle'),
           message: t('addTx.scanCurrencyMismatchMsg')
@@ -1881,6 +1893,8 @@ function fxAmountText(raw: string, live: string | null): string {
             .replace('{account}', accountCurrency),
         });
       }
+      if (!final) return; // 初步结果不弹金额类提示，等 AI 核对完再说
+      if (userEditedAmount) return; // 用户已经自己改了金额：不再用提示打扰
       if (result.amount == null) {
         // 清空金额框：否则会残留上一次扫描/输入的数值，用户一路「完成」就记错了
         setAmount('');
@@ -1913,7 +1927,24 @@ function fxAmountText(raw: string, live: string | null): string {
           ],
         });
       }
+    };
+    try {
+      // 先把照片一次性存成「只留本机」的副本，识别和凭证都用它：
+      // ① 识别上传时不再每层各复制一份（以前每次扫票会在手机上多出最多 3 份）；
+      // ② 文件名带 scan- 前缀，账同步时跳过上传 —— 服务器只读照片做识别，不保存。
+      setReceiptAmountBox(null);
+      const stableUri = await persistReceiptImage(uri, { localOnly: true });
+      stableUriForApply = stableUri;
+      const result = await scanReceipt(stableUri, base64, (prelim) => {
+        // OCR 已读出金额、AI 还在核对：先把表单给用户（不用干等 30–50 秒）
+        apply(prelim, false);
+        setScanning(false);
+        setScanVerifying(true);
+      });
+      setScanVerifying(false);
+      apply(result, true);
     } catch (e: any) {
+      setScanVerifying(false);
       dialog.alert({ title: t('addTx.scanFailed'), message: e?.message ?? t('addTx.scanFailed') });
     } finally {
       setScanning(false);
@@ -2716,6 +2747,14 @@ function fxAmountText(raw: string, live: string | null): string {
           </View>
         </View>
 
+        {/* AI 视觉模型正在后台核对金额：金额已先按 OCR 填好，可以先编辑；核对完一致就静默，不一致会更新并提示 */}
+        {scanVerifying && (
+          <View style={styles.verifyingRow}>
+            <ActivityIndicator size="small" color={colors.textTertiary} />
+            <Text style={styles.verifyingText}>{t('addTx.aiVerifying')}</Text>
+          </View>
+        )}
+
         {/* 币种/钱包卡 + 每月（用户 2026-11-03 二改：只重排这三个控件，其余不动）：
             左＝白色钱包卡，内含「货币按钮 → 短竖线 → 钱包信息」三个互不嵌套的热区；
             右＝独立的「每月」按钮（自带渐变底 / 描边 / 圆角），与卡同高，中间露出 8 的页面背景。
@@ -3021,6 +3060,8 @@ function makeStyles(colors: ThemeColors, isDark: boolean, semantic: SemanticColo
   container: { flex: 1, backgroundColor: semantic.bg },
   scanningWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scanningText: { marginTop: 16, color: colors.textSecondary, fontSize: 14 },
+  verifyingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4, marginBottom: 6 },
+  verifyingText: { color: colors.textTertiary, fontSize: 12 },
   scanningSlow: { marginTop: 8, color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 32 },
 
   // ---------- 键盘停靠区（V2）：面板自身画 keypadPanel 底 + 顶部 30 圆角，这里只留底部安全区补白 ----------
