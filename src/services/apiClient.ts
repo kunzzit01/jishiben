@@ -1,4 +1,5 @@
 import { API_BASE_URL, API_TIMEOUT_MS, TOKEN_REFRESH_MARGIN_MS } from '../config/apiConfig';
+import { makeFilePart } from '../utils/formFilePart';
 import {
   SessionUser,
   clearSession,
@@ -759,9 +760,8 @@ export const api = {
 
   // receipts（凭证图片：multipart 直传，服务端返回相对路径 receipts/xxx.jpg）
   uploadReceipt: async (localUri: string): Promise<{ path: string }> => {
-    const name = localUri.split('?')[0].split('/').pop() ?? 'receipt.jpg';
-    // RN 的 FormData 认 { uri, name, type } 这种"文件"形状（DOM 类型里没有，故断言）
-    const part = { uri: localUri, name, type: receiptMimeType(name) };
+    // Expo SDK 57 的 fetch 不认 RN 老式 { uri, name, type }：用 File 部件（见 utils/formFilePart.ts）
+    const part = makeFilePart(localUri);
     const body = await uploadMultipart<{ path?: unknown }>('/api/receipts', () => {
       const form = new FormData();
       form.append('file', part as unknown as Blob);

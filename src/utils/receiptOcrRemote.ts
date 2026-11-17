@@ -18,6 +18,7 @@ import { getAccessToken } from '../services/sessionStore';
 import { guestToken } from '../services/premiumApi';
 import { API_BASE_URL } from '../config/apiConfig';
 import type { OcrLine } from './receiptParse';
+import { makeFilePart } from './formFilePart';
 import type { ServerOcrSettings } from './scanSettings';
 
 /** 稳定错误码（只用于诊断日志，界面不展示） */
@@ -226,9 +227,8 @@ export async function recognizeReceiptLinesRemote(
   if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过上传');
 
   const fileUri = await ensureUploadableUri(imageUri, base64);
-  const name = fileNameOf(fileUri);
-  // RN 的 FormData 认 { uri, name, type } 这种「文件」形状（DOM 类型里没有，故断言）
-  const part = { uri: fileUri, name, type: mimeFor(name) } as unknown as Blob;
+  // Expo SDK 57 的 fetch 不认 { uri, name, type }，必须用 File（见 formFilePart.ts）
+  const part = makeFilePart(fileUri);
   const form = new FormData();
   form.append('file', part);
 
@@ -284,8 +284,7 @@ export async function recognizeReceiptVisionRemote(
   if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过视觉识别');
 
   const fileUri = await ensureUploadableUri(imageUri, base64);
-  const name = fileNameOf(fileUri);
-  const part = { uri: fileUri, name, type: mimeFor(name) } as unknown as Blob;
+  const part = makeFilePart(fileUri);
   const form = new FormData();
   form.append('file', part);
 
