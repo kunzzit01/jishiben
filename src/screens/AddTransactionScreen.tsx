@@ -469,6 +469,9 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   const [scanning, setScanning] = useState(false);
   // OCR 初步结果已填入、AI 视觉模型还在后台核对：表单先可用，顶部显示一行「核对中」提示
   const [scanVerifying, setScanVerifying] = useState(false);
+  // OCR 初步金额：核对期间金额没被用户改过（仍等于它）就视为「待核对」—— 显示成半透明，并拦住保存
+  const [scanPrelimAmount, setScanPrelimAmount] = useState<number | null>(null);
+  const amountUnverified = scanVerifying && scanPrelimAmount !== null && Number(amount) === scanPrelimAmount;
   // 最新的金额输入框内容：AI 核对完要不要覆盖金额，取决于用户这期间有没有自己改过
   const amountNowRef = useRef('');
   amountNowRef.current = amount;
@@ -1567,7 +1570,15 @@ function fxAmountText(raw: string, live: string | null): string {
   // 加 try/catch 是因为：这是个 async 函数，如果内部（amountExpr.confirm / addTransaction 等）
   // 抛出异常又没人接住，Promise 会变成"未处理的 rejection"——不会崩溃，也不会有任何提示，
   // 表现出来就是点了"完成"完全没反应。这里统一兜底，出问题至少能看到是哪里错了。
+  /** OCR 的初步金额还在等 AI 核对（手写票常被读错，如 88/= → 881）：先别存，免得把错金额记进账里 */
+  const blockSaveWhileVerifying = (): boolean => {
+    if (!amountUnverified) return false;
+    dialog.alert({ title: t('common.confirm'), message: t('addTx.aiVerifyingBlock') });
+    return true;
+  };
+
   const handleKeypadConfirm = async () => {
+    if (blockSaveWhileVerifying()) return;
     try {
       const total = commitAmount();
       const ok = await saveTransaction(total);
@@ -1593,6 +1604,7 @@ function fxAmountText(raw: string, live: string | null): string {
   // 长按"完成"＝保存这一笔之后不退出，留在本页直接记下一笔
   // （原来"保存并继续记一笔"按钮做的事，现在挪到这个长按手势上；编辑模式下不会用到）
   const handleKeypadConfirmAndContinue = async () => {
+    if (blockSaveWhileVerifying()) return;
     try {
       const total = commitAmount();
       const ok = await saveTransaction(total);
@@ -1823,6 +1835,7 @@ function fxAmountText(raw: string, live: string | null): string {
     }
     setScanning(true);
     setScanVerifying(false);
+    setScanPrelimAmount(null);
     // 初步结果（OCR）与最终结果（AI 核对后）共用同一套写表单的逻辑
     let prelimAmount: number | null = null;
     let userEditedAmount = false;
@@ -1866,6 +1879,7 @@ function fxAmountText(raw: string, live: string | null): string {
       if (!final) {
         if (result.amount != null) {
           prelimAmount = result.amount;
+          setScanPrelimAmount(result.amount);
           setAmount(String(result.amount));
           amountExpr.reset(result.amount);
         }
@@ -1942,9 +1956,11 @@ function fxAmountText(raw: string, live: string | null): string {
         setScanVerifying(true);
       });
       setScanVerifying(false);
+      setScanPrelimAmount(null);
       apply(result, true);
     } catch (e: any) {
       setScanVerifying(false);
+      setScanPrelimAmount(null);
       dialog.alert({ title: t('addTx.scanFailed'), message: e?.message ?? t('addTx.scanFailed') });
     } finally {
       setScanning(false);
@@ -2718,7 +2734,7 @@ function fxAmountText(raw: string, live: string | null): string {
             </AppText>
           )}
 
-          <View onLayout={registerFieldY('amount')} style={styles.heroAmountBox}>
+          <View onLayout={registerFieldY('amount')} style={[styles.heroAmountBox, amountUnverified && { opacity: 0.4 }]}>
             <PressableScale
               style={styles.heroAmountTouch}
               activeScale={0.98}
