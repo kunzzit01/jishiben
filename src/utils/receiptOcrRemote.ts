@@ -5,7 +5,7 @@
 //
 // 四条硬约束（改之前先读）：
 // 1) 超时 6s：兜底不许把用户卡住（离线时 fetch 一般 1–2s 就自己报错，不会真等满 6s）；
-// 2) 失败即熔断：一次失败后 10 分钟内不再上传（含重启后的续期），成功一次立刻复位；
+// 2) 不熔断：失败只影响当次，下一张票照样请求（熔断曾把线上配置错误悄悄藏了起来）；
 // 3) 不重试、不排队：这里只发一次请求，失败就抛，由 scanReceipt 改回本地结果；
 // 4) 只抛错误、绝不返回「空的成功」。
 //
@@ -14,7 +14,6 @@
 // 与 /api/* 的 Spring 后端可能不是同一个地址。同源代理额外校验订阅；独立服务不接收 App 凭证。
 // 这里用 fetch + FormData 自己拼，
 // 超时 / 取消 / JSON 解析的写法与 apiClient 保持一致。
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAccessToken } from '../services/sessionStore';
 import { guestToken } from '../services/premiumApi';
 import { API_BASE_URL } from '../config/apiConfig';
@@ -46,63 +45,9 @@ export class RemoteOcrError extends Error {
 const OCR_UPLOAD_TIMEOUT_MS = 25_000;
 /** 设置页那行「服务状态」的探测超时 */
 const OCR_HEALTH_TIMEOUT_MS = 6_000;
-/** 失败后的冷却时长：这段时间内所有扫票都直接跳过上传，连一次等待都不付 */
-export const REMOTE_OCR_COOLDOWN_MS = 2 * 60_000;
-/** 冷却截止时间戳（进程重启后靠它续上，避免每次冷启动都再撞一遍） */
-const COOLDOWN_STORAGE_KEY = '@jizhang/scan.serverOcr.blockedUntil';
-
-// ── 会话内熔断 ──────────────────────────────────────────────────────────────
-let blockedUntil = 0;
-let lastFailureCode = '';
-let cooldownInFlight: Promise<void> | null = null;
-
-/** 只读一次持久化的冷却截止时间；并发调用共享同一个 Promise（不会抢跑到「还没读到」。 */
-function hydrateCooldown(): Promise<void> {
-  if (!cooldownInFlight) {
-    cooldownInFlight = (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(COOLDOWN_STORAGE_KEY);
-        const stored = raw ? Number(raw) : NaN;
-        if (Number.isFinite(stored) && stored > Date.now()) blockedUntil = Math.max(blockedUntil, stored);
-      } catch {
-        /* 读不到就当没有冷却 */
-      }
-    })();
-  }
-  return cooldownInFlight;
-}
-
-/** 是否处于熔断冷却期（true ⇒ 本次扫票直接跳过上传） */
-export function isRemoteOcrBlocked(): boolean {
-  return Date.now() < blockedUntil;
-}
-
-/** 熔断原因（诊断用；未熔断时为空串） */
-export function getRemoteOcrBlockReason(): string {
-  return isRemoteOcrBlocked() ? lastFailureCode : '';
-}
-
-/**
- * 哪些失败算「服务端不可达」。
- * 400（图片问题）/413（太大）只针对这一张图 —— 换张图可能就好，所以不熔断。
- * 401（密钥错）是配置问题：不熔断会每张票都白撞一次，必须熔断。
- */
-function shouldTripBreaker(code: RemoteOcrErrorCode): boolean {
-  return code === 'timeout' || code === 'network' || code === 'bad-key' || code === 'engine-error';
-}
-
-function markFailure(code: RemoteOcrErrorCode): void {
-  if (!shouldTripBreaker(code)) return;
-  blockedUntil = Date.now() + REMOTE_OCR_COOLDOWN_MS;
-  lastFailureCode = code;
-  void AsyncStorage.setItem(COOLDOWN_STORAGE_KEY, String(blockedUntil)).catch(() => undefined);
-}
-
-function markSuccess(): void {
-  blockedUntil = 0;
-  lastFailureCode = '';
-  void AsyncStorage.removeItem(COOLDOWN_STORAGE_KEY).catch(() => undefined);
-}
+// 说明：这里**没有熔断**。曾经失败一次就 N 分钟内跳过所有上传，结果线上配置错误（nginx 校验 500）
+// 被它悄悄藏了起来 —— 用户只看到「读不到」，服务器上也没有任何请求记录。
+// 现在每次扫票都老实请求，失败只影响当次，原因由调用方写进诊断提示。
 
 // ── 地址 / 传输 ─────────────────────────────────────────────────────────────
 
@@ -280,11 +225,6 @@ export async function recognizeReceiptLinesRemote(
   const key = settings.key.trim();
   if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过上传');
 
-  await hydrateCooldown();
-  if (isRemoteOcrBlocked()) {
-    throw new RemoteOcrError('network', '熔断冷却中（上次失败：' + lastFailureCode + '），本次跳过上传');
-  }
-
   const fileUri = await ensureUploadableUri(imageUri, base64);
   const name = fileNameOf(fileUri);
   // RN 的 FormData 认 { uri, name, type } 这种「文件」形状（DOM 类型里没有，故断言）
@@ -296,21 +236,14 @@ export async function recognizeReceiptLinesRemote(
   try {
     result = await ocrFetch('/ocr/lines', 'POST', key, OCR_UPLOAD_TIMEOUT_MS, form);
   } catch (e) {
-    const code = e instanceof RemoteOcrError ? e.code : 'network';
-    markFailure(code);
     throw e instanceof RemoteOcrError
       ? e
       : new RemoteOcrError('network', '上传失败：' + String((e as Error)?.message ?? e).slice(0, 120));
   }
 
-  if (!result.ok) {
-    const error = httpError(result.status, result.body);
-    markFailure(error.code);
-    throw error;
-  }
+  if (!result.ok) throw httpError(result.status, result.body);
 
-  // 拿到 2xx 就说明服务端可达：先复位熔断，再映射行（行里没文字是「引擎没读懂这张图」，不是不可达）
-  markSuccess();
+  // 行里没文字是「引擎没读懂这张图」，由 toOcrLines 抛 no-text
   return toOcrLines(result.body);
 }
 
@@ -333,19 +266,6 @@ export interface VisionReceipt {
 
 /** 视觉识别比 OCR 慢（本机 CPU 跑视觉模型，一张约 20–50 秒）：给足时间，换来手写也读得出；服务端总超时 105s、nginx 120s */
 const VISION_TIMEOUT_MS = 110_000;
-/** 未启用（503 VISION_DISABLED）长冷却；其它失败短冷却 —— 都不会拖累原有 OCR 的熔断 */
-const VISION_DISABLED_COOLDOWN_MS = 30 * 60_000;
-const VISION_FAIL_COOLDOWN_MS = 2 * 60_000;
-let visionBlockedUntil = 0;
-let visionBlockReason = '';
-
-export function isVisionBlocked(): boolean {
-  return Date.now() < visionBlockedUntil;
-}
-
-export function getVisionBlockReason(): string {
-  return isVisionBlocked() ? visionBlockReason : '';
-}
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -362,7 +282,6 @@ export async function recognizeReceiptVisionRemote(
 ): Promise<VisionReceipt> {
   const key = settings.key.trim();
   if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过视觉识别');
-  if (isVisionBlocked()) throw new RemoteOcrError('network', '视觉识别冷却中（' + visionBlockReason + '）');
 
   const fileUri = await ensureUploadableUri(imageUri, base64);
   const name = fileNameOf(fileUri);
@@ -370,27 +289,8 @@ export async function recognizeReceiptVisionRemote(
   const form = new FormData();
   form.append('file', part);
 
-  let result: OcrResponse;
-  try {
-    result = await ocrFetch('/ocr/vision', 'POST', key, VISION_TIMEOUT_MS, form);
-  } catch (e) {
-    visionBlockedUntil = Date.now() + VISION_FAIL_COOLDOWN_MS;
-    visionBlockReason = e instanceof RemoteOcrError ? e.code : 'network';
-    throw e;
-  }
-  if (!result.ok) {
-    const code =
-      result.body && typeof result.body === 'object' ? (result.body as { code?: unknown }).code : undefined;
-    // 400/413 只针对这一张图，不进冷却；其余按「服务不可用」冷却
-    if (result.status !== 400 && result.status !== 413) {
-      visionBlockedUntil =
-        Date.now() + (code === 'VISION_DISABLED' ? VISION_DISABLED_COOLDOWN_MS : VISION_FAIL_COOLDOWN_MS);
-      visionBlockReason = typeof code === 'string' ? code : 'http-' + result.status;
-    }
-    throw httpError(result.status, result.body);
-  }
-  visionBlockedUntil = 0;
-  visionBlockReason = '';
+  const result = await ocrFetch('/ocr/vision', 'POST', key, VISION_TIMEOUT_MS, form);
+  if (!result.ok) throw httpError(result.status, result.body);
 
   const b = (result.body ?? {}) as Record<string, unknown>;
   const rawAmount = typeof b.amount === 'number' ? b.amount : null;
@@ -415,23 +315,16 @@ export interface RemoteOcrHealth {
 
 /**
  * 设置页那行「服务状态」：探测 GET /ocr/health（需要密钥头就带上）。
- * 这里**不受熔断冷却限制** —— 用户手动看状态就是想知道现在通不通，通了立刻复位熔断。
+ * 用户手动看状态就是想知道现在通不通。
  */
 export async function checkRemoteOcrHealth(settings: ServerOcrSettings): Promise<RemoteOcrHealth> {
   const key = settings.key.trim();
   if (!key) return { ok: false, detail: 'no-key' };
   try {
     const result = await ocrFetch('/ocr/health', 'GET', key, OCR_HEALTH_TIMEOUT_MS);
-    if (!result.ok) {
-      const error = httpError(result.status, result.body);
-      markFailure(error.code);
-      return { ok: false, detail: error.message };
-    }
-    markSuccess();
+    if (!result.ok) return { ok: false, detail: httpError(result.status, result.body).message };
     return { ok: true };
   } catch (e) {
-    const code = e instanceof RemoteOcrError ? e.code : 'network';
-    markFailure(code as RemoteOcrErrorCode);
     return { ok: false, detail: e instanceof Error ? e.message : String(e) };
   }
 }

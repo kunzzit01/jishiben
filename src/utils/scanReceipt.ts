@@ -126,10 +126,7 @@ async function tryReceiptVision(imageUri: string, imageBase64: string | undefine
     await hydrateServerOcrSettings();
     const settings = getServerOcrSettings();
     if (!isServerOcrUsable(settings)) return { result: null, attempted: false, reason: 'vision-off（服务端识别未开启）' };
-    const { recognizeReceiptVisionRemote, isVisionBlocked, getVisionBlockReason } = await import('./receiptOcrRemote');
-    if (isVisionBlocked()) {
-      return { result: null, attempted: false, reason: 'vision-cooldown（' + getVisionBlockReason() + '）' };
-    }
+    const { recognizeReceiptVisionRemote } = await import('./receiptOcrRemote');
     const result = await recognizeReceiptVisionRemote(uploadUri, imageBase64, settings);
     return { result, attempted: true, reason: 'vision-ok' };
   } catch (e) {
@@ -195,16 +192,7 @@ async function fetchRemoteLines(
         reason: settings.enabled ? 'server-skip（没有密钥）' : 'server-off（设置里未开启）',
       };
     }
-    const { recognizeReceiptLinesRemote, isRemoteOcrBlocked, getRemoteOcrBlockReason } = await import(
-      './receiptOcrRemote'
-    );
-    if (isRemoteOcrBlocked()) {
-      return {
-        lines: null,
-        attempted: false,
-        reason: 'server-cooldown（上次失败：' + getRemoteOcrBlockReason() + '）',
-      };
-    }
+    const { recognizeReceiptLinesRemote } = await import('./receiptOcrRemote');
     const lines = await recognizeReceiptLinesRemote(uploadUri, imageBase64, settings);
     return { lines, attempted: true, reason: 'server-lines=' + lines.length };
   } catch (e) {
