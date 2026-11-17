@@ -1908,7 +1908,8 @@ function fxAmountText(raw: string, live: string | null): string {
       dialog.alert({ title: t('addTx.photoPermissionTitle'), message: t('addTx.photoPermissionMsg') });
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, base64: true });
+    // 扫票要看清手写与小字：质量 0.6 → 0.85（上传前服务端会再缩放，不会变慢多少）
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, base64: true });
     if (!result.canceled && result.assets?.[0]?.base64 && result.assets?.[0]?.uri) {
       runScan(result.assets[0].base64, result.assets[0].uri);
     }
@@ -2076,7 +2077,7 @@ function fxAmountText(raw: string, live: string | null): string {
             >
               <IconCircle
                 size={44}
-                color={fromAsset?.color ?? semantic.surfaceSunken}
+                color={fromAsset?.color ?? (isDark ? undefined : semantic.surfaceSunken)}
                 icon={(fromAsset?.icon as IconName) ?? 'wallet-outline'}
               />
 
@@ -2227,7 +2228,7 @@ function fxAmountText(raw: string, live: string | null): string {
             >
               <IconCircle
                 size={44}
-                color={toAsset?.color ?? semantic.surfaceSunken}
+                color={toAsset?.color ?? (isDark ? undefined : semantic.surfaceSunken)}
                 icon={(toAsset?.icon as IconName) ?? 'wallet-outline'}
               />
 

@@ -35,7 +35,11 @@ export interface ScannedReceipt {
    * - 'server'：本地拿不准，服务端 OCR 的行解析出更好的金额，已采用
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
-  ocrSource: 'local' | 'server' | 'local-after-server-failed';
+  ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed';
+  /** 是否请求过视觉识别（多模态大模型；诊断用，界面不展示） */
+  visionTried?: boolean;
+  /** 视觉识别的金额是否被采用 */
+  visionUsed?: boolean;
   /**
    * 服务端 OCR 的原始行（诊断/证据核对用，界面不展示）。
    * 只有真正拿到服务端结果时才填充；注意 /ocr/lines 只回 lines（没有 crop 信息），
@@ -99,6 +103,49 @@ async function tryReceiptAi(lines: OcrLine[], imageUri: string): Promise<AiAttem
   } catch (e) {
     return { draft: null, reason: `ai-error: ${String((e as Error)?.message ?? e).slice(0, 120)}` };
   }
+}
+
+interface VisionAttempt {
+  /** 视觉识别结果；null = 没拿到 */
+  result: import('./receiptOcrRemote').VisionReceipt | null;
+  attempted: boolean;
+  reason: string;
+}
+
+/**
+ * 视觉识别（多模态大模型）：最精准的一层，专治手写 / 褪色 / OCR 一行字都读不出的票。
+ * 与服务端 OCR 同样的边界：内置密钥才发；独立冷却；失败一律吞掉返回 null，不影响已有结果。
+ */
+async function tryReceiptVision(imageUri: string, imageBase64: string | undefined): Promise<VisionAttempt> {
+  try {
+    const { persistReceiptImage } = await import('./receiptStore');
+    const uploadUri = await persistReceiptImage(imageUri).catch(() => imageUri);
+    const { hydrateServerOcrSettings, getServerOcrSettings, isServerOcrUsable } = await import('./scanSettings');
+    await hydrateServerOcrSettings();
+    const settings = getServerOcrSettings();
+    if (!isServerOcrUsable(settings)) return { result: null, attempted: false, reason: 'vision-off（服务端识别未开启）' };
+    const { recognizeReceiptVisionRemote, isVisionBlocked, getVisionBlockReason } = await import('./receiptOcrRemote');
+    if (isVisionBlocked()) {
+      return { result: null, attempted: false, reason: 'vision-cooldown（' + getVisionBlockReason() + '）' };
+    }
+    const result = await recognizeReceiptVisionRemote(uploadUri, imageBase64, settings);
+    return { result, attempted: true, reason: 'vision-ok' };
+  } catch (e) {
+    return { result: null, attempted: true, reason: 'vision-error: ' + String((e as Error)?.message ?? e).slice(0, 100) };
+  }
+}
+
+/** 金额是否在 OCR 文字里出现过（任意一行里有数值相同的数字）：出现过 = 有证据，没出现 = 只能靠视觉读图 */
+function amountInLines(amount: number, lines: OcrLine[]): boolean {
+  for (const l of lines) {
+    const tokens = l.text.match(/\d[\d,]*(?:\.\d+)?/g);
+    if (!tokens) continue;
+    for (const tok of tokens) {
+      const n = Number(tok.replace(/,/g, ''));
+      if (Number.isFinite(n) && Math.abs(n - amount) < 0.005) return true;
+    }
+  }
+  return false;
 }
 
 interface RemoteAttempt {
@@ -236,6 +283,8 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let lines: OcrLine[];
     let localRecognitionFailed = false;
     let localFailCode = '';
+    /** OCR 一行字都没有时，视觉识别已经先跑过的结果（后面不再重复请求） */
+    let visionPre: VisionAttempt | null = null;
     try {
       lines = await recognizeReceiptLines(imageUri, imageBase64);
     } catch (e) {
@@ -248,12 +297,19 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       // 本地一行都没读到（no-text / ocr-failed），但**图片本身还在本地磁盘** ——
       // 上传不依赖本地识别结果，所以让服务端再读一次；服务端也拿不到行，才把本地这条错误抛给用户。
       const got = await fetchRemoteLines(imageUri, imageBase64);
-      if (!got.lines) {
-        throw new ReceiptScanError(code, toReadableMessage(code, detail));
+      if (got.lines) {
+        lines = got.lines;
+        serverLines = got.lines;
+        serverPasses = 1;
+      } else {
+        // OCR 两层都一行字没读到（手写 / 严重褪色时常见）：还有视觉识别可以救 —— 它读的是整张图
+        const v = await tryReceiptVision(imageUri, imageBase64);
+        if (!v.result || v.result.amount === null) {
+          throw new ReceiptScanError(code, toReadableMessage(code, detail));
+        }
+        lines = [];
+        visionPre = v;
       }
-      lines = got.lines;
-      serverLines = got.lines;
-      serverPasses = 1;
       localRecognitionFailed = true;
       localFailCode = code;
     }
@@ -280,9 +336,11 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let confidence = parsed.confidence;
     let aiTried = false;
     let aiUsed = false;
+    let visionTried = false;
+    let visionUsed = false;
     let aiReason = '';
     // 本地识别整体失败时，解析结果本来就来自服务端行 → 路径直接记 server
-    let ocrSource: 'local' | 'server' | 'local-after-server-failed' = localRecognitionFailed ? 'server' : 'local';
+    let ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed' = localRecognitionFailed ? 'server' : 'local';
     let serverReason = '';
     // 本地识别失败时服务端行已经在上面拿到 → 复用它，不为同一份结果再上传第二次
     const prefetched: RemoteAttempt | null = localRecognitionFailed
@@ -344,7 +402,37 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
 
       // b) 端侧 AI 兜底（现有逻辑不变）：只有服务端也没给出可用金额时才打扰模型 ——
       //    否则 AI 会用固定 0.7 覆盖掉更好的服务端结果。
-      const activeIsConfident = active.amount !== null && active.confidence >= 0.6;
+      // c) 视觉识别（多模态大模型）：OCR 没把握 / 只有弱证据时，让模型看整张图。
+      //    采用规则：模型读到金额就采用；金额在 OCR 文字里出现过 = 有证据（0.92），
+      //    没出现过（多半是手写，OCR 本来就读不到）= 无证据，置信度压到 0.55，界面会提示用户核对金额。
+      const needVision =
+        visionPre !== null || active.amount === null || active.confidence < 0.6 || isWeakAmountTier(active.amountTier);
+      if (needVision) {
+        const v = visionPre ?? (await tryReceiptVision(imageUri, imageBase64));
+        visionTried = v.attempted;
+        aiReason += ' | ' + v.reason;
+        const vr = v.result;
+        if (vr && vr.amount !== null) {
+          const grounded = amountInLines(vr.amount, [...lines, ...(serverLines ?? [])]);
+          amount = vr.amount;
+          currency = vr.currency ?? currency;
+          date = vr.date ?? date;
+          type = vr.type;
+          if (vr.category) suggestedCategory = vr.category;
+          // 商户只在 OCR 文字里确有其字时才当可靠备注（与 AI 校验同口径）
+          if (vr.merchant && rawText.toLowerCase().includes(vr.merchant.toLowerCase())) {
+            merchant = vr.merchant;
+            merchantConfident = true;
+          }
+          amountLabel = vr.amountText ?? amountLabel;
+          confidence = grounded && vr.legible ? 0.92 : vr.legible ? 0.55 : 0.45;
+          visionUsed = true;
+          ocrSource = 'vision';
+          aiReason += ' | vision-used（amount=' + vr.amount + ' grounded=' + grounded + ' handwritten=' + vr.handwritten + '）';
+        }
+      }
+
+      const activeIsConfident = visionUsed || (active.amount !== null && active.confidence >= 0.6);
       if (activeIsConfident) {
         aiReason += ' → 不再尝试端侧 AI';
       } else {
@@ -406,6 +494,8 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       aiTried,
       aiUsed,
       aiReason,
+      visionTried,
+      visionUsed,
       ocrSource,
       // 服务端证据：只有真有服务端结果时才有值
       remoteLines: serverLines ?? undefined,

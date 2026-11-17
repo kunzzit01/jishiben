@@ -314,6 +314,99 @@ export async function recognizeReceiptLinesRemote(
   return toOcrLines(result.body);
 }
 
+// ── 视觉识别（多模态大模型，最精准的一层兜底）────────────────────────────────
+
+/** 服务端 /ocr/vision 的结构化结果（字段已在服务端按类型收敛，这里再防一层） */
+export interface VisionReceipt {
+  amount: number | null;
+  /** 金额在票面上的原文（程序用它与 OCR 行核对） */
+  amountText: string | null;
+  currency: string | null;
+  date: string | null;
+  merchant: string | null;
+  type: 'expense' | 'income';
+  /** 中文分类名（服务端提示词里给了内置分类清单） */
+  category: string | null;
+  handwritten: boolean;
+  legible: boolean;
+}
+
+/** 视觉识别比 OCR 慢（要等大模型）：给 30s，用户看着「识别中」可以接受，换来手写也读得出 */
+const VISION_TIMEOUT_MS = 30_000;
+/** 未启用（503 VISION_DISABLED）长冷却；其它失败短冷却 —— 都不会拖累原有 OCR 的熔断 */
+const VISION_DISABLED_COOLDOWN_MS = 30 * 60_000;
+const VISION_FAIL_COOLDOWN_MS = 2 * 60_000;
+let visionBlockedUntil = 0;
+let visionBlockReason = '';
+
+export function isVisionBlocked(): boolean {
+  return Date.now() < visionBlockedUntil;
+}
+
+export function getVisionBlockReason(): string {
+  return isVisionBlocked() ? visionBlockReason : '';
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * 上传原图 → 视觉识别结构化结果。失败一律抛 RemoteOcrError，由 scanReceipt 吞掉并退回已有结果。
+ * 只有设置里有密钥（内置）才会发请求；失败后进入各自的冷却，不重试、不排队。
+ */
+export async function recognizeReceiptVisionRemote(
+  imageUri: string,
+  base64: string | undefined,
+  settings: ServerOcrSettings,
+): Promise<VisionReceipt> {
+  const key = settings.key.trim();
+  if (!key) throw new RemoteOcrError('no-key', '没有服务端密钥，跳过视觉识别');
+  if (isVisionBlocked()) throw new RemoteOcrError('network', '视觉识别冷却中（' + visionBlockReason + '）');
+
+  const fileUri = await ensureUploadableUri(imageUri, base64);
+  const name = fileNameOf(fileUri);
+  const part = { uri: fileUri, name, type: mimeFor(name) } as unknown as Blob;
+  const form = new FormData();
+  form.append('file', part);
+
+  let result: OcrResponse;
+  try {
+    result = await ocrFetch('/ocr/vision', 'POST', key, VISION_TIMEOUT_MS, form);
+  } catch (e) {
+    visionBlockedUntil = Date.now() + VISION_FAIL_COOLDOWN_MS;
+    visionBlockReason = e instanceof RemoteOcrError ? e.code : 'network';
+    throw e;
+  }
+  if (!result.ok) {
+    const code =
+      result.body && typeof result.body === 'object' ? (result.body as { code?: unknown }).code : undefined;
+    // 400/413 只针对这一张图，不进冷却；其余按「服务不可用」冷却
+    if (result.status !== 400 && result.status !== 413) {
+      visionBlockedUntil =
+        Date.now() + (code === 'VISION_DISABLED' ? VISION_DISABLED_COOLDOWN_MS : VISION_FAIL_COOLDOWN_MS);
+      visionBlockReason = typeof code === 'string' ? code : 'http-' + result.status;
+    }
+    throw httpError(result.status, result.body);
+  }
+  visionBlockedUntil = 0;
+  visionBlockReason = '';
+
+  const b = (result.body ?? {}) as Record<string, unknown>;
+  const rawAmount = typeof b.amount === 'number' ? b.amount : null;
+  return {
+    amount: rawAmount !== null && Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount : null,
+    amountText: str(b.amountText),
+    currency: str(b.currency),
+    date: str(b.date),
+    merchant: str(b.merchant),
+    type: b.type === 'income' ? 'income' : 'expense',
+    category: str(b.category),
+    handwritten: b.handwritten === true,
+    legible: b.legible !== false,
+  };
+}
+
 export interface RemoteOcrHealth {
   ok: boolean;
   /** 失败原因（诊断用；ok=true 时缺省） */

@@ -95,6 +95,11 @@ _STATUS_BY_CODE = {
     "DEEP_TIMEOUT": 504,
     "DEEP_UNAVAILABLE": 503,
     "DEEP_ERROR": 502,
+    # 视觉识别（多模态大模型）：未配置密钥 / 超时 / 上游错误同样走 5xx
+    "VISION_DISABLED": 503,
+    "VISION_TIMEOUT": 504,
+    "VISION_UNAVAILABLE": 503,
+    "VISION_ERROR": 502,
     "NOT_FOUND": 404,
     "ENGINE_ERROR": 500,
 }
@@ -642,6 +647,185 @@ async def ocr_deep(file: UploadFile = File(...), _: None = Depends(require_key))
         "elapsedMs": elapsed,
         "loadMs": int((data.get("load_duration") or 0) / 1e6),
     }
+
+# ── 视觉识别（第四层，最精准）：多模态大模型直接读图 ─────────────────────
+# 为什么要有它：OCR 只认字、不理解「这是总额」，手写金额（88/=、潦草数字）、
+# 热敏纸褪色、斜拍反光时，OCR 行里根本没有可用的数字。大模型看整张图，按上下文判断应付总额。
+# 约束：未配置 ANTHROPIC_API_KEY 一律 503（客户端会静默退回本地结果）；单图只发一次；
+#      图片在内存里缩放后直发上游，不落盘、不打印图片或回答内容；返回结构化字段由客户端二次校验。
+VISION_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+VISION_MODEL = os.environ.get("VISION_MODEL", "claude-sonnet-5-5").strip()
+VISION_URL = os.environ.get("ANTHROPIC_API_URL", "https://api.anthropic.com").rstrip("/")
+VISION_TIMEOUT_MS = _env_int("VISION_TIMEOUT_MS", 40000)
+VISION_MAX_SIDE = _env_int("VISION_MAX_SIDE", 1568)
+_VISION_SEM = asyncio.Semaphore(_env_int("VISION_CONCURRENCY", 3))
+
+VISION_EXPENSE_CATEGORIES = (
+    "餐饮,蔬菜,水果,零食,烟酒,购物,日用,外卖,奶茶,食材,服饰,美容,住房,居家,维修,孩子,宠物,水电,网络,家电,"
+    "交通,汽车,旅行,娱乐,加油,医疗,运动,书籍,学习,办公,数码,药品,学费,保险,礼物,通讯,其他"
+)
+VISION_INCOME_CATEGORIES = "工资,兼职,退款,其他收入"
+
+VISION_SYSTEM = (
+    "你是记账 App 的票据识别器。输入是一张小票、发票、账单或手写单据的照片。"
+    "只通过 record_receipt 工具回答，不要输出别的文字。规则：\n"
+    "1) amount = 这张单据最终实际应付/已付的总金额（含税、含服务费、扣掉折扣后）。"
+    "不是小计、不是找零、不是现金收款额、不是单价；有多个金额时按上下文判断总额。\n"
+    "2) 手写金额要逐位仔细读，注意 1/7、0/6、5/6、4/9 易混；常见写法 88/=、88.- 都表示 88。"
+    "整张图里读不清金额就把 amount 置 null，绝不猜。\n"
+    "3) amount_text 填你读到金额的**原文**（票面上怎么写就怎么抄，含符号），供程序核对。\n"
+    "4) 日期按票面写 YYYY-MM-DD；没有或看不清置 null；不要用今天的日期补。\n"
+    "5) currency 用 ISO 代码（RM→MYR，S$→SGD，$ 无法判断时置 null，￥/元→CNY）。\n"
+    "6) category 必须从给定列表里选一个，选不准用「其他」。\n"
+    "7) handwritten：总金额是否为手写。legible：金额是否清晰可读。"
+)
+
+VISION_TOOL = {
+    "name": "record_receipt",
+    "description": "记录从票据图片读到的结构化信息",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "amount": {"type": ["number", "null"], "description": "最终应付总金额，纯数字；读不清为 null"},
+            "amount_text": {"type": ["string", "null"], "description": "金额在票面上的原文"},
+            "currency": {"type": ["string", "null"]},
+            "date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+            "merchant": {"type": ["string", "null"]},
+            "type": {"type": "string", "enum": ["expense", "income"]},
+            "category": {"type": ["string", "null"]},
+            "handwritten": {"type": "boolean"},
+            "legible": {"type": "boolean"},
+        },
+        "required": ["amount", "amount_text", "type", "handwritten", "legible"],
+    },
+}
+
+
+def _vision_prepare(raw: bytes) -> str:
+    """解码（已处理 EXIF 之外的坏图）→ 最长边缩到 VISION_MAX_SIDE → JPEG q88 → base64。"""
+    img, _w, _h = _decode(raw)
+    try:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img)
+    except Exception:  # noqa: BLE001 - 方向修正失败不影响识别
+        pass
+    longest = max(img.size)
+    if longest > VISION_MAX_SIDE:
+        ratio = VISION_MAX_SIDE / float(longest)
+        img = img.resize(
+            (max(1, int(round(img.size[0] * ratio))), max(1, int(round(img.size[1] * ratio)))),
+            Image.LANCZOS,
+        )
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _vision_clean(tool_input: dict) -> dict:
+    """工具输入 → 受约束的返回字段（金额非数/非正/离谱一律置 null）。"""
+    amount = tool_input.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not math.isfinite(amount):
+        amount = None
+    elif amount <= 0 or amount >= 10_000_000:
+        amount = None
+    else:
+        amount = round(float(amount), 2)
+
+    def _s(key: str, limit: int = 80):
+        v = tool_input.get(key)
+        return v.strip()[:limit] if isinstance(v, str) and v.strip() else None
+
+    date = _s("date", 10)
+    if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        date = None
+    currency = _s("currency", 3)
+    currency = currency.upper() if currency and re.fullmatch(r"[A-Za-z]{3}", currency) else None
+    currency = {"RMB": "CNY"}.get(currency, currency)
+    ttype = tool_input.get("type")
+    return {
+        "amount": amount,
+        "amountText": _s("amount_text", 40),
+        "currency": currency,
+        "date": date,
+        "merchant": _s("merchant", 60),
+        "type": ttype if ttype in ("expense", "income") else "expense",
+        "category": _s("category", 12),
+        "handwritten": bool(tool_input.get("handwritten")),
+        "legible": bool(tool_input.get("legible", True)),
+    }
+
+
+@router.post("/vision")
+async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key)) -> dict:
+    if not VISION_API_KEY:
+        raise OCRError("VISION_DISABLED", "视觉识别未启用（未配置 ANTHROPIC_API_KEY）")
+
+    started = time.monotonic()
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in LAX_MIME:
+        raise OCRError("BAD_IMAGE", "不支持的 Content-Type: " + (content_type or "empty"))
+    raw = await _read_limited(file)
+    b64 = await asyncio.get_running_loop().run_in_executor(None, _vision_prepare, raw)
+
+    body = {
+        "model": VISION_MODEL,
+        "max_tokens": 400,
+        "system": VISION_SYSTEM,
+        "tools": [VISION_TOOL],
+        "tool_choice": {"type": "tool", "name": "record_receipt"},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+                    {
+                        "type": "text",
+                        "text": "支出分类可选：" + VISION_EXPENSE_CATEGORIES
+                        + "；收入分类可选：" + VISION_INCOME_CATEGORIES + "。请读这张单据。",
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {
+        "x-api-key": VISION_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    async with _VISION_SEM:
+        try:
+            async with httpx.AsyncClient(timeout=VISION_TIMEOUT_MS / 1000.0) as client:
+                resp = await client.post(VISION_URL + "/v1/messages", json=body, headers=headers)
+        except httpx.TimeoutException:
+            raise OCRError("VISION_TIMEOUT", "视觉识别超时（%dms）" % VISION_TIMEOUT_MS)
+        except Exception as exc:  # noqa: BLE001
+            raise OCRError("VISION_UNAVAILABLE", "连不上视觉识别服务：" + type(exc).__name__)
+
+    if resp.status_code != 200:
+        # 不回传上游正文（可能含请求片段）；只留状态码
+        logger.warning("ocr vision upstream status=%d", resp.status_code)
+        raise OCRError("VISION_ERROR", "视觉识别服务返回 %d" % resp.status_code)
+
+    tool_input = None
+    for block in (resp.json().get("content") or []):
+        if isinstance(block, dict) and block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
+            tool_input = block["input"]
+            break
+    if tool_input is None:
+        raise OCRError("VISION_ERROR", "视觉识别没有返回结构化结果")
+
+    result = _vision_clean(tool_input)
+    elapsed = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "ocr vision bytes=%d model=%s elapsedMs=%d hasAmount=%s handwritten=%s",
+        len(raw), VISION_MODEL, elapsed, result["amount"] is not None, result["handwritten"],
+    )
+    result["model"] = VISION_MODEL
+    result["elapsedMs"] = elapsed
+    return result
+
 
 # ── 应用装配 ────────────────────────────────────────────────────────────────
 @asynccontextmanager

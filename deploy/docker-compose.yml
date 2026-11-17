@@ -181,6 +181,10 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:7b}
       OCR_DEEP_TIMEOUT_MS: ${OCR_DEEP_TIMEOUT_MS:-120000}
+      # 视觉识别（多模态大模型，手写/褪色票据最精准的一层）：不填 ANTHROPIC_API_KEY 则该层关闭
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VISION_MODEL: ${VISION_MODEL:-claude-sonnet-5-5}
+      VISION_TIMEOUT_MS: ${VISION_TIMEOUT_MS:-40000}
       TZ: UTC
     # 仅内网可达：只写 expose，不写 ports（宿主机无法直连 8090）
     expose:
