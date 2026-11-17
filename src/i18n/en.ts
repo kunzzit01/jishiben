@@ -267,6 +267,7 @@ export const en = {
     scanCurrencyMismatchTitle: 'Currency mismatch',
     scanCurrencyMismatchMsg: 'Receipt says {scan} but the account is {account}. Switch the account or fix the amount before saving.',
     // Scan: low-confidence hint
+    scanViewPhoto: 'View on photo',
     scanAmountDisagreeMsg: 'The two readings disagree: filled in {used}; the other reading is {alt} ({src}). Please check the amount against the receipt.',
     scanCheckAmountTitle: 'Please verify the result',
     scanCheckAmountMsg: 'No clear amount label was found, so the amount may be inferred. Check it before saving.',

@@ -36,6 +36,8 @@ export interface ScannedReceipt {
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
   ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed';
+  /** 视觉模型指出的总金额位置（0~1 归一化，近似）：界面在原图大图上高亮，方便用户核对 */
+  amountBox?: { x: number; y: number; w: number; h: number } | null;
   /** OCR 与视觉模型读到的金额不一致时，没被采用的那一个（界面据此提示「另一个读数是 X」） */
   altAmount?: number | null;
   altSource?: 'ocr' | 'vision';
@@ -336,6 +338,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let visionUsed = false;
     let visionReason = '';
     let altAmount: number | null = null;
+    let amountBox: { x: number; y: number; w: number; h: number } | null = null;
     let altSource: 'ocr' | 'vision' | undefined;
     let aiReason = '';
     // 本地识别整体失败时，解析结果本来就来自服务端行 → 路径直接记 server
@@ -420,6 +423,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
           (v.result ? (v.result.amount === null ? '（模型没读出金额）' : '（视觉=' + v.result.amount + '）') : '');
         aiReason += ' | ' + v.reason;
         const vr = v.result;
+        if (vr) amountBox = vr.amountBox;
         if (vr && vr.amount !== null) {
           const agree = ocrAmount !== null && Math.abs(ocrAmount - vr.amount) < 0.005;
           const disagree = ocrAmount !== null && !agree;
@@ -530,6 +534,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
         (visionReason || (localIsConfident ? 'vision-skip（本地已有把握）' : 'vision-skip')),
       altAmount,
       altSource,
+      amountBox,
       visionTried,
       visionUsed,
       ocrSource,

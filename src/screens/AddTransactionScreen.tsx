@@ -483,6 +483,8 @@ export default function AddTransactionScreen({ navigation, route }: any) {
   // 用户点备注框且备注为空时才填入，可改可删
   // 用户手动改过备注 → 本次票据内不再自动填入/覆盖（重新扫票才复位）
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  // 本次扫票 AI 指出的总金额位置（0~1 归一化）：在凭证大图上高亮，只对刚扫的这张有效
+  const [receiptAmountBox, setReceiptAmountBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // 本次扫票的 OCR 原文：保存成功后写进本地查重库
   const lastScanRawTextRef = useRef<string | undefined>(undefined);
   // 本次扫描的商户与「产生金额的标签行」：保存成功后写入本机学习库
@@ -1819,8 +1821,10 @@ function fxAmountText(raw: string, live: string | null): string {
       // 先把照片一次性存成「只留本机」的副本，识别和凭证都用它：
       // ① 识别上传时不再每层各复制一份（以前每次扫票会在手机上多出最多 3 份）；
       // ② 文件名带 scan- 前缀，账同步时跳过上传 —— 服务器只读照片做识别，不保存。
+      setReceiptAmountBox(null);
       const stableUri = await persistReceiptImage(uri, { localOnly: true });
       const result = await scanReceipt(stableUri, base64);
+      setReceiptAmountBox(result.amountBox ?? null);
 
       // 记下 OCR 原文：保存成功后写进本地查重库（同一张小票再扫会提示）
       lastScanRawTextRef.current = result.rawText;
@@ -1893,10 +1897,21 @@ function fxAmountText(raw: string, live: string | null): string {
             .replace('{used}', String(result.amount))
             .replace('{alt}', String(result.altAmount))
             .replace('{src}', result.altSource === 'vision' ? 'AI' : 'OCR'),
+          buttons: [
+            ...(result.amountBox ? [{ text: t('addTx.scanViewPhoto'), onPress: () => setReceiptPreviewOpen(true) }] : []),
+            { text: t('common.confirm') },
+          ],
         });
       } else if ((result.confidence ?? 1) < 0.6) {
         // 规则置信度低（没找到明确金额标签/货币符号）：提醒核对，而不是悄悄填错
-        dialog.alert({ title: t('addTx.scanCheckAmountTitle'), message: t('addTx.scanCheckAmountMsg') });
+        dialog.alert({
+          title: t('addTx.scanCheckAmountTitle'),
+          message: t('addTx.scanCheckAmountMsg'),
+          buttons: [
+            ...(result.amountBox ? [{ text: t('addTx.scanViewPhoto'), onPress: () => setReceiptPreviewOpen(true) }] : []),
+            { text: t('common.confirm') },
+          ],
+        });
       }
     } catch (e: any) {
       dialog.alert({ title: t('addTx.scanFailed'), message: e?.message ?? t('addTx.scanFailed') });
@@ -2578,6 +2593,7 @@ function fxAmountText(raw: string, live: string | null): string {
         <ReceiptPreviewModal
           visible={receiptPreviewOpen}
           uri={receiptUri}
+          box={receiptAmountBox}
           onClose={() => setReceiptPreviewOpen(false)}
         />
 
@@ -2943,6 +2959,7 @@ function fxAmountText(raw: string, live: string | null): string {
       <ReceiptPreviewModal
         visible={receiptPreviewOpen}
         uri={receiptUri}
+        box={receiptAmountBox}
         onClose={() => setReceiptPreviewOpen(false)}
       />
       {/* 选择账户：AccountPickerSheet（T13 抽取）——树内覆盖层（不用 RN Modal——Modal 是独立原生窗口，

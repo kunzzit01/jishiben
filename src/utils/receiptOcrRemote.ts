@@ -262,6 +262,24 @@ export interface VisionReceipt {
   category: string | null;
   handwritten: boolean;
   legible: boolean;
+  /** 模型指出的总金额在原图中的位置（0~1 归一化，近似值）；没给或不合理为 null */
+  amountBox: AmountBox | null;
+}
+
+/** 0~1 归一化矩形（相对整张图的宽高） */
+export interface AmountBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function parseBox(v: unknown): AmountBox | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const x = Number(o.x), y = Number(o.y), w = Number(o.w), h = Number(o.h);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > 1.01 || y + h > 1.01) return null;
+  return { x, y, w, h };
 }
 
 /** 视觉识别比 OCR 慢（本机 CPU 跑视觉模型，一张约 20–50 秒）：给足时间，换来手写也读得出；服务端总超时 105s、nginx 120s */
@@ -303,6 +321,7 @@ export async function recognizeReceiptVisionRemote(
     category: str(b.category),
     handwritten: b.handwritten === true,
     legible: b.legible !== false,
+    amountBox: parseBox(b.amountBox),
   };
 }
 

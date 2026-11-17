@@ -730,10 +730,22 @@ def _vision_prepare(raw: bytes) -> tuple[str, int, int]:
     return base64.b64encode(buf.getvalue()).decode("ascii"), img.size[0], img.size[1]
 
 
+# 模型坐标系：实测（2026-11-17）无论我发多大的图，qwen2.5vl 返回的框几乎一模一样 —— 它的坐标不在我发出去的图的像素里，
+# 而是在它内部的画布上：把图等比缩放到约 28*28*1024 像素，再对齐到 28 的倍数（例：9:20 的票 → 588x1344）。
+# 用已知位置核对：表头区域换算回原图后，y 偏差几个像素、x 约 3%，够做「高亮提示」，不够做精确裁切。
+_VISION_FRAME_PIXELS = 28 * 28 * 1024
+
+
+def _vision_frame(w: int, h: int) -> tuple[int, int]:
+    scale = math.sqrt(_VISION_FRAME_PIXELS / float(max(1, w * h)))
+    return max(28, int(round(w * scale / 28.0)) * 28), max(28, int(round(h * scale / 28.0)) * 28)
+
+
 def _vision_box(raw_box, w: int, h: int):
-    """模型给的 [x1,y1,x2,y2] → 0~1 归一化的 {x,y,w,h}；不合理（越界太多 / 面积为 0）一律 None，绝不瞎画。"""
+    """模型给的 [x1,y1,x2,y2]（模型画布坐标）→ 0~1 归一化的 {x,y,w,h}；不合理一律 None，绝不瞎画。"""
     if not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4 or w <= 0 or h <= 0:
         return None
+    w, h = _vision_frame(w, h)
     try:
         x1, y1, x2, y2 = [float(v) for v in raw_box]
     except (TypeError, ValueError):
@@ -854,8 +866,6 @@ async def ocr_vision(file: UploadFile = File(...), _: None = Depends(require_key
 
     result = _vision_clean(tool_input)
     result["amountBox"] = _vision_box(tool_input.get("amount_box"), sent_w, sent_h)
-    result["_rawBox"] = tool_input.get("amount_box")  # 临时调试：核对坐标系用，验证完删除
-    result["_sent"] = [sent_w, sent_h]
     elapsed = int((time.monotonic() - started) * 1000)
     logger.info(
         "ocr vision bytes=%d model=%s elapsedMs=%d hasAmount=%s handwritten=%s",
