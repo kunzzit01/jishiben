@@ -198,6 +198,12 @@ services:
       - "host.docker.internal:host-gateway"
     # 单 worker 持有一份 onnx 模型 + 图片解码缓冲；Swarm 下改用 deploy.resources.limits
     mem_limit: 2g
+    # 照片只在内存里处理，不留任何痕迹：根文件系统只读，临时目录用内存盘（tmpfs，容器停掉就没了）。
+    # Starlette 对 >1MB 的上传会暂存成临时文件，落在 /tmp —— 这里让它写进 RAM 而不是磁盘。
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /home/ocr:size=64m,uid=10001,gid=10001
     networks:
       - jishiben-net
       - ollama-net
