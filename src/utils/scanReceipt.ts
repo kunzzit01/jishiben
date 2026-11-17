@@ -36,6 +36,8 @@ export interface ScannedReceipt {
    * - 'local-after-server-failed'：试过服务端但没拿到更好的结果，最终仍是本地那份
    */
   ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed';
+  /** 一行诊断：本地行数 / 服务端 OCR / 视觉识别各走到哪一步、为什么跳过（识别失败时界面会显示，便于定位） */
+  diag?: string;
   /** 是否请求过视觉识别（多模态大模型；诊断用，界面不展示） */
   visionTried?: boolean;
   /** 视觉识别的金额是否被采用 */
@@ -305,7 +307,10 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
         // OCR 两层都一行字没读到（手写 / 严重褪色时常见）：还有视觉识别可以救 —— 它读的是整张图
         const v = await tryReceiptVision(imageUri, imageBase64);
         if (!v.result || v.result.amount === null) {
-          throw new ReceiptScanError(code, toReadableMessage(code, detail));
+          throw new ReceiptScanError(
+            code,
+            toReadableMessage(code, detail) + '\n\n诊断：本地=' + code + ' ｜ ' + got.reason + ' ｜ ' + v.reason,
+          );
         }
         lines = [];
         visionPre = v;
@@ -338,6 +343,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
     let aiUsed = false;
     let visionTried = false;
     let visionUsed = false;
+    let visionReason = '';
     let aiReason = '';
     // 本地识别整体失败时，解析结果本来就来自服务端行 → 路径直接记 server
     let ocrSource: 'local' | 'server' | 'vision' | 'local-after-server-failed' = localRecognitionFailed ? 'server' : 'local';
@@ -410,6 +416,7 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       if (needVision) {
         const v = visionPre ?? (await tryReceiptVision(imageUri, imageBase64));
         visionTried = v.attempted;
+        visionReason = v.reason + (v.result && v.result.amount === null ? '（模型没读出金额）' : '');
         aiReason += ' | ' + v.reason;
         const vr = v.result;
         if (vr && vr.amount !== null) {
@@ -494,6 +501,9 @@ export async function scanReceipt(imageUri: string, imageBase64?: string): Promi
       aiTried,
       aiUsed,
       aiReason,
+      diag:
+        '本地' + lines.length + '行 ｜ ' + (serverReason || 'server-?') + ' ｜ ' +
+        (visionReason || (localIsConfident ? 'vision-skip（本地已有把握）' : 'vision-skip')),
       visionTried,
       visionUsed,
       ocrSource,

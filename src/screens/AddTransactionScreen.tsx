@@ -1877,7 +1877,10 @@ function fxAmountText(raw: string, live: string | null): string {
         // 清空金额框：否则会残留上一次扫描/输入的数值，用户一路「完成」就记错了
         setAmount('');
         amountExpr.reset();
-        dialog.alert({ title: t('common.confirm'), message: t('addTx.scanNoAmount') });
+        dialog.alert({
+          title: t('common.confirm'),
+          message: t('addTx.scanNoAmount') + (result.diag ? '\n\n诊断：' + result.diag : ''),
+        });
       } else if ((result.confidence ?? 1) < 0.6) {
         // 规则置信度低（没找到明确金额标签/货币符号）：提醒核对，而不是悄悄填错
         dialog.alert({ title: t('addTx.scanCheckAmountTitle'), message: t('addTx.scanCheckAmountMsg') });
@@ -1919,7 +1922,7 @@ function fxAmountText(raw: string, live: string | null): string {
       return;
     }
     // 扫票要看清手写与小字：质量 0.6 → 0.85（上传前服务端会再缩放，不会变慢多少）
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.85, base64: true });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.75, base64: true });
     if (!result.canceled && result.assets?.[0]?.base64 && result.assets?.[0]?.uri) {
       runScan(result.assets[0].base64, result.assets[0].uri);
     }

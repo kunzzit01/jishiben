@@ -37,9 +37,12 @@ function emit() {
 function normalize(raw: unknown): ServerOcrSettings {
   if (!raw || typeof raw !== 'object') return DEFAULTS;
   const o = raw as { enabled?: unknown; key?: unknown };
+  // 产品决定（2026-11-06）：扫票自动、设置页已无开关。旧版本落盘的「关闭 + 空密钥」不能再生效，
+  // 否则老用户的手机会永远静默跳过所有上传（线上实测：手机一次 /ocr/ 请求都没发）。
+  // 所以开关一律取内置值；只有存了非空密钥才用存的，空的回落到内置密钥。
   return {
-    enabled: o.enabled === true,
-    key: typeof o.key === 'string' ? o.key.trim() : '',
+    enabled: DEFAULTS.enabled,
+    key: typeof o.key === 'string' && o.key.trim() ? o.key.trim() : DEFAULTS.key,
   };
 }
 

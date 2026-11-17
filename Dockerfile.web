@@ -162,7 +162,7 @@ server {
         resolver 127.0.0.11 ipv6=off valid=10s;
         set $ocr_upstream http://ocr:8090;
         # 服务端上限 8MB，留出 multipart 边界与表单头的余量
-        client_max_body_size 10m;
+        client_max_body_size 26m;
         proxy_pass $ocr_upstream;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

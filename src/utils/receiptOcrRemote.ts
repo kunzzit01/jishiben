@@ -42,12 +42,12 @@ export class RemoteOcrError extends Error {
   }
 }
 
-/** 单次上传超时（产品要求 6s：宁可放弃兜底，也不能让用户一直看着转圈） */
-const OCR_UPLOAD_TIMEOUT_MS = 6_000;
+/** 单次上传超时：6s 对「手机网络上传几 MB 原图 + 服务端首次加载模型」太短，线上会频繁超时并触发熔断；放宽到 25s */
+const OCR_UPLOAD_TIMEOUT_MS = 25_000;
 /** 设置页那行「服务状态」的探测超时 */
 const OCR_HEALTH_TIMEOUT_MS = 6_000;
 /** 失败后的冷却时长：这段时间内所有扫票都直接跳过上传，连一次等待都不付 */
-export const REMOTE_OCR_COOLDOWN_MS = 10 * 60_000;
+export const REMOTE_OCR_COOLDOWN_MS = 2 * 60_000;
 /** 冷却截止时间戳（进程重启后靠它续上，避免每次冷启动都再撞一遍） */
 const COOLDOWN_STORAGE_KEY = '@jizhang/scan.serverOcr.blockedUntil';
 

@@ -66,7 +66,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 # ── 限制 ────────────────────────────────────────────────────────────────────
-MAX_BYTES = 8 * 1024 * 1024  # 上传上限 8MB
+MAX_BYTES = 24 * 1024 * 1024  # 上传上限 24MB（高像素手机原图可到 10MB+；识别前会缩小）
 MAX_SIDE = 2000  # 解码后最长边上限：超出先缩小再识别，控内存
 MAX_CONCURRENCY = 2  # 同时进识别的请求数上限
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}

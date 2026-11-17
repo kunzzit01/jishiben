@@ -19,8 +19,8 @@ interface ReceiptCameraModalProps {
 
 /** 成片比例：相机传感器的原生比例。预览框与拍后确认图都按它画，所见即所得 */
 const PHOTO_RATIO = 3 / 4; // 宽 / 高（竖拍）
-/** 拍照质量：识别要看清手写与小字，比之前的 0.6 高一档（上传前服务端会再缩放） */
-const CAPTURE_QUALITY = 0.9;
+/** 拍照质量：比旧的 0.6 高，手写与小字更清楚；但 0.9 在 1200 万像素以上的手机上能超过 8MB 的上传上限，取 0.75（约 2–3MB） */
+const CAPTURE_QUALITY = 0.75;
 const TOP_BAR_H = 56;
 const BOTTOM_BAR_H = 150;
 const CORNER = 26;
