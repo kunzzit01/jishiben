@@ -29,7 +29,7 @@ class GoogleBillingServiceTest {
         google = mock(GooglePlayGateway.class);
         when(google.encrypt(anyString())).thenAnswer(i -> "enc:" + i.getArgument(0));
         when(google.decrypt(anyString())).thenAnswer(i -> ((String) i.getArgument(0)).substring(4));
-        when(google.packageName()).thenReturn("com.kylim0103.jizhangapp");
+        when(google.packageName()).thenReturn("kunova.moni");
         billing = new GoogleBillingService(premium, google, json, db.transactions, props);
         db.jdbc.update("UPDATE billing_settings SET enrollment_open=TRUE, gates_enabled=TRUE");
     }
@@ -182,7 +182,7 @@ class GoogleBillingServiceTest {
         String guest = premium.createGuest().token();
         when(google.verify("early")).thenReturn(verified("ACTIVE", "not-yet-known"));
         billing.notification("Bearer x", envelope("m1", """
-            {"packageName":"com.kylim0103.jizhangapp","subscriptionNotification":{"notificationType":4,"purchaseToken":"early"}}"""));
+            {"packageName":"kunova.moni","subscriptionNotification":{"notificationType":4,"purchaseToken":"early"}}"""));
         assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_orphans", Integer.class)).isEqualTo(1);
         verify(google, never()).acknowledge(anyString());
         // Duplicate delivery is ignored.
@@ -200,13 +200,13 @@ class GoogleBillingServiceTest {
         when(google.verify("r")).thenReturn(verified("ACTIVE", account, true, ""));
         billing.verify(guest, "r", false, false);
         billing.notification("Bearer x", envelope("v1", """
-            {"packageName":"com.kylim0103.jizhangapp","voidedPurchaseNotification":{"purchaseToken":"r","productType":1,"refundType":1}}"""));
+            {"packageName":"kunova.moni","voidedPurchaseNotification":{"purchaseToken":"r","productType":1,"refundType":1}}"""));
         var refunded = premium.status(guest);
         assertThat(refunded.subscriptions().getFirst().refundType()).isEqualTo("FULL_REFUND");
         assertThat(refunded.active()).as("refund without revocation keeps Google's state").isTrue();
         when(google.verify("r")).thenReturn(new GooglePlayGateway.Verified("EXPIRED", Instant.now(), "monthly", false, true, account, "", "", "", false));
         billing.notification("Bearer x", envelope("v2", """
-            {"packageName":"com.kylim0103.jizhangapp","subscriptionNotification":{"notificationType":12,"purchaseToken":"r"}}"""));
+            {"packageName":"kunova.moni","subscriptionNotification":{"notificationType":12,"purchaseToken":"r"}}"""));
         assertThat(premium.status(guest).active()).isFalse();
         assertThat(db.jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM billing_subscriptions", Boolean.class)).isTrue();
     }
@@ -214,7 +214,7 @@ class GoogleBillingServiceTest {
     @Test void unsupportedOrForeignNotificationsDoNotLoop() throws Exception {
         when(google.verify("odd")).thenThrow(new GooglePlayGateway.Unsupported("other product"));
         assertThatCode(() -> billing.notification("Bearer x", envelope("u1", """
-            {"packageName":"com.kylim0103.jizhangapp","subscriptionNotification":{"notificationType":4,"purchaseToken":"odd"}}""")))
+            {"packageName":"kunova.moni","subscriptionNotification":{"notificationType":4,"purchaseToken":"odd"}}""")))
                 .doesNotThrowAnyException();
         assertThatCode(() -> billing.notification("Bearer x", envelope("u2", """
             {"packageName":"com.other","subscriptionNotification":{"notificationType":4,"purchaseToken":"x"}}""")))
@@ -224,7 +224,7 @@ class GoogleBillingServiceTest {
     @Test void transientGoogleFailuresAreRetriedByPubSub() throws Exception {
         when(google.verify("t")).thenThrow(ApiException.upstream("down"));
         assertThatThrownBy(() -> billing.notification("Bearer x", envelope("t1", """
-            {"packageName":"com.kylim0103.jizhangapp","subscriptionNotification":{"notificationType":2,"purchaseToken":"t"}}""")))
+            {"packageName":"kunova.moni","subscriptionNotification":{"notificationType":2,"purchaseToken":"t"}}""")))
                 .isInstanceOf(ApiException.class);
         assertThat(db.jdbc.queryForObject("SELECT COUNT(*) FROM billing_events", Integer.class)).as("not marked processed").isZero();
     }

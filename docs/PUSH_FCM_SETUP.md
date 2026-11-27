@@ -19,7 +19,7 @@
 
 1. 打开 https://console.firebase.google.com → 新建项目（名字随意，例如 `jizhang-app`）
 2. 项目里「添加应用」→ **Android**
-3. **Android 包名必须填**：`com.kylim0103.jizhangapp`（与 `app.json` 的 `android.package` 一致，填错 token 拿不到）
+3. **Android 包名必须填**：`kunova.moni`（与 `app.json` 的 `android.package` 一致，填错 token 拿不到）
 4. 下载 `google-services.json`，放到仓库根目录：`_repo/jishiben/google-services.json`
 5. 回来告诉我「文件放好了」
 

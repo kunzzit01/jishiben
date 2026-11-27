@@ -101,7 +101,7 @@ Initial commit → … → 08862c7d(Supabase 云同步+Bio Lock+后端) → d552
 | 入口 | `index.ts` → `registerRootComponent(App)` → 根组件 `App.tsx` | `index.ts:1-8` |
 | 构建/发布 | Expo + **EAS**（`eas.json`、`app.json`、`metro.config.js`） | `eas.json`、`app.json:67-71`（eas.projectId） |
 | 打包目标 | iOS / Android，另含 `react-native-web` 可跑 web | `package.json:45`、`app.json:36-38` |
-| Android 包名 | `com.kylim0103.jizhangapp` | `app.json:34` |
+| Android 包名 | `kunova.moni` | `app.json:34` |
 | 脚本 | `expo start` / `expo run:android` / `expo run:ios` / `expo start --web` | `package.json:52-57` |
 
 ### 2.2 导航 / 状态 / UI / 其它

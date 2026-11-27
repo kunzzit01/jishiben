@@ -46,7 +46,7 @@ public class GooglePlayGateway {
     private HttpRequestFactory factory;
 
     public GooglePlayGateway(ObjectMapper json,
-            @Value("${app.billing.package-name:com.kylim0103.jizhangapp}") String packageName,
+            @Value("${app.billing.package-name:kunova.moni}") String packageName,
             @Value("${app.billing.product-id:premium}") String productId,
             @Value("${app.billing.token-encryption-key:}") String key,
             @Value("${app.billing.push-audience:}") String audience,

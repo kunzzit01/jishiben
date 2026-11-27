@@ -111,7 +111,7 @@
 - Google 请求连接超时 5 秒、读取超时 10 秒，不做隐式重试。凭证使用 google-auth-library 的 ADC。
 - 购买 token 用 AES-GCM 加密保存，另存 SHA-256 作为唯一键。
 - App 端使用 expo-iap 6.4.3。它依赖 openiap-google 4.0.10 → **Play Billing Library 9.1.0**，满足 Google 现行要求：2026-11-01 起新应用和更新至少使用 PBL 7。
-- 「管理订阅」深链：`https://play.google.com/store/account/subscriptions?sku=premium&package=com.kylim0103.jizhangapp`。
+- 「管理订阅」深链：`https://play.google.com/store/account/subscriptions?sku=premium&package=kunova.moni`。
 
 **开放正式购买前需要完成（上架负责人 / 运维）**：
 - [ ] Play Console：创建订阅 `premium` 及 base plan `monthly` / `yearly`，设置售卖地区和最终价格。

@@ -50,7 +50,7 @@
         "android.permission.USE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.kylim0103.jizhangapp",
+      "package": "kunova.moni",
       "versionCode": 4,
       "usesCleartextTraffic": true,
       "googleServicesFile": "./google-services.json"

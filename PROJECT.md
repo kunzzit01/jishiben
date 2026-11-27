@@ -4,7 +4,7 @@
 
 - **语言/界面**：中文界面，代码注释也以中文为主
 - **平台**：iOS / Android（Expo），兼做 Web
-- **包名**：`com.kylim0103.jizhangapp`（Android），EAS projectId 已配置（见 `app.json`）
+- **包名**：`kunova.moni`（Android；iOS bundleIdentifier 仍是 com.kylim0103.jizhangapp），EAS projectId 已配置（见 `app.json`）
 
 ## 技术栈
 

@@ -89,4 +89,4 @@ npx eas-cli submit -p android                          # 需要 Play Console 账
 - **装完打开是白屏 / 一直转圈**：API 地址写错，或服务器没起来、HTTPS 证书无效。
 - **登录报网络错误**：`usesCleartextTraffic` 与协议不匹配（http 需要 true，https 保持 false）。
 - **相机打不开**：确认装的是本次构建的包（不是 Expo Go）；`expo-camera` 已配好权限文案。
-- **构建失败提示 bundleIdentifier**：那是 iOS 的问题；Android 用 `android.package`，本项目已设为 `com.kylim0103.jizhangapp`。
+- **构建失败提示 bundleIdentifier**：那是 iOS 的问题；Android 用 `android.package`，本项目已设为 `kunova.moni`。

@@ -15,7 +15,7 @@ import {
 import { buyStore, restoreStore, storePlans, StorePlan } from '../services/playBilling';
 import { openSignIn } from '../navigation/navigationRef';
 
-const PACKAGE = 'com.kylim0103.jizhangapp';
+const PACKAGE = 'kunova.moni';
 const PLAY_MANAGE_URL = 'https://play.google.com/store/account/subscriptions?sku=premium&package=' + PACKAGE;
 
 const ACTIONS = [
