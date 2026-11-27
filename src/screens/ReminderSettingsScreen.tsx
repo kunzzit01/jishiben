@@ -15,7 +15,6 @@ import { AppText, Card, EmptyState, HeroGradient, ListRow, ListSection, ScreenHe
 import { formatDate } from '../utils/formatDate';
 import { formatMoney } from '../utils/formatMoney';
 import * as NotificationsModule from 'expo-notifications';
-import { sendTestReminder, probePushRegistration } from '../utils/notifications';
 import { broadcastPush } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 
@@ -38,23 +37,11 @@ export default function ReminderSettingsScreen({ navigation }: any) {
   const { items, allItems, rules, disabledRules, toggleRule, loading } = useReminderItems();
   const { alerts: budgetAlerts, dismiss: dismissBudgetAlert } = useBudgetAlerts();
 
-  // 通知状态诊断：权限 / 已排期条数 / 下一条触发时间 —— 用户「为什么没弹」时一眼能看出来
-  const [testResult, setTestResult] = useState<string>('');
   // 管理员广播：只有 ADMIN 角色或配置里的管理员邮箱能看到这一行
   const { user } = useAuth();
   const isBroadcastAdmin =
     user?.role === 'ADMIN' || (user?.email ?? '').toLowerCase() === 'mingsoon249@gmail.com';
   const [broadcastResult, setBroadcastResult] = useState<string>('');
-  const [pushProbe, setPushProbe] = useState<string>('');
-  const runPushProbe = useCallback(async () => {
-    setPushProbe(t('reminder.pushProbeRunning'));
-    const res = await probePushRegistration();
-    setPushProbe(
-      res.ok
-        ? t('reminder.pushProbeOk', { token: (res.token ?? '').slice(0, 22) + '…' })
-        : t('reminder.pushProbeFail', { reason: res.reason ?? 'unknown' })
-    );
-  }, [t]);
   const runBroadcast = useCallback(async () => {
     setBroadcastResult(t('reminder.broadcastRunning'));
     try {
@@ -66,30 +53,14 @@ export default function ReminderSettingsScreen({ navigation }: any) {
       setBroadcastResult(t('reminder.broadcastFail', { reason: String((e as Error)?.message ?? e) }));
     }
   }, [t]);
-  const runTest = useCallback(async (delay: number) => {
-    const r = await sendTestReminder(delay, t('reminder.dailyTitle'), t('reminder.dailyBody'));
-    setTestResult(r.ok ? `已排期（${delay}s）id=${r.id}` : `失败：${r.reason}`);
-  }, [t]);
-  const [notifState, setNotifState] = useState<{ perm: string; scheduled: number; nextAt: Date | null }>({
-    perm: 'unknown',
-    scheduled: 0,
-    nextAt: null,
-  });
+  // 通知权限：关着的话提醒都不会弹，这一行让用户一眼看出来
+  const [notifState, setNotifState] = useState<{ perm: string }>({ perm: 'unknown' });
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const perm = (await NotificationsModule.getPermissionsAsync()).status;
-        const scheduled = await NotificationsModule.getAllScheduledNotificationsAsync();
-        const dates = scheduled
-          .map((s) => {
-            const tr: any = s.trigger;
-            const t = tr?.date ?? tr?.value ?? null;
-            return t ? new Date(t as any) : null;
-          })
-          .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()))
-          .sort((a, b) => a.getTime() - b.getTime());
-        if (alive) setNotifState({ perm, scheduled: scheduled.length, nextAt: dates[0] ?? null });
+        if (alive) setNotifState({ perm });
       } catch {
         /* 读不到就保持 unknown，不影响页面其它部分 */
       }
@@ -187,7 +158,7 @@ export default function ReminderSettingsScreen({ navigation }: any) {
           </ListSection>
         ) : null}
 
-        {/* 通知状态：为什么没弹，一眼可见（权限 / 已排期条数 / 下一条触发时间） */}
+        {/* 通知权限：为什么没弹，一眼可见 */}
         <ListSection title={t('reminder.statusSection')} testID="reminder-notif-state">
           <ListRow
             icon={notifState.perm === 'granted' ? 'checkmark-circle-outline' : 'alert-circle-outline'}
@@ -195,27 +166,6 @@ export default function ReminderSettingsScreen({ navigation }: any) {
             title={t('reminder.statusPerm')}
             subtitle={notifState.perm === 'granted' ? t('reminder.statusPermOn') : t('reminder.statusPermOff')}
           />
-          <ListRow
-            icon="alarm-outline"
-            title={t('reminder.statusScheduled')}
-            subtitle={notifState.scheduled > 0 ? `${notifState.scheduled} 条` : t('reminder.statusScheduledNone')}
-          />
-          <ListRow
-            icon="time-outline"
-            title={t('reminder.statusNext')}
-            subtitle={
-              notifState.nextAt
-                ? `${formatDate(notifState.nextAt, langMode, { style: 'monthDay' })} ${String(notifState.nextAt.getHours()).padStart(2, '0')}:${String(notifState.nextAt.getMinutes()).padStart(2, '0')}`
-                : t('reminder.statusNextNone')
-            }
-          />
-        </ListSection>
-
-        {/* 测试：当场验证权限/渠道/排期这条链通不通（真机排查用） */}
-        <ListSection title={t('reminder.testSection')} testID="reminder-notif-test">
-          <ListRow icon="notifications-outline" title={t('reminder.testNow')} onPress={() => void runTest(1)} />
-          <ListRow icon="timer-outline" title={t('reminder.testIn10s')} onPress={() => void runTest(10)} />
-          {testResult ? <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={testResult} /> : null}
         </ListSection>
 
         {/* 管理员广播：给所有已注册设备发一条（服务端还会再校验一次身份） */}
@@ -228,14 +178,6 @@ export default function ReminderSettingsScreen({ navigation }: any) {
             />
             {broadcastResult ? (
               <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={broadcastResult} />
-            ) : null}
-            <ListRow
-              icon="key-outline"
-              title={t('reminder.pushProbeRow')}
-              onPress={() => void runPushProbe()}
-            />
-            {pushProbe ? (
-              <ListRow icon="information-circle-outline" title={t('reminder.testResult')} subtitle={pushProbe} />
             ) : null}
           </ListSection>
         ) : null}

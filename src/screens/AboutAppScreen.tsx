@@ -1,9 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useRef, useState } from 'react';
 import * as Updates from 'expo-updates';
-import { describeLocalOcr, isLocalOcrAvailable } from '../utils/receiptOcr';
-import { describeReceiptAiStatus, getReceiptAiStatus } from '../utils/receiptAi';
-import { getServerOcrSettings, hydrateServerOcrSettings, isServerOcrUsable } from '../utils/scanSettings';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 
 /**
@@ -48,58 +44,8 @@ export default function AboutAppScreen({ navigation }: any) {
    * 检查 → 有新版就下载（下载完成写进缓存）→ 重启生效。
    * Web / 未配置 OTA 的构建里 isEnabled 为 false，直接给出"当前构建不支持"，
    * 绝不假装在检查。                                               */
-  /* 类别页性能数据（CategoryPage 每次打开都会写 @jizhang/lastCategoryPerf）：
-   * 让用户随时能在关于页看到真机数字并截图，不用盯着那个默认不显示的调试白字。 */
-  // 端侧 AI（Gemini Nano）状态 + 上次扫票的 AI 诊断：只用于排查，不参与业务
-  useEffect(() => {
-    let alive = true;
-    void getReceiptAiStatus().then((s) => { if (alive) setAiStatus(s); });
-    void hydrateServerOcrSettings().then(() => {
-      if (!alive) return;
-      const st = getServerOcrSettings();
-      // 现在没有开关：密钥内置，扫票时自动使用（仅本地拿不准时才上传）
-      setServerOcrState(isServerOcrUsable(st) ? '自动 · 内置密钥 · 可用' : '未配置');
-    }).catch(() => undefined);
-    void AsyncStorage.getItem('@jizhang/lastScanText')
-      .then((v) => { if (alive) setLastOcrText(v && v.trim() ? v.replace(/\s+/g, ' ').slice(0, 220) : '-'); })
-      .catch(() => undefined);
-    void AsyncStorage.getItem('@jizhang/lastReceiptAi')
-      .then((v) => { if (alive) setLastAiDiag(v ?? '-'); })
-      .catch(() => undefined);
-    return () => { alive = false; };
-  }, []);
-  const [aiStatus, setAiStatus] = useState<string>('-');
-  const [lastAiDiag, setLastAiDiag] = useState<string>('-');
-  const [lastOcrText, setLastOcrText] = useState<string>('-');
-  const [serverOcrState, setServerOcrState] = useState<string>('-');
-  const [catPerf, setCatPerf] = useState<{
-    first: number;
-    full: number | null;
-    renders: number;
-    frameAvg: number | null;
-    frameMax: number | null;
-  } | null>(null);
-  useEffect(() => {
-    AsyncStorage.getItem('@jizhang/lastCategoryPerf')
-      .then((raw) => {
-        if (!raw) return;
-        const p = JSON.parse(raw);
-        setCatPerf({
-          first: p.first ?? 0,
-          full: p.full ?? null,
-          renders: p.renders ?? 0,
-          frameAvg: p.frameAvg ?? null,
-          frameMax: p.frameMax ?? null,
-        });
-      })
-      .catch(() => {});
-  }, []);
-
   const [phase, setPhase] = useState<UpdatePhase>('idle');
-  // 排查用：把 expo-updates 抛出的真实错误显示出来（原来只有「检查失败」三个字）
   const busyRef = useRef(false);
-
-  const updateIdText = Updates.updateId ? Updates.updateId.slice(0, 8) : t('addTx.updateBuiltin');
 
   const phaseText =
     phase === 'checking'
@@ -110,7 +56,9 @@ export default function AboutAppScreen({ navigation }: any) {
           ? t('addTx.updateLatest')
           : phase === 'ready'
             ? t('addTx.updateReady')
-            : '';
+            : phase === 'unsupported'
+              ? t('addTx.updateUnsupported')
+              : '';
 
   const handleCheckUpdate = async () => {
     if (busyRef.current) return;
@@ -203,90 +151,6 @@ export default function AboutAppScreen({ navigation }: any) {
             </TouchableOpacity>
           )}
 
-          {/* 诊断行：现在跑的是哪一份 JS（内置 / 某个 updateId）+ 哪个渠道 */}
-          <Row
-            label={t('addTx.updateBundleRow')}
-            value={Updates.isEnabled ? updateIdText : t('addTx.updateUnsupported')}
-            muted={semantic.textSecondary}
-          />
-          <Row
-            label={t('addTx.updateChannelRow')}
-            value={Updates.channel ?? '-'}
-            muted={semantic.textSecondary}
-          />
-
-          {/* 本地扫票依赖原生模块：这行用于确认当前安装包是否包含它 */}
-          <Row
-            label={t('addTx.localOcr')}
-            value={describeLocalOcr()}
-            muted={semantic.textSecondary}
-          />
-
-          {/* 端侧 AI（Gemini Nano）：只有 AVAILABLE 才会用于难票兜底 */}
-          <Row
-            label={t('addTx.receiptAiRow')}
-            value={describeReceiptAiStatus(aiStatus)}
-            muted={semantic.textSecondary}
-            wrap
-          />
-          {/* 上次扫票：是否尝试端侧 AI、是否采用、为什么没采用 */}
-          <Row
-            label={t('addTx.receiptAiLastRow')}
-            value={lastAiDiag}
-            muted={semantic.textSecondary}
-            wrap
-          />
-          {/* 上一次扫票的 OCR 原文（截断）：扫不准时截图这一行即可反馈版式 */}
-                    <Row
-            label={t('addTx.serverOcrStateRow')}
-            value={serverOcrState}
-            muted={semantic.textSecondary}
-            wrap
-          />
-<Row
-            label={t('addTx.receiptLastOcrRow')}
-            value={lastOcrText}
-            muted={semantic.textSecondary}
-            wrap
-          />
-
-          {/* 模型「可下载但未下载」时给一句可执行提示，避免用户以为是 bug */}
-          {aiStatus.startsWith('module-missing') && (
-            <AppText variant="footnote" color={semantic.textSecondary} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-              {t('addTx.receiptAiMissingHint')}
-            </AppText>
-          )}
-          {aiStatus === 'DOWNLOADABLE' && (
-            <AppText variant="footnote" color={semantic.textSecondary} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-              {t('addTx.receiptAiDownloadableHint')}
-            </AppText>
-          )}
-          {/* 真机性能诊断（用户截图用）：数值来自最近一次打开「类别管理」页 */}
-          <Row
-            label={t('addTx.categoryPerfRow')}
-            value={
-              catPerf
-                ? '首帧 ' +
-                  catPerf.first +
-                  'ms · 满载 ' +
-                  (catPerf.full == null ? '…' : catPerf.full + 'ms') +
-                  ' · 渲染 ' +
-                  catPerf.renders +
-                  ' 次'
-                : t('addTx.categoryPerfNone')
-            }
-            muted={semantic.textSecondary}
-            wrap
-          />
-          <Row
-            label={t('addTx.categoryFrameRow')}
-            value={
-              catPerf && catPerf.frameAvg != null
-                ? '均 ' + catPerf.frameAvg + 'ms / 最差 ' + (catPerf.frameMax ?? 0) + 'ms'
-                : t('addTx.categoryPerfNone')
-            }
-            muted={semantic.textSecondary}
-          />
         </GlassView>
 
         <AppText variant="caption" color={semantic.textSecondary} style={styles.footer}>
@@ -328,7 +192,6 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  diagnostic: { paddingHorizontal: 16, paddingTop: 6, lineHeight: 16 },
   container: { flex: 1 },
   headerGlass: { position: 'absolute', width: 44, height: 44 },
   headerGlassInner: { width: 44, height: 44 },

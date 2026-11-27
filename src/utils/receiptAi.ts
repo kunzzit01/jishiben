@@ -158,28 +158,3 @@ export async function askReceiptAi(input: { lines: OcrLine[]; imageUri?: string 
     return null;
   }
 }
-
-/** 端侧 AI 的真实状态（给设置页展示）：AVAILABLE / DOWNLOADABLE / DOWNLOADING / UNAVAILABLE / …
- *  永不抛：模块缺失返回 module-missing，异常返回 error:<msg> */
-export async function getReceiptAiStatus(): Promise<string> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { NativeModules } = require('react-native');
-    const native = NativeModules?.GeminiNano;
-    if (!native || typeof native.status !== 'function') return 'module-missing（安装包过旧，需装含端侧 AI 的新 APK）';
-    const raw = await native.status();
-    return typeof raw === 'string' && raw ? raw : 'unknown';
-  } catch (e) {
-    return 'error:' + String((e as Error)?.message ?? e).slice(0, 60);
-  }
-}
-
-/** 把原始 FeatureStatus 翻译成人话（保留原始值，便于排查） */
-export function describeReceiptAiStatus(raw: string): string {
-  if (raw === 'AVAILABLE') return 'AVAILABLE（可用）';
-  if (raw === 'DOWNLOADABLE') return 'DOWNLOADABLE（本机支持，模型未下载）';
-  if (raw === 'DOWNLOADING') return 'DOWNLOADING（模型下载中）';
-  if (raw === 'UNAVAILABLE') return 'UNAVAILABLE（本机系统未开放端侧模型）';
-  if (raw.startsWith('module-missing')) return raw;
-  return raw;
-}

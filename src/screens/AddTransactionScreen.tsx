@@ -1877,7 +1877,7 @@ function fxAmountText(raw: string, live: string | null): string {
         amountExpr.reset();
         dialog.alert({
           title: t('common.confirm'),
-          message: t('addTx.scanNoAmount') + (result.diag ? '\n\n诊断：' + result.diag : ''),
+          message: t('addTx.scanNoAmount'),
         });
       } else if (result.altAmount != null) {
         // OCR 与 AI 读数不一致：把两个数都告诉用户，别悄悄选一个

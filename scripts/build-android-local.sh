@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Rebuild the jizhang-app release APK locally (no EAS / no Expo cloud).
+# JZ_TASK=bundle also builds a Play Store .aab (bundleRelease), signed by the same
+# release signingConfig / key as the APK.
 #
 # Why a "shadow" build root: this repo lives under a long OneDrive path, and the CMake
 # paths Android generates for prefab (.cxx/<cfg>/<hash>/<abi>/../prefab/...) exceed
@@ -13,6 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHADOW="${JZ_SHADOW:-/c/jzsrc}"
 RN_ARCHS="${RN_ARCHS:-arm64-v8a}"
+JZ_TASK="${JZ_TASK:-apk}"   # apk | bundle
 
 SDK="${ANDROID_HOME:-${LOCALAPPDATA:-$HOME/AppData/Local}/Android/Sdk}"
 export ANDROID_HOME="$SDK"
@@ -27,6 +30,7 @@ echo "[build] shadow  = $SHADOW"
 echo "[build] SDK     = $SDK"
 echo "[build] API URL = $EXPO_PUBLIC_API_BASE_URL"
 echo "[build] ABIs    = $RN_ARCHS"
+echo "[build] task    = $JZ_TASK"
 
 # 1) NDK + CMake (idempotent)
 NDK_VERSION=27.1.12297006   # must match node_modules/react-native/gradle/libs.versions.toml
@@ -79,3 +83,14 @@ cp "$SRC_APK" "$ROOT/android/app/build/outputs/apk/release/app-release.apk"
 
 echo "[build] APK: $ROOT/android/app/build/outputs/apk/release/app-release.apk"
 ls -l "$ROOT/android/app/build/outputs/apk/release/app-release.apk"
+
+# 8) Optional: Play Store bundle (same release signingConfig as the APK above)
+if [ "$JZ_TASK" = "bundle" ]; then
+  ( cd "$SHADOW/android" && ./gradlew.bat bundleRelease -PreactNativeArchitectures="$RN_ARCHS" )
+  SRC_AAB="$SHADOW/android/app/build/outputs/bundle/release/app-release.aab"
+  [ -f "$SRC_AAB" ] || { echo "[build] ERROR: no AAB at $SRC_AAB" >&2; exit 1; }
+  mkdir -p "$ROOT/android/app/build/outputs/bundle/release"
+  cp "$SRC_AAB" "$ROOT/android/app/build/outputs/bundle/release/app-release.aab"
+  echo "[build] AAB: $ROOT/android/app/build/outputs/bundle/release/app-release.aab"
+  ls -l "$ROOT/android/app/build/outputs/bundle/release/app-release.aab"
+fi

@@ -258,13 +258,6 @@ export const zh = {
     other: '其他',
   },
   addTx: {
-    serverOcrStateRow: '服务端 OCR',
-    receiptLastOcrRow: '上次识别文字',
-    receiptAiMissingHint: '这台手机的安装包还不含端侧 AI 模块。到「设置 → 关于应用」看 APK 大小应为 73,776,339 字节；小于它说明装的是旧包，重装最新版即可。扫票本身不受影响。',
-    receiptAiDownloadableHint: '这台手机支持端侧 AI，但模型还没下载。到系统设置 → Google → 端侧模型（AICore）下载后，难票识别会更好；不下载也能正常扫票。',
-    // 关于应用：端侧 AI 诊断
-    receiptAiRow: '端侧 AI',
-    receiptAiLastRow: '上次扫票 AI',
     // 扫票币种与账户币种不一致
     scanCurrencyMismatchTitle: '币种不一致，请核对',
     scanCurrencyMismatchMsg: '识别到 {scan}，当前账户是 {account}。请确认是否换账户，或手动校正金额后再保存。',
@@ -273,10 +266,6 @@ export const zh = {
     scanViewPhoto: '看原图位置',
     scanAmountDisagreeMsg: '两种识别结果不一致：已填入 {used}，另一个读数是 {alt}（{src}）。请对照原单核对金额。',
     scanCheckAmountMsg: '没有找到明确的金额标签，金额可能是推断的。请确认无误后再保存。',
-    // 关于应用：本地扫票模块自检
-    localOcr: '本地识别',
-    localOcrReady: '可用（支持离线扫票）',
-    localOcrMissing: '不可用（安装包过旧）',
     // 扫票需要新版安装包（本地 OCR 是原生模块）
     scanNeedUpdateTitle: '扫票需要更新 App',
     scanNeedUpdateMsg: '本地识别是原生模块，当前安装包还没有。装一次最新版本后即可离线扫票（以后可 OTA 更新）。',
@@ -447,7 +436,7 @@ export const zh = {
     whatsNew: '更新内容',
     whatsNewValue: '基础记账 · 预算 · 资产统计',
     checkUpdate: '检查更新',
-    // 关于页「检查更新」的四种结果 + 诊断行（手动触发 OTA）
+    // 关于页「检查更新」的几种结果（手动触发 OTA）
     updateChecking: '检查中…',
     updateDownloading: '下载中…',
     updateLatest: '已是最新',
@@ -455,13 +444,6 @@ export const zh = {
     updateRestart: '重启并应用',
     updateFailed: '检查失败',
     updateUnsupported: '当前构建不支持',
-    updateBundleRow: '更新包',
-    updateBuiltin: '内置版本',
-    updateChannelRow: '更新渠道',
-    // 真机性能诊断（关于页）：「类别管理」页最近一次打开的首帧 / 帧间隔
-    categoryPerfRow: '类别页耗时',
-    categoryFrameRow: '类别页帧间隔',
-    categoryPerfNone: '未记录（先进一次类别页）',
     enterFeedback: '请输入反馈内容',
     submitOk: '提交成功',
     submitThanks: '感谢你的反馈',
@@ -560,24 +542,12 @@ export const zh = {
     statusPerm: '通知权限',
     statusPermOn: '已授权',
     statusPermOff: '未授权：系统设置里允许「记账」发通知后才会弹',
-    statusScheduled: '已排期提醒',
-    statusScheduledCount: '%{count} 条',
-    statusScheduledNone: '0 条：排期没成功，或权限被关掉了',
-    statusNext: '下一条',
-    statusNextNone: '没有排期',
-    testSection: '发送测试通知',
-    testNow: '立即发一条',
-    testIn10s: '10 秒后发一条',
     testResult: '上次结果',
     broadcastSection: '广播（仅管理员）',
     broadcastRow: '给所有设备发一条通知',
     broadcastRunning: '发送中…',
     broadcastResult: '已发送 %{sent}/%{total}（失败 %{failed}）',
     broadcastFail: '发送失败：%{reason}',
-    pushProbeRow: '注册推送 token（排查用）',
-    pushProbeRunning: '注册中…',
-    pushProbeOk: '已注册并上报后端：%{token}',
-    pushProbeFail: '注册失败：%{reason}',
 
     budgetSectionTitle: '预算提醒',
     rulesSectionTitle: '提醒规则',

@@ -29,29 +29,6 @@ export function isLocalOcrAvailable(): boolean {
   }
 }
 
-/** 诊断用：把「JS 包是否存在 / 原生模块是否注册 / 错误原文」合成一行，显示在关于页 */
-export function describeLocalOcr(): string {
-  if (Platform.OS === 'web') return 'web-unsupported';
-  let jsOk = false;
-  let jsErr = '';
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('@react-native-ml-kit/text-recognition');
-    jsOk = !!((mod?.default ?? mod)?.recognize);
-  } catch (e) {
-    jsErr = String((e as Error)?.message ?? e).slice(0, 40);
-  }
-  let native = false;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { NativeModules } = require('react-native');
-    native = typeof NativeModules?.TextRecognition?.recognize === 'function';
-  } catch {
-    native = false;
-  }
-  return 'js=' + (jsOk ? '1' : '0') + ' native=' + (native ? '1' : '0') + (jsErr ? ' err=' + jsErr : '');
-}
-
 let recognizer: Recognizer | null = null;
 
 /** 惰性加载原生模块：Web/未安装原生模块时给出可读错误，而不是崩溃 */

@@ -332,10 +332,8 @@ export async function scanReceipt(
         // OCR 两层都一行字没读到（手写 / 严重褪色时常见）：还有视觉识别可以救 —— 它读的是整张图
         const v = await tryReceiptVision(imageUri, imageBase64);
         if (!v.result || v.result.amount === null) {
-          throw new ReceiptScanError(
-            code,
-            toReadableMessage(code, detail) + '\n\n诊断：本地=' + code + ' ｜ ' + got.reason + ' ｜ ' + v.reason,
-          );
+          if (__DEV__) console.warn('[scan] no amount: local=' + code + ' | ' + got.reason + ' | ' + v.reason);
+          throw new ReceiptScanError(code, toReadableMessage(code, detail));
         }
         lines = [];
         visionPre = v;

@@ -109,8 +109,6 @@ export type ProfileStackParamList = {
   // 原侧拉菜单的入口（从设置项列表跳转）
   关于应用: undefined;
   帮助与反馈: undefined;
-  // 手势诊断页（临时）：定位账本弹层上滑滚不动的坏点，诊断完删除
-  手势诊断: undefined;
   // 记一笔选择账户弹窗的"添加新账户"双注册（与 AssetStack 同一组件）：push 本栈，goBack 天然回记一笔
   添加资产账户: { assetId?: string; presetType?: AssetType } | undefined;
 };
