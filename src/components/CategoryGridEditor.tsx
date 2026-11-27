@@ -809,7 +809,9 @@ function CategoryGridEditorInner({
 }
 
 function makeGridStyles(columns: number, slotHeight: number, semantic: SemanticColors, spacing: Spacing) {
-  const slotPct = 100 / columns + '%';
+  // 向下取到 0.01%：100/3 = 33.333…% 三格浮点相加会略超 100%，
+  // Android 上 flexWrap 就把第 3 格挤到下一行（选择类别只剩 2 列、右侧空一列）
+  const slotPct = Math.floor(10000 / columns) / 100 + '%';
   return StyleSheet.create({
     // userSelect none：长按拖动时不要顺手把页面文字选中（web）
     groupGrid: {
