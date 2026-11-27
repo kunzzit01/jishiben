@@ -91,15 +91,16 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderedCount, visibleSections.length]);
 
-  // 网格可用宽（实测，卡片内衬内侧）：决定 3 列还是 4 列，格宽 = 可用宽 ÷ 列数（不用百分比 —— RN Web 百分比宽要落在 flex 直接子项上才可靠）
+  // 网格可用宽（实测，卡片内衬内侧）：只用来决定列数。
+  // 格子不再按「可用宽 ÷ 列数」算像素宽 + flexWrap —— 那样只要舍入差一点点，Android 上第 3 格
+  // 就会被挤到下一行（抽屉只剩 2 列、右侧空一列）。改成显式分行、每格 flex:1 等分，永不折行。
   const [gridW, setGridW] = useState(0);
   const onGridLayout = (e: LayoutChangeEvent) => {
-    const w = Math.round(e.nativeEvent.layout.width);
-    if (w > 0 && Math.abs(w - gridW) > 1) setGridW(w);
+    const w = Math.floor(e.nativeEvent.layout.width);
+    if (w > 0 && w !== gridW) setGridW(w);
   };
   const innerW = Math.max(0, gridW - GRID_PAD_X * 2);
   const columns = innerW > 0 ? Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.floor(innerW / CELL_MIN_WIDTH))) : MAX_COLUMNS;
-  const cellW = innerW > 0 ? Math.floor(innerW / columns) : undefined;
 
   const shownSections = useMemo(
     () => visibleSections.slice(0, Math.max(2, renderedCount)),
@@ -117,13 +118,16 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
         {shownSections.map(({ group, items }) => (
           <ListSection key={group} title={getGroupLabel(group, t)} style={styles.group}>
             <View style={styles.grid} onLayout={onGridLayout}>
-              {items.map((c) => {
+              {chunkRows(items, columns).map((row, rowIndex) => (
+              <View key={rowIndex} style={styles.row}>
+              {row.map((c, i) => {
+                if (!c) return <View key={`pad-${i}`} style={styles.cellSlot} />;
                 const selected = selectedId === c.id;
                 return (
                   <PressableScale
                     key={c.id}
                     onPress={() => onPickCategory(c.id)}
-                    containerStyle={cellW ? { width: cellW } : styles.cellFallback}
+                    containerStyle={styles.cellSlot}
                     style={styles.cell}
                     accessibilityRole="button"
                     accessibilityLabel={getCategoryLabel(c, t)}
@@ -148,6 +152,8 @@ export function CategoryPickerSheet({ sections, selectedId, onPickCategory, onMa
                   </PressableScale>
                 );
               })}
+              </View>
+              ))}
             </View>
           </ListSection>
         ))}
@@ -172,14 +178,26 @@ function makeStyles(semantic: SemanticColors, spacing: Spacing, radius: Radius, 
     list: { flexShrink: 1 },
     listContent: { paddingHorizontal: layout.page, paddingTop: spacing.sm, paddingBottom: spacing.xs },
     group: { marginBottom: spacing.md },
-    grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: GRID_PAD_X, paddingVertical: spacing.sm },
-    // 宽度未测得前的兜底（首帧）：按 4 列估，测得后立即换成实测格宽
-    cellFallback: { width: '33.333%' },
+    grid: { paddingHorizontal: GRID_PAD_X, paddingVertical: spacing.sm },
+    row: { flexDirection: 'row' },
+    // 一格 = 行内等分（flex:1 + minWidth 0：标签再长也不会把格子撑宽、挤歪别的列）
+    cellSlot: { flex: 1, minWidth: 0 },
     // 顶部留 8：选中态外圈向外溢出 8，要有地方露出来
     cell: { alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: 2 },
     cellLabel: { marginTop: spacing.xs, textAlign: 'center' },
     footer: { paddingHorizontal: layout.page, paddingTop: spacing.sm },
   });
+}
+
+/** 按列数切行；最后一行不足时补 null（渲染成空占位格，保证每列宽度一致） */
+function chunkRows<T>(items: T[], columns: number): (T | null)[][] {
+  const rows: (T | null)[][] = [];
+  for (let i = 0; i < items.length; i += columns) {
+    const row: (T | null)[] = items.slice(i, i + columns);
+    while (row.length < columns) row.push(null);
+    rows.push(row);
+  }
+  return rows;
 }
 
 export default CategoryPickerSheet;
