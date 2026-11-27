@@ -42,16 +42,19 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.USE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS"
       ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.USE_EXACT_ALARM",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.ACTIVITY_RECOGNITION"
+      ],
       "package": "kunova.moni",
-      "versionCode": 4,
+      "versionCode": 5,
       "usesCleartextTraffic": true,
       "googleServicesFile": "./google-services.json"
     },
@@ -69,11 +72,11 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "允许使用相机，用来拍摄小票照片自动识别记账信息"
+          "cameraPermission": "允许使用相机，用来拍摄小票照片自动识别记账信息",
+          "recordAudioAndroidPermission": false
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-audio",
       "expo-sharing",
       "expo-notifications",
       "expo-localization",
