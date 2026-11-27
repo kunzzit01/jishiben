@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>隐私政策 · 记账本</title>
+<title>隐私政策 · Moni</title>
 <style>
   :root { color-scheme: light dark; }
   body { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px;
@@ -21,57 +21,89 @@
 </head>
 <body>
 <h1>隐私政策</h1>
-<div class="meta">应用名称：记账本（jizhang-app）　·　最后更新：2026-10-23</div>
+<div class="meta">应用名称：Moni（Android 包名 kunova.moni）　·　最后更新：2026-11-27</div>
 
-<p>本隐私政策说明「记账本」应用（下称"本应用"）如何收集、使用和保存你的信息。本应用是自建服务，
-数据存储在自己控制的服务器上，不向第三方广告或数据平台出售、共享你的账目信息。</p>
+<p>本隐私政策说明 Moni 记账应用（下称"本应用"）如何收集、使用和保存你的信息。本应用的账目数据存储在开发者自己运营的服务器上，
+不出售你的数据，也不与广告或数据平台共享。</p>
 
 <h2>一、我们收集什么</h2>
 <ul>
-  <li><strong>账号信息</strong>：邮箱地址、密码（以 bcrypt 单向哈希保存，我们无法还原你的明文密码）。</li>
-  <li><strong>记账数据</strong>：你主动录入的账本名称、账户、分类、交易金额、日期、备注。</li>
-  <li><strong>可选的小票与语音</strong>：仅在你点击「扫票」或「语音记账」时，把你选择的图片或录音内容发送到服务端做字段识别；识别完成后不在服务端长期保存原始文件。</li>
-  <li><strong>推送令牌</strong>：仅在你授权通知时保存设备推送标识，用于发送你开启的提醒。</li>
+  <li><strong>账号信息</strong>：注册用的邮箱地址和密码（密码以 bcrypt 单向哈希保存，我们无法还原明文）。
+      如果你选择「使用 Google 登录」，我们会从 Google 获取你的邮箱地址、显示名称和 Google 账号标识，用于创建和识别你的账号。</li>
+  <li><strong>记账数据</strong>：你主动录入的账本、账户、分类、交易金额、日期、备注、预算和财务规划。</li>
+  <li><strong>小票图片（可选）</strong>：仅在你使用「扫票」时，你拍摄或选择的小票图片会先在手机上识别；
+      本地识别不准时，图片会上传到我们自己的服务器做文字和金额识别，识别完成后不长期保存原始图片。</li>
+  <li><strong>推送令牌（可选）</strong>：仅在你允许通知时保存设备推送标识，用于发送提醒。</li>
 </ul>
 
 <h2>二、我们不收集什么</h2>
 <ul>
-  <li>不读取你的通讯录、短信、通话记录。</li>
-  <li>不采集设备广告标识（IDFA / OAID），不投放广告，不做用户画像。</li>
-  <li>不采集精确地理位置。</li>
+  <li>不读取你的通讯录、短信、通话记录，不使用麦克风。</li>
+  <li>不采集设备广告标识，不投放广告，不做用户画像。</li>
+  <li>不采集地理位置。</li>
 </ul>
 
-<h2>三、数据如何保存</h2>
+<h2>三、数据如何保存与传输</h2>
 <div class="box">
-  账目数据同时保存在<strong>你的设备本地</strong>与<strong>你使用的服务器</strong>。
-  设备本地数据用于离线使用；服务器数据用于换设备或重装后恢复。
-  传输过程在生产环境中应启用 HTTPS。
+  账目数据同时保存在<strong>你的设备本地</strong>和<strong>我们的服务器</strong>：本地数据用于离线使用，服务器数据用于换设备或重装后恢复。
+  应用与服务器之间的所有通信都通过 HTTPS 加密传输。
 </div>
 
-<h2>四、数据保留与删除</h2>
+<h2>四、第三方服务</h2>
 <ul>
-  <li>你可以随时在应用内删除账本、账户、分类与流水。</li>
-  <li>如需彻底删除账号及其全部数据，请通过下方联系方式提出，我们会在 7 个工作日内处理。</li>
+  <li><strong>小票识别</strong>：识别由我们自己服务器上部署的模型完成，不发送给任何第三方 AI 服务商。</li>
+  <li><strong>Google 登录</strong>：由 Google 提供身份验证，适用 Google 隐私权政策。</li>
+  <li><strong>推送通知</strong>：通过 Expo 推送服务和 Google Firebase Cloud Messaging 送达，只传递推送令牌和通知内容。</li>
+  <li><strong>订阅付款</strong>（如开放）：由 Google Play 处理，我们不接触你的支付信息。</li>
 </ul>
 
-<h2>五、第三方服务</h2>
-<p>若服务器端开启了小票识别或语音解析能力，识别请求会转发给大模型服务商（OpenRouter 及其上游模型提供方）
-处理，仅发送你当次提交的图片/文本。不开启该能力时，应用会提示不可用并降级为手动记账。</p>
+<h2 id="delete">五、删除账号与数据</h2>
+<ul>
+  <li><strong>在应用内删除</strong>：打开「设置」→ 安全分组里的「删除账号」，输入密码（Google 登录的账号输入邮箱）确认。
+      你的账号以及服务器上的全部账目数据会被立即永久删除，无法恢复。如果你购买过订阅，Google Play 的购买凭证会解除与账号的关联后保留，仅用于防止重复兑换和审计。</li>
+  <li><strong>通过邮件申请</strong>：如果无法登录应用，请用注册邮箱发送邮件到 <code>kunovasystem@gmail.com</code>，
+      标题写「删除账号」。我们会在 7 个工作日内删除你的账号和全部数据，并回复确认。</li>
+  <li>你也可以随时在应用内单独删除某个账本、账户、分类或流水，或在「设置」里清空本机数据。</li>
+</ul>
 
 <h2>六、儿童</h2>
 <p>本应用不面向 13 岁以下儿童，也不会主动收集其信息。</p>
 
 <h2>七、你的权利</h2>
 <ul>
-  <li>查询、导出你的账目数据（应用内可查看，服务端数据库由你自己掌控）。</li>
-  <li>更正账号信息、修改密码。</li>
-  <li>删除数据与注销账号。</li>
+  <li>在应用内查看、更正你的账目数据和账号信息。</li>
+  <li>修改密码、删除数据、注销账号（见第五节）。</li>
 </ul>
 
 <h2>八、联系方式</h2>
-<p>邮箱：<code>kkyylim663@gmail.com</code></p>
+<p>邮箱：<code>kunovasystem@gmail.com</code></p>
 
 <h2>九、政策变更</h2>
 <p>如本政策发生实质变更，我们会更新本页顶部的「最后更新」日期。</p>
+
+<hr style="margin:48px 0 24px;border:none;border-top:1px solid rgba(127,127,127,.3)">
+
+<h1 id="en">Privacy Policy (English)</h1>
+<div class="meta">App: Moni (Android package kunova.moni) · Last updated: 2026-11-27</div>
+<p>Moni is a personal bookkeeping app. Your data is stored on servers operated by the developer. We do not sell your data or share it with advertising or data brokers.</p>
+<h2>What we collect</h2>
+<ul>
+  <li><strong>Account</strong>: email and password (stored as a bcrypt hash). With Google Sign-In we receive your email, display name and Google account ID.</li>
+  <li><strong>Bookkeeping data</strong> you enter: ledgers, accounts, categories, amounts, dates, notes, budgets and plans.</li>
+  <li><strong>Receipt photos (optional)</strong>: recognized on the device first; if needed, uploaded to our own server for text and amount recognition and not kept long term.</li>
+  <li><strong>Push token (optional)</strong>: only if you allow notifications, to deliver reminders.</li>
+</ul>
+<p>We do not access contacts, SMS, call logs, microphone or location, and we show no ads. All traffic between the app and our server uses HTTPS.</p>
+<h2>Third parties</h2>
+<p>Google (Sign-In, Firebase Cloud Messaging, Google Play billing if enabled) and Expo push service (delivers notifications). Receipt recognition runs on our own server; no third-party AI provider receives your images.</p>
+<h2 id="delete-en">Deleting your account and data</h2>
+<ul>
+  <li><strong>In the app</strong>: Settings → Delete account, then confirm with your password (or your email for Google accounts). Your account and all server-side data are deleted immediately and permanently. If you bought a subscription, the Google Play purchase record is kept unlinked from your account, only to prevent re-use and for audit.</li>
+  <li><strong>By email</strong>: if you cannot sign in, email <code>kunovasystem@gmail.com</code> from your account email with the subject "Delete account". We delete your account and all data within 7 business days and confirm by reply.</li>
+</ul>
+<h2>Children</h2>
+<p>The app is not directed at children under 13.</p>
+<h2>Contact</h2>
+<p><code>kunovasystem@gmail.com</code></p>
 </body>
 </html>
